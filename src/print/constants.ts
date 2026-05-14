@@ -22,6 +22,8 @@ export const CHARUCO_PRINT_LABEL_SPEC_VERSION = 1;
 export const CHARUCO_PRINT_SOURCE_URL =
     'https://docs.freemocap.org/documentation/multi-camera-calibration.html';
 export const OPENCV_LABEL_VERSION = '4.10+';
+/** Default marker edge length as a fraction of square length (OpenCV Charuco-style). */
+export const CHARUCO_MARKER_LENGTH_RATIO = 0.8;
 
 export const PAPER_SIZES_MM: Record<string, [number, number]> = {
     a4: [210, 297],

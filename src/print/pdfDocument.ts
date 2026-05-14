@@ -1,6 +1,12 @@
 import {jsPDF} from 'jspdf';
 import QRCode from 'qrcode';
-import {grayToRgba, renderCharucoBoardGray} from '../charuco/board.js';
+import {
+    charucoBoardPixelLayout,
+    charucoCropXRange,
+    charucoCropYRange,
+    grayToRgba,
+    renderCharucoBoardGray,
+} from '../charuco/board.js';
 import type {CharucoGeometry} from '../charuco/board.js';
 import {
     CHARUCO_PRINT_LABEL_SPEC_VERSION,
@@ -12,6 +18,7 @@ import {
     MM_PAGE_NUMBER_CLEARANCE_MM,
     MM_TAPE_LABEL_INSET_FROM_JOIN_MM,
     OPENCV_LABEL_VERSION,
+    SKELLY_TOP_HEIGHT_MM,
     ORIGIN_BANNER_CONTENT_SIDE_MM,
     ORIGIN_BANNER_CONTENT_TOP_MM,
     ORIGIN_CORNER_MARKER_PAD_MM,
@@ -26,6 +33,12 @@ import {
 } from './constants.js';
 import {interpolate, pdfLabels} from './labels.js';
 import type {PageSpec, TilingInfo} from './tiling.js';
+import {yieldToMain} from '../ui/yieldToMain.js';
+
+/** Match Python `int(x)` for nonnegative layout pixels (`charuco_board_print.py`). */
+function layoutIntPx(x: number): number {
+    return Math.max(0, Math.floor(x));
+}
 
 function charucoCv2QueryValue(markerLengthRatio: number): string {
     return `${OPENCV_LABEL_VERSION}+DICT_4X4_250+ratio=${markerLengthRatio}`;
@@ -51,6 +64,16 @@ function joinDashGapPpm(ppm: number): [number, number] {
     const dash = Math.max(4, Math.round(1.0 * ppm));
     const gap = Math.max(2, Math.round(0.45 * ppm));
     return [dash, gap];
+}
+
+/** Pixel gap from dashed seam to tape-instruction label (see `MM_TAPE_LABEL_INSET_FROM_JOIN_MM`). */
+function tapeLabelInsetFromJoinPx(ppm: number): number {
+    return Math.max(1, Math.round(MM_TAPE_LABEL_INSET_FROM_JOIN_MM * ppm));
+}
+
+/** Minimum inset from printable sheet edge when placing tape labels (matches vertical-label clamp). */
+function tapeLabelSheetInsetPx(ppm: number): number {
+    return Math.max(1, Math.floor(ppm / 6));
 }
 
 function drawDashedVline(
@@ -252,10 +275,11 @@ export interface PrintPdfParams {
     paperWMm: number;
     paperHMm: number;
     markerLengthRatio: number;
-    legacyPattern: boolean;
     tiling: TilingInfo;
     pages: PageSpec[];
     documentationSourceUrl?: string;
+    /** When aborted (e.g. preview superseded), rendering stops cooperatively between pages. */
+    signal?: AbortSignal;
 }
 
 function pageCoordMap(
@@ -338,27 +362,40 @@ export async function renderCharucoPrintPdf(params: PrintPdfParams): Promise<Blo
         paperWMm,
         paperHMm,
         markerLengthRatio,
-        legacyPattern,
         tiling,
         pages,
+        signal,
     } = params;
+
+    const abortIfNeeded = (): void => {
+        if (signal?.aborted) {
+            throw new DOMException('Aborted', 'AbortError');
+        }
+    };
     const markerMm = squareLengthMm * markerLengthRatio;
     const geom: CharucoGeometry = {
         squaresX,
         squaresY,
         squareLength: squareLengthMm,
         markerLength: markerMm,
-        legacyPattern,
     };
 
-    const fullWPx = Math.max(1, Math.round(squaresX * squareLengthMm * ppm));
-    const fullHPx = Math.max(1, Math.round(squaresY * squareLengthMm * ppm));
+    const fullWPx = Math.max(1, layoutIntPx(squaresX * squareLengthMm * ppm));
+    const fullHPx = Math.max(1, layoutIntPx(squaresY * squareLengthMm * ppm));
     const fullGray = renderCharucoBoardGray(fullWPx, fullHPx, geom);
+    abortIfNeeded();
+    await yieldToMain();
     const fullRgba = grayToRgba(fullGray, fullWPx, fullHPx);
+    abortIfNeeded();
+    await yieldToMain();
     const fullCanvas = document.createElement('canvas');
     fullCanvas.width = fullWPx;
     fullCanvas.height = fullHPx;
     fullCanvas.getContext('2d')!.putImageData(new ImageData(fullRgba, fullWPx, fullHPx), 0, 0);
+
+    const boardPxLayout = charucoBoardPixelLayout(fullWPx, fullHPx, squaresX, squaresY);
+    abortIfNeeded();
+    await yieldToMain();
 
     const docUrl = buildCharucoDocumentationUrl(
         params.documentationSourceUrl ?? CHARUCO_PRINT_SOURCE_URL,
@@ -371,13 +408,14 @@ export async function renderCharucoPrintPdf(params: PrintPdfParams): Promise<Blo
 
     const pagePxW = Math.max(1, Math.round(paperWMm * ppm));
     const pagePxH = Math.max(1, Math.round(paperHMm * ppm));
-    const marginPx = Math.round(MM_MARGIN_SHEET * ppm);
+    const marginPx = layoutIntPx(MM_MARGIN_SHEET * ppm);
     const joinPx = tiling.npx > 1 ? Math.round(MM_JOIN_STRIP * ppm) : 0;
     const joinPy = tiling.npy > 1 ? Math.round(MM_JOIN_STRIP * ppm) : 0;
     const totalPdfPages = pages.length;
-    const originTopReservePx = Math.round(ORIGIN_PAGE_EXTRA_MM * ppm);
+    const originTopReservePx = layoutIntPx(ORIGIN_PAGE_EXTRA_MM * ppm);
     const bodyFontPx = Math.round(26 * (ppm / 12));
     const titleFontPx = Math.round(24 * (ppm / 12));
+    const bodyLineLead = bodyFontPx + Math.max(4, Math.round(0.52 * ppm));
     const joinFontPx = bodyFontPx;
 
     const pdf = new jsPDF({
@@ -387,8 +425,15 @@ export async function renderCharucoPrintPdf(params: PrintPdfParams): Promise<Blo
     });
 
     const qrImg = await loadImage(qrDataUrl);
+    abortIfNeeded();
+    await yieldToMain();
+    const skellyBanner = await loadSkellyBannerRaster(ppm);
+    abortIfNeeded();
+    await yieldToMain();
 
     for (const spec of pages) {
+        abortIfNeeded();
+        await yieldToMain();
         if (spec.sheetIndex > 1) {
             pdf.addPage([paperWMm, paperHMm], paperWMm > paperHMm ? 'landscape' : 'portrait');
         }
@@ -400,12 +445,12 @@ export async function renderCharucoPrintPdf(params: PrintPdfParams): Promise<Blo
         ctx.fillStyle = '#fff';
         ctx.fillRect(0, 0, pagePxW, pagePxH);
 
-        const l = spec.gx0 * squareLengthMm * ppm;
-        const t = spec.gy0 * squareLengthMm * ppm;
-        const r = spec.gx1 * squareLengthMm * ppm;
-        const b = spec.gy1 * squareLengthMm * ppm;
-        const tw = r - l;
-        const th = b - t;
+        let [l, r] = charucoCropXRange(spec.gx0, spec.gx1, boardPxLayout);
+        let [t, b] = charucoCropYRange(spec.gy0, spec.gy1, boardPxLayout);
+        r = Math.min(r, fullWPx);
+        b = Math.min(b, fullHPx);
+        const tw = Math.max(1, r - l);
+        const th = Math.max(1, b - t);
 
         let bannerBottomPx: number | null = null;
         let originBannerBox: [number, number, number, number] | null = null;
@@ -419,20 +464,34 @@ export async function renderCharucoPrintPdf(params: PrintPdfParams): Promise<Blo
             const qrY = marginPx + topPad;
             const qrX = bannerRightInner - qrImg.width;
             const bannerTitleTop = qrY;
-             const gapBoardQr = Math.round(ORIGIN_GAP_QR_TO_BOARD_INFO_MM * ppm);
+            const gapBoardQr = Math.round(ORIGIN_GAP_QR_TO_BOARD_INFO_MM * ppm);
             const gapInstBoard = Math.round(ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM * ppm);
             const gapSkellyInst = Math.round(ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM * ppm);
             const boardInfoRight = qrX - gapBoardQr;
-            let instrLeft = bannerLeft;
-            const skellyW = 0;
-            instrLeft = bannerLeft + skellyW + (skellyW ? gapSkellyInst : 0);
+            let skellyW = 0;
+            let skellyH = 0;
+            if (skellyBanner) {
+                skellyW = skellyBanner.w;
+                skellyH = skellyBanner.h;
+            }
+            let instrLeft = bannerLeft + skellyW + (skellyW > 0 ? gapSkellyInst : 0);
+            const minInstColPx = Math.max(1, Math.round(12 * ppm));
 
-            ctx.font = `${titleFontPx}px system-ui, Segoe UI, sans-serif`;
+            ctx.font = `bold ${titleFontPx}px system-ui, Segoe UI, sans-serif`;
             ctx.fillStyle = '#000';
             const boardTitle = interpolate(pdfLabels.originTitleLine, {
                 version: CHARUCO_PRINT_LABEL_SPEC_VERSION,
             });
-            const boardBodyLines = [
+
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'top';
+            ctx.fillText(boardTitle, boardInfoRight, bannerTitleTop);
+
+            const boardColMaxW = Math.max(
+                1,
+                boardInfoRight - instrLeft - gapInstBoard - minInstColPx,
+            );
+            const boardInfoBlock = [
                 interpolate(pdfLabels.originSquareSizeLine, {mm: squareLengthMm}),
                 interpolate(pdfLabels.originWidthLine, {n: squaresX}),
                 interpolate(pdfLabels.originHeightLine, {n: squaresY}),
@@ -440,45 +499,59 @@ export async function renderCharucoPrintPdf(params: PrintPdfParams): Promise<Blo
                     opencv_version: OPENCV_LABEL_VERSION,
                     dictionary_name: 'DICT_4X4_250',
                 }),
-            ];
-
-            ctx.textAlign = 'right';
-            ctx.textBaseline = 'top';
-            ctx.fillText(boardTitle, boardInfoRight, bannerTitleTop);
+            ].join('\n');
 
             ctx.font = `${bodyFontPx}px system-ui, Segoe UI, sans-serif`;
+            const boardInfoLines = wrapText(ctx, boardInfoBlock, boardColMaxW);
             let by = bannerTitleTop + titleFontPx + Math.max(4, ppm);
             let infoLeft = boardInfoRight;
-            for (const line of boardBodyLines) {
+            for (const line of boardInfoLines) {
                 const w = ctx.measureText(line).width;
                 infoLeft = Math.min(infoLeft, boardInfoRight - w);
                 ctx.fillText(line, boardInfoRight, by);
-                by += bodyFontPx + Math.max(4, Math.round(0.52 * ppm));
+                by += bodyLineLead;
             }
             const lineBoardBottom = by;
             ctx.textAlign = 'left';
 
             const instructionAllowRight = infoLeft - gapInstBoard;
+            if (instructionAllowRight - instrLeft < minInstColPx) {
+                throw new Error(
+                    'Origin banner layout: insufficient horizontal space for logo, instructions, ChaRuCo info, and QR on this paper size.',
+                );
+            }
+
+            if (skellyBanner && skellyW > 0) {
+                ctx.drawImage(skellyBanner.img, bannerLeft, qrY, skellyW, skellyH);
+            }
+
             const instTitle = pdfLabels.originInstructionsTitle;
-            ctx.font = `${titleFontPx}px system-ui, Segoe UI, sans-serif`;
+            ctx.font = `bold ${titleFontPx}px system-ui, Segoe UI, sans-serif`;
             ctx.fillText(instTitle, instrLeft, bannerTitleTop);
             const titleBB = titleFontPx;
             const bodyY = bannerTitleTop + titleBB + Math.max(4, ppm);
             ctx.font = `${bodyFontPx}px system-ui, Segoe UI, sans-serif`;
             const colW = instructionAllowRight - instrLeft;
-            const instLines = wrapText(ctx, pdfLabels.originInstructions + '\n\n' + pdfLabels.originInstructionsDocumentationFooter, colW);
+            const instLines = wrapText(ctx, pdfLabels.originInstructions + '\n' + pdfLabels.originInstructionsDocumentationFooter, colW);
             let iy = bodyY;
             for (const line of instLines) {
                 ctx.fillText(line, instrLeft, iy);
-                iy += bodyFontPx + Math.max(4, Math.round(0.52 * ppm));
+                iy += bodyLineLead;
             }
             const instBottom = iy;
 
             ctx.drawImage(qrImg, qrX, bannerTitleTop);
+            const skellyBottomExtra = skellyW > 0 ? qrY + skellyH : qrY;
             const bannerBottom =
-                Math.max(lineBoardBottom, instBottom, qrY + qrImg.height, bannerTitleTop + (skellyW ? 0 : 0)) +
+                Math.max(lineBoardBottom, instBottom, qrY + qrImg.height, skellyBottomExtra) +
                 Math.round(MM_ORIGIN_BANNER_BELOW_GAP_MM * ppm);
             bannerBottomPx = bannerBottom;
+            const bannerMaxPx = marginPx + originTopReservePx + Math.max(2, layoutIntPx(2 * ppm));
+            if (bannerBottomPx > bannerMaxPx) {
+                throw new Error(
+                    'Origin-page top banner taller than reserved strip; increase ORIGIN_PAGE_EXTRA_MM.',
+                );
+            }
             const padB = Math.max(2, Math.floor(ppm / 4));
             originBannerBox = [
                 bannerLeft - padB,
@@ -535,7 +608,7 @@ export async function renderCharucoPrintPdf(params: PrintPdfParams): Promise<Blo
         };
         drawJoin();
 
-        const gapPx = Math.max(1, Math.round(MM_TAPE_LABEL_INSET_FROM_JOIN_MM * ppm));
+        const tapeGapPx = tapeLabelInsetFromJoinPx(ppm);
         ctx.save();
         ctx.font = `${joinFontPx}px system-ui, Segoe UI, sans-serif`;
         ctx.fillStyle = '#000';
@@ -543,26 +616,19 @@ export async function renderCharucoPrintPdf(params: PrintPdfParams): Promise<Blo
 
         if (spec.col > 0) {
             const msg = interpolate(pdfLabels.tapeJoinNearPage, {page: spec.sheetIndex - 1});
-            drawVerticalTapeLabel(ctx, msg, pagePxW, pagePxH, marginPx, joinPx, midPatternY, 'left', x0 - 1, gapPx, ppm);
+            drawVerticalTapeLabel(ctx, msg, pagePxW, pagePxH, marginPx, joinPx, midPatternY, 'left', x0 - 1, tapeGapPx, ppm);
         }
         if (spec.col < tiling.npx - 1) {
             const msg = interpolate(pdfLabels.tapeJoinNearPage, {page: spec.sheetIndex + 1});
-            drawVerticalTapeLabel(ctx, msg, pagePxW, pagePxH, marginPx, joinPx, midPatternY, 'right', x0 + tw, gapPx, ppm);
+            drawVerticalTapeLabel(ctx, msg, pagePxW, pagePxH, marginPx, joinPx, midPatternY, 'right', x0 + tw, tapeGapPx, ppm);
         }
         if (spec.row > 0) {
             const msg = interpolate(pdfLabels.tapeJoinNearPage, {page: spec.sheetIndex - tiling.npx});
-            drawHorizontalTapeTop(ctx, msg, x0, tw, marginPx, joinPy, y0 - 1, gapPx, ppm, joinFontPx);
+            drawHorizontalTapeLabel(ctx, msg, x0, tw, marginPx, pagePxH, tapeGapPx, joinFontPx, ppm, joinPy, 'above', y0 - 1);
         }
         if (spec.row < tiling.npy - 1) {
             const msg = interpolate(pdfLabels.tapeJoinNearPage, {page: spec.sheetIndex + tiling.npx});
-            const m = ctx.measureText(msg);
-            const thh = joinFontPx;
-            const xBot = x0 + Math.max(0, (tw - m.width) / 2);
-            const availLo = y0 + th + 1;
-            const availHi = pagePxH - marginPx - thh - 1;
-            let yBot =
-                availLo <= availHi ? Math.min(Math.max(y0 + th + gapPx, availLo), availHi) : pagePxH - marginPx - joinPy + Math.max(0, (joinPy - thh) / 2);
-            ctx.fillText(msg, xBot, yBot);
+            drawHorizontalTapeLabel(ctx, msg, x0, tw, marginPx, pagePxH, tapeGapPx, joinFontPx, ppm, joinPy, 'below', y0 + th);
         }
         ctx.restore();
 
@@ -578,18 +644,53 @@ export async function renderCharucoPrintPdf(params: PrintPdfParams): Promise<Blo
 
         const dataUrl = pageCanvas.toDataURL('image/png');
         pdf.addImage(dataUrl, 'PNG', 0, 0, paperWMm, paperHMm, undefined, 'SLOW');
+        abortIfNeeded();
+        await yieldToMain();
     }
 
+    abortIfNeeded();
+    await yieldToMain();
     return pdf.output('blob');
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
     return new Promise((resolve, reject) => {
         const im = new Image();
+        im.crossOrigin = 'anonymous';
         im.onload = () => resolve(im);
         im.onerror = reject;
         im.src = src;
     });
+}
+
+async function loadSkellyBannerRaster(ppm: number): Promise<{img: HTMLImageElement; w: number; h: number} | null> {
+    const tryFromHref = async (href: string) => {
+        const img = await loadImage(href);
+        const nh = Math.max(1, Math.round(SKELLY_TOP_HEIGHT_MM * ppm));
+        const nw = Math.max(1, Math.round((img.naturalWidth * nh) / img.naturalHeight));
+        return {img, w: nw, h: nh};
+    };
+
+    if (typeof window !== 'undefined') {
+        try {
+            const href = new URL('/freemocap-logo.svg', window.location.origin).href;
+            return await tryFromHref(href);
+        } catch {
+            /* try fallbacks */
+        }
+    }
+
+    const logoFile = typeof process !== 'undefined' ? process.env.CHARUCO_LOGO_FILE?.trim() : '';
+    if (logoFile) {
+        try {
+            const {pathToFileURL} = await import(/* @vite-ignore */ 'node:url');
+            return await tryFromHref(pathToFileURL(logoFile).href);
+        } catch {
+            return null;
+        }
+    }
+
+    return null;
 }
 
 function drawVerticalTapeLabel(
@@ -620,12 +721,13 @@ function drawVerticalTapeLabel(
     off.height = h;
     const o = off.getContext('2d')!;
     o.translate(w / 2, h / 2);
-    o.rotate(side === 'left' ? -Math.PI / 2 : Math.PI / 2);
+    // +90° left / −90° right keeps copy upright when printed; the previous pair read upside‑down.
+    o.rotate(side === 'left' ? Math.PI / 2 : -Math.PI / 2);
     o.drawImage(c, -200, -40);
     const rw = off.width;
     const rh = off.height;
     let px: number;
-    const inset = Math.max(1, Math.floor(ppm / 6));
+    const inset = tapeLabelSheetInsetPx(ppm);
     if (side === 'left') {
         px = meetX - gapPx - rw;
         px = Math.max(marginPx + inset, px);
@@ -637,41 +739,57 @@ function drawVerticalTapeLabel(
     ctx.drawImage(off, px, py);
 }
 
-function drawHorizontalTapeTop(
+/** Horizontal tape instruction above (`meetY` = dashed line) or below it. Uses direct `fillText` on the page canvas so orientation matches other printed copy (avoids rare flipped bitmap compositing from small scratch canvases). */
+function drawHorizontalTapeLabel(
     ctx: CanvasRenderingContext2D,
     text: string,
     tileX0: number,
     tileW: number,
     marginPx: number,
-    _joinPy: number,
-    meetY: number,
+    pagePxH: number,
     gapPx: number,
-    _ppm: number,
     fontPx: number,
+    ppm: number,
+    joinPy: number,
+    placement: 'above' | 'below',
+    meetY: number,
 ): void {
-    const c = document.createElement('canvas');
-    c.width = 800;
-    c.height = 60;
-    const sctx = c.getContext('2d')!;
-    sctx.font = `${fontPx}px system-ui, Segoe UI, sans-serif`;
-    sctx.fillStyle = '#000';
-    const reversed = text.split('').reverse().join('');
-    sctx.fillText(reversed, 10, 35);
-    const off = document.createElement('canvas');
-    off.width = c.width;
-    off.height = c.height;
-    const o = off.getContext('2d')!;
-    o.translate(off.width / 2, off.height / 2);
-    o.rotate(Math.PI);
-    o.drawImage(c, -off.width / 2, -off.height / 2);
-    const rw = off.width;
-    const rh = off.height;
-    const px = tileX0 + Math.max(0, (tileW - rw) / 2);
-    let py = meetY - gapPx - rh;
-    py = Math.max(marginPx + 1, py);
-    const bottomLimit = meetY - gapPx;
-    if (py + rh > bottomLimit) {
-        py = bottomLimit - rh;
+    const sheetInset = tapeLabelSheetInsetPx(ppm);
+
+    ctx.save();
+    ctx.resetTransform();
+    ctx.font = `${fontPx}px system-ui, Segoe UI, sans-serif`;
+    ctx.fillStyle = '#000';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.direction = 'ltr';
+
+    const m = ctx.measureText(text);
+    const ascent = m.actualBoundingBoxAscent ?? fontPx * 0.75;
+    const descent = m.actualBoundingBoxDescent ?? fontPx * 0.25;
+    const rh = Math.max(1, Math.ceil(ascent + descent));
+    const px = tileX0 + Math.max(0, (tileW - m.width) / 2);
+
+    if (placement === 'above') {
+        let pyTop = meetY - gapPx - rh;
+        pyTop = Math.max(marginPx + sheetInset, pyTop);
+        const seamBandBottom = meetY - gapPx;
+        if (pyTop + rh > seamBandBottom) {
+            pyTop = seamBandBottom - rh;
+        }
+        ctx.fillText(text, px, pyTop);
+    } else {
+        let pyTop = meetY + gapPx;
+        const innerBottom = pagePxH - marginPx - sheetInset;
+        if (pyTop + rh > innerBottom) {
+            pyTop = innerBottom - rh;
+        }
+        if (pyTop < meetY + gapPx) {
+            const joinStripTop = pagePxH - marginPx - joinPy;
+            pyTop = joinStripTop + Math.max(0, (joinPy - rh) / 2);
+        }
+        ctx.fillText(text, px, pyTop);
     }
-    ctx.drawImage(off, px, py);
+
+    ctx.restore();
 }

@@ -190,6 +190,26 @@ export function computeTilingInfoMatchingPageCount(
     return {...best.info, landscape: best.landscape};
 }
 
+/**
+ * PDF / physical sheet width×height (mm) for a nominal paper size from presets (`wMm`×`hMm`, short×long).
+ * Must match the orientation used when `tiling` was computed (`computeTilingInfo*` swaps dimensions
+ * when `landscape` is true); otherwise `maxCx` / row caps assume the wrong printable width and tiles
+ * bisect ChaRuCo squares on the raster.
+ */
+export function nominalPaperToPdfDimensionsMm(
+    nominalWMm: number,
+    nominalHMm: number,
+    tiling: TilingInfo,
+): {paperWMm: number; paperHMm: number} {
+    if (Math.abs(nominalWMm - nominalHMm) < 0.01) {
+        return {paperWMm: nominalWMm, paperHMm: nominalHMm};
+    }
+    if (tiling.landscape) {
+        return {paperWMm: nominalHMm, paperHMm: nominalWMm};
+    }
+    return {paperWMm: nominalWMm, paperHMm: nominalHMm};
+}
+
 export function selectPaperDimensionsMm(
     squaresX: number,
     squaresY: number,

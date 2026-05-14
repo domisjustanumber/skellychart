@@ -5,7 +5,70 @@ export interface CharucoGeometry {
     squaresY: number;
     squareLength: number;
     markerLength: number;
-    legacyPattern: boolean;
+}
+
+/**
+ * Pixel layout for a ChaRuCo bitmap (same math as `renderCharucoBoardGray`).
+ * Crops for multi-page PDF must use this so page seams never bisect a rendered square
+ * (`charuco_board_print.py` splits only on whole square indices; pixel cuts must match).
+ */
+export function charucoBoardPixelLayout(
+    widthPx: number,
+    heightPx: number,
+    squaresX: number,
+    squaresY: number,
+): {
+    startX: number;
+    startY: number;
+    pixInSquare: number;
+    pixBoardW: number;
+    pixBoardH: number;
+} {
+    const w = squaresX;
+    const h = squaresY;
+    const pixInSquareX = widthPx / w;
+    const pixInSquareY = heightPx / h;
+    let pixInSquare: number;
+    let startX = 0;
+    let startY = 0;
+    let pixBoardW = widthPx;
+    let pixBoardH = heightPx;
+    if (pixInSquareX <= pixInSquareY) {
+        pixInSquare = pixInSquareX;
+        pixBoardH = Math.round(pixInSquare * h);
+        startY = Math.floor((heightPx - pixBoardH) / 2);
+    } else {
+        pixInSquare = pixInSquareY;
+        pixBoardW = Math.round(pixInSquare * w);
+        startX = Math.floor((widthPx - pixBoardW) / 2);
+    }
+    return {startX, startY, pixInSquare, pixBoardW, pixBoardH};
+}
+
+/** Left and right (exclusive) pixel X for square columns [gx0, gx1), matching checker cell edges. */
+export function charucoCropXRange(
+    gx0: number,
+    gx1: number,
+    layout: ReturnType<typeof charucoBoardPixelLayout>,
+): [number, number] {
+    const x0 = Math.round(gx0 * layout.pixInSquare);
+    const x1 = Math.round(gx1 * layout.pixInSquare);
+    const left = layout.startX + x0;
+    const rightEx = layout.startX + Math.min(x1, layout.pixBoardW);
+    return [left, rightEx];
+}
+
+/** Top and bottom (exclusive) pixel Y for square rows [gy0, gy1), matching checker cell edges. */
+export function charucoCropYRange(
+    gy0: number,
+    gy1: number,
+    layout: ReturnType<typeof charucoBoardPixelLayout>,
+): [number, number] {
+    const y0 = Math.round(gy0 * layout.pixInSquare);
+    const y1 = Math.round(gy1 * layout.pixInSquare);
+    const top = layout.startY + y0;
+    const bottomEx = layout.startY + Math.min(y1, layout.pixBoardH);
+    return [top, bottomEx];
 }
 
 export interface CharucoMarkerModel {
@@ -14,18 +77,15 @@ export interface CharucoMarkerModel {
     cornersMm: [{x: number; y: number}, {x: number; y: number}, {x: number; y: number}, {x: number; y: number}];
 }
 
-/** Marker layout matching `CharucoBoardImpl::createCharucoBoard` (OpenCV ≥4.6 non-legacy by default). */
+/** Marker layout matching `CharucoBoardImpl::createCharucoBoard` (OpenCV ≥4.6 default / non-legacy). */
 export function buildCharucoMarkers(geom: CharucoGeometry): CharucoMarkerModel[] {
-    const {squaresX, squaresY, squareLength, markerLength, legacyPattern} = geom;
+    const {squaresX, squaresY, squareLength, markerLength} = geom;
     const diff = (squareLength - markerLength) / 2;
     const markers: CharucoMarkerModel[] = [];
     let nextId = 0;
     for (let y = 0; y < squaresY; y++) {
         for (let x = 0; x < squaresX; x++) {
-            const skip =
-                legacyPattern && squaresY % 2 === 0
-                    ? (y + 1) % 2 === x % 2
-                    : y % 2 === x % 2;
+            const skip = y % 2 === x % 2;
             if (skip) {
                 continue;
             }
@@ -72,26 +132,11 @@ function blitGray(
 
 /** OpenCV `CharucoBoardImpl::generateImage` + `Board::Impl::generateImage` (aligned blit path). */
 export function renderCharucoBoardGray(widthPx: number, heightPx: number, geom: CharucoGeometry): Uint8Array {
-    const {squaresX: w, squaresY: h, squareLength, markerLength, legacyPattern} = geom;
+    const {squaresX: w, squaresY: h, squareLength, markerLength} = geom;
     const img = new Uint8Array(widthPx * heightPx);
     img.fill(255);
 
-    let pixInSquareX = widthPx / w;
-    let pixInSquareY = heightPx / h;
-    let pixInSquare: number;
-    let startX = 0;
-    let startY = 0;
-    let pixBoardW = widthPx;
-    let pixBoardH = heightPx;
-    if (pixInSquareX <= pixInSquareY) {
-        pixInSquare = pixInSquareX;
-        pixBoardH = Math.round(pixInSquare * h);
-        startY = Math.floor((heightPx - pixBoardH) / 2);
-    } else {
-        pixInSquare = pixInSquareY;
-        pixBoardW = Math.round(pixInSquare * w);
-        startX = Math.floor((widthPx - pixBoardW) / 2);
-    }
+    const {startX, startY, pixInSquare, pixBoardW, pixBoardH} = charucoBoardPixelLayout(widthPx, heightPx, w, h);
 
     const pixInMarker = (markerLength / squareLength) * pixInSquare;
     const pixInMarginMarker = 0.5 * (pixInSquare - pixInMarker);
@@ -140,8 +185,7 @@ export function renderCharucoBoardGray(widthPx: number, heightPx: number, geom: 
 
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
-            const isBlack =
-                legacyPattern && h % 2 === 0 ? (y + 1) % 2 === x % 2 : y % 2 === x % 2;
+            const isBlack = y % 2 === x % 2;
             if (!isBlack) {
                 continue;
             }

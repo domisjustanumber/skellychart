@@ -1,167 +1,747 @@
 import {putGrayOnCanvas, renderCharucoBoardGray} from './charuco/board.js';
-import {PAPER_SIZES_MM} from './print/constants.js';
 import {renderCharucoPrintPdf} from './print/pdfDocument.js';
-import {buildPageSpecs, computeTilingInfo, selectPaperDimensionsMm} from './print/tiling.js';
+import {
+    BOARD_GRID_MAX,
+    BOARD_GRID_MIN,
+    CHARUCO_SQUARE_MM_MAX,
+    CHARUCO_SQUARE_MM_MIN,
+    PAGE_COUNT_MAX,
+    PAGE_COUNT_MIN,
+    PAPER_OPTIONS,
+    paperById,
+    charucoPagePreviewBorderColor,
+    computeCharucoPagePreviewRects,
+    computeEffectiveTiling,
+    defaultPaperId,
+    layoutSummaryText,
+    maxSquareMmForGridAndPages,
+    nearestValidTargetPages,
+    resolveDistancePrintPlan,
+    shouldUseImperialWorkingDistanceUnits,
+    snapSquareMm,
+    squareLengthTierBandEdgeFractions,
+    validTargetPageCountsForGrid,
+    workingDistanceTierFromSquareLengthMm,
+} from './print/charucoLayout.js';
+import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from './print/tiling.js';
+import {CHARUCO_MARKER_LENGTH_RATIO} from './print/constants.js';
+import {decodePdfThumbnails, PREVIEW_DEBOUNCE_MS} from './ui/previewPdf.js';
+import {
+    loadPresetPreviewManifest,
+    presetPreviewKey,
+    resolvePresetAssetUrl,
+} from './ui/presetPreviewManifest.js';
+import {yieldToMain} from './ui/yieldToMain.js';
+import {
+    applyThemePreference,
+    getStoredPreference,
+    initTheme,
+    setStoredPreference,
+    type ThemePreference,
+} from './ui/theme.js';
+import {bandLabel, distanceLabel, interpolate, paperLabel, S, sheetCountPhrase} from './ui/strings.js';
 
-const $ = (id: string) => document.getElementById(id)!;
+const PRESET_IDS = ['near', 'mid', 'far'] as const;
 
-function readParams() {
-    const squaresX = Math.max(2, Math.min(32, Number(($('sx') as HTMLInputElement).value) || 4));
-    const squaresY = Math.max(2, Math.min(32, Number(($('sy') as HTMLInputElement).value) || 5));
-    const squareLengthMm = Math.max(10, Math.min(250, Number(($('sqmm') as HTMLInputElement).value) || 58));
-    const markerLengthRatio = Math.max(0.1, Math.min(0.99, Number(($('ratio') as HTMLInputElement).value) || 0.8));
-    const legacyPattern = ($('legacy') as HTMLInputElement).checked;
-    const paperId = ($('paper') as HTMLSelectElement).value;
-    return {squaresX, squaresY, squareLengthMm, markerLengthRatio, legacyPattern, paperId};
+function initialBoard(): {paperId: string; squareMm: number; squaresX: number; squaresY: number} {
+    const paperId = defaultPaperId();
+    const paper = paperById(paperId) ?? PAPER_OPTIONS[0]!;
+    const plan = resolveDistancePrintPlan('mid', paperId);
+    const squareMm =
+        maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, paper.wMm, paper.hMm, plan.targetPages) ?? 54;
+    return {paperId, squareMm, squaresX: plan.squaresX, squaresY: plan.squaresY};
+}
+
+const defaultBoard = initialBoard();
+
+interface AppState {
+    distanceId: string;
+    paperId: string;
+    squareMm: number;
+    squaresX: number;
+    squaresY: number;
+    autoGrid: boolean;
+}
+
+const state: AppState = {
+    distanceId: 'mid',
+    paperId: defaultBoard.paperId,
+    squareMm: defaultBoard.squareMm,
+    squaresX: defaultBoard.squaresX,
+    squaresY: defaultBoard.squaresY,
+    autoGrid: true,
+};
+
+function byId(id: string): HTMLElement {
+    const el = document.getElementById(id);
+    if (!el) {
+        throw new Error(`Missing #${id}`);
+    }
+    return el;
+}
+
+function hideFullPreviewPlaceholder(): void {
+    const ph = byId('fullPreviewPlaceholder');
+    ph.textContent = '';
+    ph.classList.add('hidden');
+    ph.classList.remove('preview-image-placeholder--busy');
+}
+
+function showFullPreviewPlaceholder(message: string): void {
+    const ph = byId('fullPreviewPlaceholder');
+    const img = byId('boardImg') as HTMLImageElement;
+    ph.textContent = message;
+    ph.classList.remove('hidden');
+    ph.classList.add('preview-image-placeholder--busy');
+    img.classList.add('board-img--hidden');
+    img.removeAttribute('src');
+    img.alt = '';
+}
+
+function setThumbGridPlaceholder(message: string): void {
+    const thumbs = byId('thumbGrid');
+    thumbs.innerHTML = '';
+    const p = document.createElement('p');
+    p.className = 'thumb-grid-loading thumb-grid-loading--busy';
+    p.textContent = message;
+    thumbs.appendChild(p);
+}
+
+function resetPreviewVisualsEmpty(): void {
+    hideFullPreviewPlaceholder();
+    const img = byId('boardImg') as HTMLImageElement;
+    img.classList.add('board-img--hidden');
+    img.removeAttribute('src');
+    img.alt = '';
+    byId('sheetOverlays').innerHTML = '';
+    byId('thumbGrid').innerHTML = '';
+}
+
+function paperDims() {
+    return paperById(state.paperId) ?? PAPER_OPTIONS[0]!;
+}
+
+function autoPlan() {
+    return resolveDistancePrintPlan(state.distanceId, state.paperId);
+}
+
+function applyAutoPreset(): void {
+    if (!state.autoGrid) {
+        return;
+    }
+    const plan = autoPlan();
+    const pd = paperDims();
+    const maxSq = maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, pd.wMm, pd.hMm, plan.targetPages);
+    if (maxSq !== null) {
+        state.squaresX = plan.squaresX;
+        state.squaresY = plan.squaresY;
+        state.squareMm = maxSq;
+    }
+}
+
+function effectiveTiling() {
+    const pd = paperDims();
+    return computeEffectiveTiling(
+        state.squaresX,
+        state.squaresY,
+        state.squareMm,
+        pd.wMm,
+        pd.hMm,
+        state.autoGrid,
+        autoPlan().targetPages,
+    );
+}
+
+function pagesSliderDisplay(tiling: ReturnType<typeof effectiveTiling>): number {
+    return state.autoGrid ? autoPlan().targetPages : tiling?.pageCount ?? 1;
+}
+
+function syncDistanceFromSquareIfManual(): void {
+    if (state.autoGrid) {
+        return;
+    }
+    const tier = workingDistanceTierFromSquareLengthMm(state.squareMm);
+    if ((PRESET_IDS as readonly string[]).includes(tier)) {
+        state.distanceId = tier;
+    }
+}
+
+function isDarkMode(): boolean {
+    return document.documentElement.dataset.theme === 'dark';
+}
+
+function syncThemeToggle(): void {
+    const group = byId('themeToggle');
+    group.setAttribute('aria-label', S.colorTheme);
+    const pref = getStoredPreference();
+    for (const b of group.querySelectorAll<HTMLButtonElement>('[data-theme-pick]')) {
+        const pick = b.dataset.themePick as ThemePreference;
+        const label = pick === 'dark' ? S.themeDark : pick === 'light' ? S.themeLight : S.themeSystem;
+        b.setAttribute('aria-label', label);
+        b.setAttribute('title', label);
+        b.setAttribute('aria-pressed', String(pick === pref));
+    }
 }
 
 function showErr(msg: string | null): void {
-    const el = $('err') as HTMLParagraphElement;
+    const el = byId('errBanner');
     if (msg) {
-        el.hidden = false;
+        el.classList.remove('hidden');
         el.textContent = msg;
     } else {
-        el.hidden = true;
+        el.classList.add('hidden');
         el.textContent = '';
     }
 }
 
-function updatePreview(): void {
-    showErr(null);
-    const {squaresX, squaresY, squareLengthMm, markerLengthRatio, legacyPattern, paperId} = readParams();
-    const markerMm = squareLengthMm * markerLengthRatio;
-    const canvas = $('board') as HTMLCanvasElement;
-    const maxEdge = 920;
-    const wMm = squaresX * squareLengthMm;
-    const hMm = squaresY * squareLengthMm;
-    let cW: number;
-    let cH: number;
-    if (wMm >= hMm) {
-        cW = Math.min(maxEdge, Math.max(32, Math.round(wMm)));
-        cH = Math.max(1, Math.round(cW * (hMm / wMm)));
-    } else {
-        cH = Math.min(maxEdge, Math.max(32, Math.round(hMm)));
-        cW = Math.max(1, Math.round(cH * (wMm / hMm)));
-    }
-    canvas.width = cW;
-    canvas.height = cH;
-    const gray = renderCharucoBoardGray(cW, cH, {
-        squaresX,
-        squaresY,
-        squareLength: squareLengthMm,
-        markerLength: markerMm,
-        legacyPattern,
-    });
-    putGrayOnCanvas(canvas, gray);
+let previewTimer: ReturnType<typeof setTimeout> | null = null;
+let previewAbort: AbortController | null = null;
+/** Bumped when a new preview run starts so stale async completions do not clear the busy UI. */
+let previewGeneration = 0;
+const previewCanvas = document.createElement('canvas');
 
-    const nom = PAPER_SIZES_MM[paperId];
-    if (!nom) {
-        showErr('Unknown paper.');
-        return;
+function syncUi(): void {
+    applyAutoPreset();
+    const imperial = shouldUseImperialWorkingDistanceUnits();
+    const pd = paperDims();
+    const tiling = effectiveTiling();
+
+    byId('pageTitle').textContent = S.title;
+    byId('intro').textContent = S.intro;
+    byId('lbl-distance').textContent = S.workingDistance;
+    byId('lbl-paper').textContent = S.paperSize;
+    byId('lbl-advanced').textContent = S.advanced;
+    byId('gridCaption').textContent = state.autoGrid ? S.autoGridCaption : S.customGridCaption;
+    byId('lbl-square').textContent = interpolate(S.squareLengthHeading, {mm: state.squareMm});
+    byId('lbl-pages').textContent = interpolate(S.numberOfPages, {n: pagesSliderDisplay(tiling)});
+    byId('lbl-sx').textContent = interpolate(S.squaresInX, {n: state.squaresX});
+    byId('lbl-sy').textContent = interpolate(S.squaresInY, {n: state.squaresY});
+    byId('preview-title').textContent = S.previewTitle;
+    byId('lbl-fullchart').textContent = S.fullChart;
+    (byId('btnPdf') as HTMLButtonElement).textContent = S.generatePdf;
+
+    const frac = squareLengthTierBandEdgeFractions();
+    const tierEl = byId('tierLabels');
+    tierEl.innerHTML = '';
+    const w1 = frac.nearMid * 100;
+    const w2 = (frac.midFar - frac.nearMid) * 100;
+    const s1 = document.createElement('span');
+    s1.style.width = `${w1}%`;
+    s1.style.color = 'var(--near)';
+    s1.textContent = bandLabel('near', imperial);
+    const s2 = document.createElement('span');
+    s2.style.width = `${w2}%`;
+    s2.style.color = 'var(--mid)';
+    s2.textContent = bandLabel('mid', imperial);
+    const s3 = document.createElement('span');
+    s3.style.flex = '1';
+    s3.style.color = 'var(--far)';
+    s3.textContent = bandLabel('far', imperial);
+    tierEl.append(s1, s2, s3);
+
+    const p1 = frac.nearMid * 100;
+    const p2 = frac.midFar * 100;
+    (byId('tierBar') as HTMLDivElement).style.background = `linear-gradient(to right, var(--near) 0%, var(--near) ${p1}%, var(--mid) ${p1}%, var(--mid) ${p2}%, var(--far) ${p2}%, var(--far) 100%)`;
+
+    const sqmm = byId('sqmm') as HTMLInputElement;
+    sqmm.min = String(CHARUCO_SQUARE_MM_MIN);
+    sqmm.max = String(CHARUCO_SQUARE_MM_MAX);
+    sqmm.step = '1';
+    sqmm.value = String(state.squareMm);
+
+    const pages = byId('pages') as HTMLInputElement;
+    pages.min = String(PAGE_COUNT_MIN);
+    pages.max = String(PAGE_COUNT_MAX);
+    pages.step = '1';
+    pages.value = String(Math.round(pagesSliderDisplay(tiling)));
+    const manualTargets = validTargetPageCountsForGrid(state.squaresX, state.squaresY, pd.wMm, pd.hMm);
+    pages.disabled = !state.autoGrid && manualTargets.length === 0;
+
+    const sx = byId('sx') as HTMLInputElement;
+    const sy = byId('sy') as HTMLInputElement;
+    sx.min = String(BOARD_GRID_MIN);
+    sx.max = String(BOARD_GRID_MAX);
+    sy.min = String(BOARD_GRID_MIN);
+    sy.max = String(BOARD_GRID_MAX);
+    sx.step = '1';
+    sy.step = '1';
+    sx.value = String(state.squaresX);
+    sy.value = String(state.squaresY);
+
+    const distSel = byId('distance') as HTMLSelectElement;
+    distSel.innerHTML = '';
+    for (const id of PRESET_IDS) {
+        const o = document.createElement('option');
+        o.value = id;
+        o.textContent = distanceLabel(id, imperial);
+        distSel.appendChild(o);
     }
-    const [nw, nh] = nom;
-    const tilingEl = $('tiling') as HTMLParagraphElement;
-    let paperWMm: number;
-    let paperHMm: number;
-    try {
-        ({paperWMm, paperHMm} = selectPaperDimensionsMm(squaresX, squaresY, squareLengthMm, nw, nh, undefined));
-    } catch {
-        tilingEl.textContent =
-            'This board does not fit on the selected paper at 1:1 — try larger paper or smaller squares.';
-        return;
+    distSel.value = state.distanceId;
+
+    const paperSel = byId('paper') as HTMLSelectElement;
+    paperSel.innerHTML = '';
+    for (const p of PAPER_OPTIONS) {
+        const o = document.createElement('option');
+        o.value = p.id;
+        o.textContent = interpolate(S.paperOption, {
+            paper: paperLabel(p.id),
+            wMm: p.wMm,
+            hMm: p.hMm,
+        });
+        paperSel.appendChild(o);
     }
-    const tiling = computeTilingInfo(squaresX, squaresY, squareLengthMm, paperWMm, paperHMm);
-    if (!tiling) {
-        tilingEl.textContent = 'Tiling failed for selected paper dimensions.';
-        return;
-    }
-    const orient = paperWMm !== nw || paperHMm !== nh ? ' (auto-oriented)' : '';
-    tilingEl.textContent = `Print tiling: ${tiling.pageCount} sheet(s)${orient} at 12 px/mm. Inner grid up to ${tiling.maxCx}×${tiling.maxCyFirst} (row 1) / ${tiling.maxCyRest} (later rows) squares per page.`;
+    paperSel.value = state.paperId;
+
+    const summary = layoutSummaryText(
+        tiling,
+        state.squaresX,
+        state.squaresY,
+        state.squareMm,
+        sheetCountPhrase,
+        (cols, rows) => interpolate('; {{cols}}×{{rows}} sheet grid', {cols, rows}),
+        (squaresX, squaresY, squareMm) =>
+            interpolate('; {{squaresX}}×{{squaresY}} squares; {{squareMm}} mm square length', {
+                squaresX,
+                squaresY,
+                squareMm,
+            }),
+        S.layoutCannotFit,
+    );
+    byId('layoutSummary').textContent = summary;
+
+    const btnPdf = byId('btnPdf') as HTMLButtonElement;
+    btnPdf.disabled = !tiling || tiling.pageCount < 1;
+
+    syncThemeToggle();
+    showErr(null);
+    schedulePreview();
 }
 
-async function downloadPng(): Promise<void> {
-    showErr(null);
-    const {squaresX, squaresY, squareLengthMm, markerLengthRatio, legacyPattern} = readParams();
-    const markerMm = squareLengthMm * markerLengthRatio;
-    const ppm = 12;
-    const wPx = Math.max(1, squaresX * squareLengthMm * ppm);
-    const hPx = Math.max(1, squaresY * squareLengthMm * ppm);
-    const gray = renderCharucoBoardGray(wPx, hPx, {
-        squaresX,
-        squaresY,
-        squareLength: squareLengthMm,
-        markerLength: markerMm,
-        legacyPattern,
-    });
-    const c = document.createElement('canvas');
-    c.width = wPx;
-    c.height = hPx;
-    putGrayOnCanvas(c, gray);
-    const a = document.createElement('a');
-    a.href = c.toDataURL('image/png');
-    a.download = `charuco_${squaresX}x${squaresY}_${squareLengthMm}mm.png`;
-    a.click();
+function schedulePreview(): void {
+    if (previewTimer) {
+        clearTimeout(previewTimer);
+    }
+    previewTimer = setTimeout(() => void runPreview(), PREVIEW_DEBOUNCE_MS);
+}
+
+async function runPreview(): Promise<void> {
+    previewAbort?.abort();
+    previewAbort = new AbortController();
+    const signal = previewAbort.signal;
+    const runId = ++previewGeneration;
+
+    const endPreviewBusyIfCurrent = (): void => {
+        if (runId !== previewGeneration) {
+            return;
+        }
+        byId('panelPreview').setAttribute('aria-busy', 'false');
+    };
+
+    const tiling = effectiveTiling();
+    const statusEl = byId('previewStatus') as HTMLParagraphElement;
+    const panelPreview = byId('panelPreview');
+    const fullBlock = byId('fullPreviewBlock');
+    const boardImg = byId('boardImg') as HTMLImageElement;
+    const overlays = byId('sheetOverlays');
+    const thumbs = byId('thumbGrid');
+    const trunc = byId('previewTruncated');
+
+    if (!tiling || tiling.pageCount < 1) {
+        statusEl.textContent = '';
+        panelPreview.setAttribute('aria-busy', 'false');
+        fullBlock.classList.add('hidden');
+        resetPreviewVisualsEmpty();
+        trunc.classList.add('hidden');
+        return;
+    }
+
+    panelPreview.setAttribute('aria-busy', 'true');
+    statusEl.textContent = '';
+    fullBlock.classList.remove('hidden');
+    showFullPreviewPlaceholder(S.buildingPreview);
+    setThumbGridPlaceholder(S.buildingPreviews);
+    byId('sheetOverlays').innerHTML = '';
+    await yieldToMain();
+
+    try {
+        const markerMm = state.squareMm * CHARUCO_MARKER_LENGTH_RATIO;
+        const maxEdge = 560;
+        const wMm = state.squaresX * state.squareMm;
+        const hMm = state.squaresY * state.squareMm;
+        let cW: number;
+        let cH: number;
+        if (wMm >= hMm) {
+            cW = Math.min(maxEdge, Math.max(32, Math.round(wMm)));
+            cH = Math.max(1, Math.round(cW * (hMm / wMm)));
+        } else {
+            cH = Math.min(maxEdge, Math.max(32, Math.round(hMm)));
+            cW = Math.max(1, Math.round(cH * (wMm / hMm)));
+        }
+
+        const rects = computeCharucoPagePreviewRects(state.squaresX, state.squaresY, tiling, cW, cH);
+        const dark = isDarkMode();
+
+        await yieldToMain();
+        if (signal.aborted) {
+            return;
+        }
+
+        const manifest = await loadPresetPreviewManifest();
+        const presetKey = state.autoGrid ? presetPreviewKey(state.distanceId, state.paperId) : '';
+        const baked = presetKey && manifest ? manifest[presetKey] : undefined;
+
+        if (baked) {
+            try {
+                const boardSrc = resolvePresetAssetUrl(baked.board);
+                const fetches: Promise<Response>[] = [fetch(boardSrc, {signal})];
+                for (const t of baked.thumbs) {
+                    fetches.push(fetch(resolvePresetAssetUrl(t), {signal}));
+                }
+                const responses = await Promise.all(fetches);
+                for (const r of responses) {
+                    if (!r.ok) {
+                        throw new Error(`Preset preview fetch failed (${r.status})`);
+                    }
+                }
+
+                const toDataUrl = (blob: Blob) =>
+                    new Promise<string>((resolve, reject) => {
+                        const fr = new FileReader();
+                        fr.onload = () => resolve(fr.result as string);
+                        fr.onerror = () => reject(fr.error);
+                        fr.readAsDataURL(blob);
+                    });
+
+                const boardDataUrl = await toDataUrl(await responses[0]!.blob());
+
+                if (signal.aborted) {
+                    return;
+                }
+
+                hideFullPreviewPlaceholder();
+                boardImg.src = boardDataUrl;
+                boardImg.alt = S.fullChart;
+                boardImg.classList.remove('board-img--hidden');
+
+                overlays.innerHTML = '';
+                if (rects) {
+                    for (const r of rects) {
+                        const d = document.createElement('div');
+                        d.className = 'sheet-rect';
+                        d.style.left = `${r.left * 100}%`;
+                        d.style.top = `${r.top * 100}%`;
+                        d.style.width = `${r.width * 100}%`;
+                        d.style.height = `${r.height * 100}%`;
+                        d.style.borderColor = charucoPagePreviewBorderColor(r.sheetIndex, tiling.pageCount, dark);
+                        overlays.appendChild(d);
+                    }
+                }
+
+                trunc.classList.toggle('hidden', !baked.truncated);
+                if (baked.truncated) {
+                    trunc.textContent = interpolate(S.truncatedPreview, {
+                        shown: baked.thumbs.length,
+                        total: baked.totalPages,
+                    });
+                }
+
+                thumbs.innerHTML = '';
+                if (baked.totalPages > 1) {
+                    const hdr = document.createElement('p');
+                    hdr.className = 'caption';
+                    hdr.textContent = interpolate(S.pageCountLabel, {count: baked.totalPages});
+                    hdr.style.gridColumn = '1 / -1';
+                    thumbs.appendChild(hdr);
+                }
+                const layoutN = tiling.pageCount;
+                for (let i = 0; i < responses.length - 1; i++) {
+                    const src = await toDataUrl(await responses[i + 1]!.blob());
+                    const wrap = document.createElement('div');
+                    wrap.className = 'thumb-wrap';
+                    const cap = document.createElement('p');
+                    cap.className = 'cap';
+                    cap.textContent = interpolate(S.pageLabel, {n: i + 1});
+                    const img = document.createElement('img');
+                    img.className = 'thumb-img';
+                    img.src = src;
+                    img.alt = interpolate(S.pageLabel, {n: i + 1});
+                    if (layoutN > 1 && baked.totalPages > 1) {
+                        img.style.border = `2px solid ${charucoPagePreviewBorderColor(i + 1, layoutN, dark)}`;
+                    } else {
+                        img.style.border = '1px solid var(--border)';
+                    }
+                    wrap.append(cap, img);
+                    thumbs.appendChild(wrap);
+                }
+                statusEl.textContent = '';
+                endPreviewBusyIfCurrent();
+                return;
+            } catch (e) {
+                if ((e as Error).name === 'AbortError') {
+                    return;
+                }
+                /* Missing baked assets or fetch error: fall through to live render. */
+            }
+        }
+
+        previewCanvas.width = cW;
+        previewCanvas.height = cH;
+        const gray = renderCharucoBoardGray(cW, cH, {
+            squaresX: state.squaresX,
+            squaresY: state.squaresY,
+            squareLength: state.squareMm,
+            markerLength: markerMm,
+        });
+        putGrayOnCanvas(previewCanvas, gray);
+        const boardDataUrl = previewCanvas.toDataURL('image/png');
+
+        await yieldToMain();
+        if (signal.aborted) {
+            return;
+        }
+
+        const pd = paperDims();
+        const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
+
+        const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
+
+        let blob: Blob;
+        try {
+            blob = await renderCharucoPrintPdf({
+                squaresX: state.squaresX,
+                squaresY: state.squaresY,
+                squareLengthMm: state.squareMm,
+                paperWMm,
+                paperHMm,
+                markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
+                tiling,
+                pages,
+                signal,
+            });
+        } catch (e) {
+            if ((e as Error).name === 'AbortError') {
+                return;
+            }
+            statusEl.textContent = e instanceof Error ? e.message : String(e);
+            resetPreviewVisualsEmpty();
+            return;
+        }
+
+        if (signal.aborted) {
+            return;
+        }
+
+        setThumbGridPlaceholder(S.buildingPreviews);
+        await yieldToMain();
+
+        try {
+            const decoded = await decodePdfThumbnails(await blob.arrayBuffer(), signal);
+            if (signal.aborted) {
+                return;
+            }
+
+            hideFullPreviewPlaceholder();
+            boardImg.src = boardDataUrl;
+            boardImg.alt = S.fullChart;
+            boardImg.classList.remove('board-img--hidden');
+
+            overlays.innerHTML = '';
+            if (rects) {
+                for (const r of rects) {
+                    const d = document.createElement('div');
+                    d.className = 'sheet-rect';
+                    d.style.left = `${r.left * 100}%`;
+                    d.style.top = `${r.top * 100}%`;
+                    d.style.width = `${r.width * 100}%`;
+                    d.style.height = `${r.height * 100}%`;
+                    d.style.borderColor = charucoPagePreviewBorderColor(r.sheetIndex, tiling.pageCount, dark);
+                    overlays.appendChild(d);
+                }
+            }
+
+            trunc.classList.toggle('hidden', !decoded.truncated);
+            if (decoded.truncated) {
+                trunc.textContent = interpolate(S.truncatedPreview, {
+                    shown: decoded.images.length,
+                    total: decoded.totalPages,
+                });
+            }
+            thumbs.innerHTML = '';
+            if (decoded.totalPages > 1) {
+                const hdr = document.createElement('p');
+                hdr.className = 'caption';
+                hdr.textContent = interpolate(S.pageCountLabel, {count: decoded.totalPages});
+                hdr.style.gridColumn = '1 / -1';
+                thumbs.appendChild(hdr);
+            }
+            const layoutN = tiling.pageCount;
+            decoded.images.forEach((src, i) => {
+                const wrap = document.createElement('div');
+                wrap.className = 'thumb-wrap';
+                const cap = document.createElement('p');
+                cap.className = 'cap';
+                cap.textContent = interpolate(S.pageLabel, {n: i + 1});
+                const img = document.createElement('img');
+                img.className = 'thumb-img';
+                img.src = src;
+                img.alt = interpolate(S.pageLabel, {n: i + 1});
+                if (layoutN > 1 && decoded.totalPages > 1) {
+                    img.style.border = `2px solid ${charucoPagePreviewBorderColor(i + 1, layoutN, dark)}`;
+                } else {
+                    img.style.border = '1px solid var(--border)';
+                }
+                wrap.append(cap, img);
+                thumbs.appendChild(wrap);
+            });
+            statusEl.textContent = '';
+        } catch (e) {
+            if ((e as Error).name === 'AbortError') {
+                return;
+            }
+            statusEl.textContent = e instanceof Error ? e.message : String(e);
+            resetPreviewVisualsEmpty();
+        }
+    } finally {
+        endPreviewBusyIfCurrent();
+    }
 }
 
 async function downloadPdf(): Promise<void> {
     showErr(null);
-    const {squaresX, squaresY, squareLengthMm, markerLengthRatio, legacyPattern, paperId} = readParams();
-    const nom = PAPER_SIZES_MM[paperId];
-    if (!nom) {
-        showErr('Unknown paper.');
-        return;
-    }
-    const [nw, nh] = nom;
-    let tiling = computeTilingInfo(squaresX, squaresY, squareLengthMm, nw, nh);
+    const tiling = effectiveTiling();
     if (!tiling) {
-        showErr('Cannot tile this board on the selected paper.');
+        showErr(S.layoutCannotFit);
         return;
     }
-    let paperWMm: number;
-    let paperHMm: number;
-    try {
-        ({paperWMm, paperHMm} = selectPaperDimensionsMm(squaresX, squaresY, squareLengthMm, nw, nh, undefined));
-    } catch (e) {
-        showErr(e instanceof Error ? e.message : String(e));
-        return;
+    const btnPdf = byId('btnPdf') as HTMLButtonElement;
+    const pdfLabel = S.generatePdf;
+    btnPdf.disabled = true;
+    btnPdf.classList.add('btn--busy');
+    btnPdf.textContent = S.generatingPdf;
+    await yieldToMain();
+
+    const presetKey = state.autoGrid ? presetPreviewKey(state.distanceId, state.paperId) : '';
+    const manifest = await loadPresetPreviewManifest();
+    const bakedPdfPath = presetKey && manifest?.[presetKey]?.pdf;
+
+    let downloaded = false;
+    if (bakedPdfPath) {
+        try {
+            const res = await fetch(resolvePresetAssetUrl(bakedPdfPath));
+            if (res.ok) {
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `charuco_${state.squaresX}x${state.squaresY}_${state.paperId}.pdf`;
+                a.click();
+                URL.revokeObjectURL(url);
+                downloaded = true;
+            }
+        } catch {
+            /* fall through to live render */
+        }
     }
 
-    tiling = computeTilingInfo(squaresX, squaresY, squareLengthMm, paperWMm, paperHMm);
-    if (!tiling) {
-        showErr('Tiling failed after orientation selection.');
-        return;
+    if (!downloaded) {
+        const pd = paperDims();
+        const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
+        const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
+        try {
+            const blob = await renderCharucoPrintPdf({
+                squaresX: state.squaresX,
+                squaresY: state.squaresY,
+                squareLengthMm: state.squareMm,
+                paperWMm,
+                paperHMm,
+                markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
+                tiling,
+                pages,
+            });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `charuco_${state.squaresX}x${state.squaresY}_${state.paperId}.pdf`;
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            showErr(e instanceof Error ? e.message : String(e));
+        }
     }
-    const {pages} = buildPageSpecs(squaresX, squaresY, tiling);
 
-    try {
-        const blob = await renderCharucoPrintPdf({
-            squaresX,
-            squaresY,
-            squareLengthMm,
-            paperWMm,
-            paperHMm,
-            markerLengthRatio,
-            legacyPattern,
-            tiling,
-            pages,
+    btnPdf.classList.remove('btn--busy');
+    btnPdf.textContent = pdfLabel;
+    const t = effectiveTiling();
+    btnPdf.disabled = !t || t.pageCount < 1;
+}
+
+function clampInt(n: number, lo: number, hi: number): number {
+    return Math.round(Math.max(lo, Math.min(hi, n)));
+}
+
+function wireUi(): void {
+    (byId('distance') as HTMLSelectElement).addEventListener('change', (e) => {
+        state.distanceId = (e.target as HTMLSelectElement).value;
+        state.autoGrid = true;
+        syncUi();
+    });
+
+    (byId('paper') as HTMLSelectElement).addEventListener('change', (e) => {
+        state.paperId = (e.target as HTMLSelectElement).value;
+        state.autoGrid = true;
+        syncUi();
+    });
+
+    (byId('sqmm') as HTMLInputElement).addEventListener('input', (e) => {
+        state.autoGrid = false;
+        const raw = Number((e.target as HTMLInputElement).value);
+        const pd = paperDims();
+        state.squareMm = snapSquareMm(raw, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
+        syncDistanceFromSquareIfManual();
+        syncUi();
+    });
+
+    (byId('pages') as HTMLInputElement).addEventListener('input', (e) => {
+        state.autoGrid = false;
+        const raw = Math.round(Number((e.target as HTMLInputElement).value));
+        const pd = paperDims();
+        const n = nearestValidTargetPages(raw, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
+        const sq = maxSquareMmForGridAndPages(state.squaresX, state.squaresY, pd.wMm, pd.hMm, n);
+        if (sq !== null) {
+            state.squareMm = sq;
+        }
+        syncUi();
+    });
+
+    (byId('sx') as HTMLInputElement).addEventListener('input', (e) => {
+        state.autoGrid = false;
+        state.squaresX = clampInt(Number((e.target as HTMLInputElement).value), BOARD_GRID_MIN, BOARD_GRID_MAX);
+        syncUi();
+    });
+
+    (byId('sy') as HTMLInputElement).addEventListener('input', (e) => {
+        state.autoGrid = false;
+        state.squaresY = clampInt(Number((e.target as HTMLInputElement).value), BOARD_GRID_MIN, BOARD_GRID_MAX);
+        syncUi();
+    });
+
+    byId('btnPdf').addEventListener('click', () => void downloadPdf());
+
+    const themeGroup = byId('themeToggle');
+    for (const btn of themeGroup.querySelectorAll<HTMLButtonElement>('[data-theme-pick]')) {
+        btn.addEventListener('click', () => {
+            setStoredPreference(btn.dataset.themePick as ThemePreference);
+            applyThemePreference(getStoredPreference(), () => schedulePreview());
+            syncThemeToggle();
         });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `charuco_${squaresX}x${squaresY}_${paperId}.pdf`;
-        a.click();
-        URL.revokeObjectURL(url);
-    } catch (e) {
-        showErr(e instanceof Error ? e.message : String(e));
     }
 }
 
-($('preview') as HTMLButtonElement).addEventListener('click', updatePreview);
-($('png') as HTMLButtonElement).addEventListener('click', () => void downloadPng());
-($('pdf') as HTMLButtonElement).addEventListener('click', () => void downloadPdf());
-
-for (const id of ['sx', 'sy', 'sqmm', 'ratio', 'legacy', 'paper']) {
-    $(id).addEventListener('change', updatePreview);
+async function boot(): Promise<void> {
+    await loadPresetPreviewManifest();
+    initTheme(() => schedulePreview());
+    wireUi();
+    syncUi();
 }
 
-updatePreview();
+void boot();

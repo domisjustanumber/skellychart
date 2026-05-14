@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>skellychart — ChaRuCo print</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>skellychart</h1>
+        <p class="sub">
+          Client-side ChaRuCo board preview and printable PDF (OpenCV-compatible raster, DICT_4X4_250).
+        </p>
+      </header>
+
+      <section class="controls">
+        <label>
+          Squares X
+          <input type="number" id="sx" min="2" max="32" value="4" />
+        </label>
+        <label>
+          Squares Y
+          <input type="number" id="sy" min="2" max="32" value="5" />
+        </label>
+        <label>
+          Square length (mm)
+          <input type="number" id="sqmm" min="10" max="250" value="58" />
+        </label>
+        <label>
+          Marker / square ratio
+          <input type="number" id="ratio" min="0.1" max="0.99" step="0.01" value="0.8" />
+        </label>
+        <label class="check">
+          <input type="checkbox" id="legacy" />
+          Legacy pre-4.6 pattern (even rows)
+        </label>
+        <label>
+          Paper
+          <select id="paper">
+            <option value="a4" selected>A4</option>
+            <option value="a3">A3</option>
+            <option value="letter">US Letter</option>
+            <option value="tabloid">US Tabloid</option>
+          </select>
+        </label>
+        <button type="button" id="preview">Update preview</button>
+        <button type="button" id="png">Download PNG (full board)</button>
+        <button type="button" id="pdf">Download PDF</button>
+      </section>
+
+      <p id="err" class="err" hidden></p>
+      <p id="tiling" class="tiling"></p>
+
+      <div class="preview-wrap">
+        <canvas id="board" width="400" height="500"></canvas>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

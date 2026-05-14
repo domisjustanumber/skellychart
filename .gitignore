@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.venv/
+*.local
+.DS_Store
+*.bin
+tsconfig.tsbuildinfo

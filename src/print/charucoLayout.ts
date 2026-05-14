@@ -44,11 +44,37 @@ const CANADA_TIMEZONES = new Set([
     'Canada/Yukon',
 ]);
 
-function regionFromCanadaTimeZone(): string | undefined {
+/** Primary US IANA zones — default paper when time zone matches (see {@link defaultPaperId}). */
+const US_PRIMARY_TIMEZONES = new Set([
+    'America/New_York', 'America/Detroit', 'America/Kentucky/Louisville', 'America/Kentucky/Monticello',
+    'America/Indiana/Indianapolis', 'America/Indiana/Vincennes', 'America/Indiana/Winamac', 'America/Indiana/Marengo',
+    'America/Indiana/Petersburg', 'America/Indiana/Vevay', 'America/Indiana/Tell_City', 'America/Indiana/Knox',
+    'America/Chicago', 'America/Menominee', 'America/North_Dakota/Center', 'America/North_Dakota/New_Salem',
+    'America/North_Dakota/Beulah', 'America/Denver', 'America/Boise', 'America/Phoenix', 'America/Los_Angeles',
+    'America/Anchorage', 'America/Juneau', 'America/Sitka', 'America/Metlakatla', 'America/Yakutat', 'America/Nome',
+    'America/Adak', 'Pacific/Honolulu', 'Pacific/Guam', 'Pacific/Saipan', 'America/Puerto_Rico', 'America/St_Thomas',
+]);
+
+const MEXICO_PRIMARY_TIMEZONES = new Set([
+    'America/Mexico_City', 'America/Cancun', 'America/Merida', 'America/Matamoros', 'America/Monterrey',
+    'America/Mazatlan', 'America/Chihuahua', 'America/Hermosillo', 'America/Tijuana', 'America/Bahia_Banderas',
+    'America/Ojinaga',
+]);
+
+function regionFromLetterDefaultTimeZone(): string | undefined {
     try {
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-        if (tz && CANADA_TIMEZONES.has(tz)) {
+        if (!tz) {
+            return undefined;
+        }
+        if (CANADA_TIMEZONES.has(tz)) {
             return 'CA';
+        }
+        if (US_PRIMARY_TIMEZONES.has(tz)) {
+            return 'US';
+        }
+        if (MEXICO_PRIMARY_TIMEZONES.has(tz)) {
+            return 'MX';
         }
     } catch {
         /* ignore */
@@ -56,7 +82,7 @@ function regionFromCanadaTimeZone(): string | undefined {
     return undefined;
 }
 
-export function resolveUserRegionFromNavigator(): string | undefined {
+function workingDistanceLocaleTags(): string[] {
     const candidates: string[] = [];
     try {
         candidates.push(Intl.DateTimeFormat().resolvedOptions().locale);
@@ -69,13 +95,17 @@ export function resolveUserRegionFromNavigator(): string | undefined {
             candidates.push(...navigator.languages);
         }
     }
-    for (const c of candidates) {
+    return candidates;
+}
+
+function firstRegionFromLocaleTags(): string | undefined {
+    for (const c of workingDistanceLocaleTags()) {
         const r = regionFromLocaleTag(c);
         if (r) {
             return r;
         }
     }
-    return regionFromCanadaTimeZone();
+    return undefined;
 }
 
 export function defaultPaperIdForRegion(region: string | undefined): string {
@@ -86,12 +116,30 @@ export function defaultPaperIdForRegion(region: string | undefined): string {
     return 'a4';
 }
 
+/**
+ * Default paper: known IANA time zone → region (CA / US / MX allowlists), else first BCP-47 region from
+ * locale / `navigator`, else A4.
+ */
 export function defaultPaperId(): string {
-    return defaultPaperIdForRegion(resolveUserRegionFromNavigator());
+    const fromTz = regionFromLetterDefaultTimeZone();
+    if (fromTz) {
+        return defaultPaperIdForRegion(fromTz);
+    }
+    return defaultPaperIdForRegion(firstRegionFromLocaleTags());
 }
 
+/** Feet vs metres for working-distance copy: US English → ft; first other explicit region → m. */
 export function shouldUseImperialWorkingDistanceUnits(): boolean {
-    return defaultPaperId() === 'letter';
+    for (const c of workingDistanceLocaleTags()) {
+        const r = regionFromLocaleTag(c);
+        if (r === 'US') {
+            return true;
+        }
+        if (r) {
+            return false;
+        }
+    }
+    return false;
 }
 
 export function paperById(id: string): (typeof PAPER_OPTIONS)[0] | undefined {

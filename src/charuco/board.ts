@@ -236,5 +236,5 @@ export function putGrayOnCanvas(canvas: HTMLCanvasElement, gray: Uint8Array): vo
     const {width, height} = canvas;
     const ctx = canvas.getContext('2d')!;
     const rgba = grayToRgba(gray, width, height);
-    ctx.putImageData(new ImageData(rgba, width, height), 0, 0);
+    ctx.putImageData(new ImageData(rgba as Uint8ClampedArray<ArrayBuffer>, width, height), 0, 0);
 }

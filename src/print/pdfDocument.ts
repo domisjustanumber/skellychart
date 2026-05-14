@@ -391,7 +391,11 @@ export async function renderCharucoPrintPdf(params: PrintPdfParams): Promise<Blo
     const fullCanvas = document.createElement('canvas');
     fullCanvas.width = fullWPx;
     fullCanvas.height = fullHPx;
-    fullCanvas.getContext('2d')!.putImageData(new ImageData(fullRgba, fullWPx, fullHPx), 0, 0);
+    fullCanvas.getContext('2d')!.putImageData(
+        new ImageData(fullRgba as Uint8ClampedArray<ArrayBuffer>, fullWPx, fullHPx),
+        0,
+        0,
+    );
 
     const boardPxLayout = charucoBoardPixelLayout(fullWPx, fullHPx, squaresX, squaresY);
     abortIfNeeded();

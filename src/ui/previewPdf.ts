@@ -43,7 +43,7 @@ export async function decodePdfThumbnails(
             }
             canvas.width = Math.floor(viewport.width);
             canvas.height = Math.floor(viewport.height);
-            await page.render({canvasContext: ctx, viewport}).promise;
+            await page.render({canvas, canvasContext: ctx, viewport}).promise;
             images.push(canvas.toDataURL('image/jpeg', 0.88));
             await yieldToMain();
         }

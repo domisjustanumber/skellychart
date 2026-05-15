@@ -18,7 +18,7 @@ export const S = {
     themeSystem: 'System',
     title: 'FreeMoCap Calibration Chart Generator',
     intro:
-        'Create a printable SVG chart with QR metadata on the first sheet, tape-join labels on interior edges, and a corner marker at the square origin. Margins stay blank for printer grab areas. Pick paper size and working distance; we choose the grid and number of sheets automatically and use the largest square length that fits. Use Advanced to adjust square length or grid size by hand. The square-length slider is colour banded by suggested working distance; when you customise the layout, the distance control follows the current square length.',
+        'Create a printable calibration chart that can be used with FreeMoCap. Select the distance your subject will be from the camera and your paper size. Use the Advanced settings if you want to fine-tune settings.\n\nThe QR code in the top corner can be presented to FreeMoCap to load settings, or it can be scanned with your phone to bring you back here with all of the settings pre-configured.',
     workingDistance: 'Working distance from camera',
     paperSize: 'Paper size',
     paperOption: '{{paper}} ({{wMm}} × {{hMm}} mm)',

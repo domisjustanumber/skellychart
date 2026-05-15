@@ -3,6 +3,8 @@ node_modules/
 dist/
 # Avoid committing preset SVG dumps under public/; use dist/ from npm run build.
 public/generated-presets/
+# Emitted by `npm run generate:tiling-feasibility` (also run in predev/build).
+src/print/generated/
 .venv/
 *.local
 .DS_Store

@@ -12,7 +12,7 @@ import {
     paperById,
     charucoPagePreviewBorderColor,
     computeCharucoPagePreviewRects,
-    computeEffectiveTiling,
+    computeEffectivePrintLayout,
     defaultPaperId,
     layoutSummaryText,
     maxSquareMmForGridAndPages,
@@ -169,9 +169,9 @@ function applyAutoPreset(): void {
     }
 }
 
-function effectiveTiling() {
+function effectivePrintLayout() {
     const pd = paperDims();
-    return computeEffectiveTiling(
+    return computeEffectivePrintLayout(
         state.squaresX,
         state.squaresY,
         state.squareMm,
@@ -180,6 +180,17 @@ function effectiveTiling() {
         state.autoGrid,
         autoPlan().targetPages,
     );
+}
+
+function effectiveTiling() {
+    return effectivePrintLayout()?.tiling ?? null;
+}
+
+/** Grid dimensions passed to {@link buildPageSpecs} / {@link renderCharucoPrintSvg} when the pattern is transposed for tiling. */
+function printSquareDims(patternRotated90: boolean): {squaresX: number; squaresY: number} {
+    return patternRotated90
+        ? {squaresX: state.squaresY, squaresY: state.squaresX}
+        : {squaresX: state.squaresX, squaresY: state.squaresY};
 }
 
 function pagesSliderDisplay(tiling: ReturnType<typeof effectiveTiling>): number {
@@ -526,7 +537,8 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
         byId('panelPreview').setAttribute('aria-busy', 'false');
     };
 
-    const tiling = effectiveTiling();
+    const layout = effectivePrintLayout();
+    const tiling = layout?.tiling ?? null;
     const statusEl = byId('previewStatus') as HTMLParagraphElement;
     const panelPreview = byId('panelPreview');
     const fullBlock = byId('fullPreviewBlock');
@@ -535,7 +547,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     const thumbs = byId('thumbGrid');
     const trunc = byId('previewTruncated');
 
-    if (!tiling || tiling.pageCount < 1) {
+    if (!layout || !tiling || tiling.pageCount < 1) {
         statusEl.textContent = '';
         panelPreview.setAttribute('aria-busy', 'false');
         fullBlock.classList.add('hidden');
@@ -569,7 +581,14 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
             cW = Math.max(1, Math.round(cH * (wMm / hMm)));
         }
 
-        const rects = computeCharucoPagePreviewRects(state.squaresX, state.squaresY, tiling, cW, cH);
+        const rects = computeCharucoPagePreviewRects(
+            state.squaresX,
+            state.squaresY,
+            tiling,
+            cW,
+            cH,
+            layout.patternRotated90,
+        );
         const dark = isDarkMode();
 
         await yieldToMain();
@@ -598,13 +617,14 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
         const pd = paperDims();
         const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
 
-        const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
+        const {squaresX: px, squaresY: py} = printSquareDims(layout.patternRotated90);
+        const pages = buildPageSpecs(px, py, tiling).pages;
 
         let printResult: Awaited<ReturnType<typeof renderCharucoPrintSvg>>;
         try {
             printResult = await renderCharucoPrintSvg({
-                squaresX: state.squaresX,
-                squaresY: state.squaresY,
+                squaresX: px,
+                squaresY: py,
                 squareLengthMm: state.squareMm,
                 paperWMm,
                 paperHMm,
@@ -757,8 +777,9 @@ function exportSvgBasenamePrefix(): string {
 
 async function saveSvgFiles(): Promise<void> {
     showErr(null);
-    const tiling = effectiveTiling();
-    if (!tiling) {
+    const layout = effectivePrintLayout();
+    const tiling = layout?.tiling ?? null;
+    if (!tiling || !layout) {
         showErr(S.layoutCannotFit);
         return;
     }
@@ -771,11 +792,12 @@ async function saveSvgFiles(): Promise<void> {
 
     const pd = paperDims();
     const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
-    const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
+    const {squaresX: px, squaresY: py} = printSquareDims(layout.patternRotated90);
+    const pages = buildPageSpecs(px, py, tiling).pages;
     try {
         const {pages: svgs} = await renderCharucoPrintSvg({
-            squaresX: state.squaresX,
-            squaresY: state.squaresY,
+            squaresX: px,
+            squaresY: py,
             squareLengthMm: state.squareMm,
             paperWMm,
             paperHMm,
@@ -857,8 +879,9 @@ function printHtmlDocumentInHiddenIframe(html: string): void {
 
 async function openPrintDialog(): Promise<void> {
     showErr(null);
-    const tiling = effectiveTiling();
-    if (!tiling) {
+    const layout = effectivePrintLayout();
+    const tiling = layout?.tiling ?? null;
+    if (!tiling || !layout) {
         showErr(S.layoutCannotFit);
         return;
     }
@@ -871,11 +894,12 @@ async function openPrintDialog(): Promise<void> {
 
     const pd = paperDims();
     const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
-    const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
+    const {squaresX: px, squaresY: py} = printSquareDims(layout.patternRotated90);
+    const pages = buildPageSpecs(px, py, tiling).pages;
     try {
         const {pages: svgs} = await renderCharucoPrintSvg({
-            squaresX: state.squaresX,
-            squaresY: state.squaresY,
+            squaresX: px,
+            squaresY: py,
             squareLengthMm: state.squareMm,
             paperWMm,
             paperHMm,

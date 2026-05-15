@@ -232,6 +232,25 @@ const maxSquareMmForGridAndPagesCache = new Map<string, number | null>();
 /** Memo: `syncUi` called every frame while dragging squares — avoid re-walking targets 1..9 repeatedly. */
 const validTargetPageCountsForGridCache = new Map<string, number[]>();
 
+function squareSizeFitsTargetPageCountEitherOrientation(
+    squaresX: number,
+    squaresY: number,
+    squareMm: number,
+    paperWMm: number,
+    paperHMm: number,
+    targetPages: number,
+): boolean {
+    if (computeTilingInfoMatchingPageCount(squaresX, squaresY, squareMm, paperWMm, paperHMm, targetPages) !== null) {
+        return true;
+    }
+    if (squaresX !== squaresY) {
+        return (
+            computeTilingInfoMatchingPageCount(squaresY, squaresX, squareMm, paperWMm, paperHMm, targetPages) !== null
+        );
+    }
+    return false;
+}
+
 export function maxSquareMmForGridAndPages(
     squaresX: number,
     squaresY: number,
@@ -244,8 +263,7 @@ export function maxSquareMmForGridAndPages(
         return maxSquareMmForGridAndPagesCache.get(key)!;
     }
     for (let s = SQ_MAX; s >= SQ_MIN; s--) {
-        const t = computeTilingInfoMatchingPageCount(squaresX, squaresY, s, paperWMm, paperHMm, targetPages);
-        if (t !== null) {
+        if (squareSizeFitsTargetPageCountEitherOrientation(squaresX, squaresY, s, paperWMm, paperHMm, targetPages)) {
             maxSquareMmForGridAndPagesCache.set(key, s);
             return s;
         }
@@ -271,7 +289,7 @@ export function validTargetPageCountsForGrid(
         for (let s = SQ_MIN; s <= SQ_MAX; s++) {
             // Existence-only: stops as soon as *some* square length satisfies `p` sheets (much cheaper than
             // walking all `s` to find the maximum, which `maxSquareMmForGridAndPages` does when needed).
-            if (computeTilingInfoMatchingPageCount(squaresX, squaresY, s, paperWMm, paperHMm, p) !== null) {
+            if (squareSizeFitsTargetPageCountEitherOrientation(squaresX, squaresY, s, paperWMm, paperHMm, p)) {
                 any = true;
                 break;
             }
@@ -298,6 +316,8 @@ export function enumerateValidSquareSizes(
     for (let s = SQ_MIN; s <= SQ_MAX; s++) {
         if (computeTilingInfo(squaresX, squaresY, s, paperWMm, paperHMm) !== null) {
             out.add(s);
+        } else if (squaresX !== squaresY && computeTilingInfo(squaresY, squaresX, s, paperWMm, paperHMm) !== null) {
+            out.add(s);
         }
     }
     validSquareSizesCache = [...out].sort((a, b) => a - b);
@@ -319,9 +339,7 @@ export function enumerateValidSquareSizesForGridMatchingSheetsTarget(
     }
     const out = new Set<number>();
     for (let s = SQ_MIN; s <= SQ_MAX; s++) {
-        if (
-            computeTilingInfoMatchingPageCount(squaresX, squaresY, s, paperWMm, paperHMm, targetSheets) !== null
-        ) {
+        if (squareSizeFitsTargetPageCountEitherOrientation(squaresX, squaresY, s, paperWMm, paperHMm, targetSheets)) {
             out.add(s);
         }
     }
@@ -427,6 +445,7 @@ export function computeCharucoPagePreviewRects(
     tiling: TilingInfo,
     previewCanvasW: number,
     previewCanvasH: number,
+    patternRotated90 = false,
 ): CharucoPagePreviewRect[] | null {
     if (tiling.pageCount <= 1 || squaresX < 1 || squaresY < 1) {
         return null;
@@ -434,7 +453,16 @@ export function computeCharucoPagePreviewRects(
     const pw = Math.max(1, Math.round(previewCanvasW));
     const ph = Math.max(1, Math.round(previewCanvasH));
     const layout = charucoBoardPixelLayout(pw, ph, squaresX, squaresY);
-    return computeCharucoPageSquareRegions(squaresX, squaresY, tiling).map((r) => {
+    const regions = patternRotated90
+        ? computeCharucoPageSquareRegions(squaresY, squaresX, tiling).map((r) => ({
+              sheetIndex: r.sheetIndex,
+              gx0: r.gy0,
+              gx1: r.gy1,
+              gy0: r.gx0,
+              gy1: r.gx1,
+          }))
+        : computeCharucoPageSquareRegions(squaresX, squaresY, tiling);
+    return regions.map((r) => {
         const [l, rPx] = charucoCropXRange(r.gx0, r.gx1, layout);
         const [t, bPx] = charucoCropYRange(r.gy0, r.gy1, layout);
         return {
@@ -462,6 +490,97 @@ export function charucoPagePreviewBorderColor(
     return `hsl(${hue} ${sat}% ${light}%)`;
 }
 
+/** Tiling plus whether the print uses the grid transposed (90°) vs logical {@link squaresX}×{@link squaresY}. */
+export interface EffectivePrintLayout {
+    tiling: TilingInfo;
+    patternRotated90: boolean;
+}
+
+function tilingFitPreferenceKey(tiling: TilingInfo, patternRotated90: boolean): [number, number, number] {
+    const prod = tiling.maxCx * tiling.maxCyRest;
+    return [tiling.pageCount, -prod, patternRotated90 ? 1 : 0];
+}
+
+function pickBetterEffectiveLayout(a: EffectivePrintLayout | null, b: EffectivePrintLayout | null): EffectivePrintLayout | null {
+    if (!a) {
+        return b;
+    }
+    if (!b) {
+        return a;
+    }
+    const ka = tilingFitPreferenceKey(a.tiling, a.patternRotated90);
+    const kb = tilingFitPreferenceKey(b.tiling, b.patternRotated90);
+    for (let i = 0; i < ka.length; i++) {
+        if (ka[i] !== kb[i]) {
+            return ka[i]! < kb[i]! ? a : b;
+        }
+    }
+    return a;
+}
+
+/**
+ * Effective tiling for UI and PDF/SVG — same sheet count as freemocap auto mode when possible, but also considers
+ * transposing the grid (90° pattern rotation) when that yields larger per-sheet coverage or a valid auto match.
+ */
+export function computeEffectivePrintLayout(
+    squaresX: number,
+    squaresY: number,
+    squareMm: number,
+    paperWMm: number,
+    paperHMm: number,
+    autoGrid: boolean,
+    targetPagesWhenAuto: number,
+): EffectivePrintLayout | null {
+    if (autoGrid) {
+        const nat = computeTilingInfoMatchingPageCount(
+            squaresX,
+            squaresY,
+            squareMm,
+            paperWMm,
+            paperHMm,
+            targetPagesWhenAuto,
+        );
+        const rot =
+            squaresX === squaresY
+                ? null
+                : computeTilingInfoMatchingPageCount(
+                      squaresY,
+                      squaresX,
+                      squareMm,
+                      paperWMm,
+                      paperHMm,
+                      targetPagesWhenAuto,
+                  );
+
+        let chosen: EffectivePrintLayout | null = null;
+        if (nat && rot) {
+            const prodN = nat.maxCx * nat.maxCyRest;
+            const prodR = rot.maxCx * rot.maxCyRest;
+            chosen =
+                prodR > prodN
+                    ? {tiling: rot, patternRotated90: true}
+                    : {tiling: nat, patternRotated90: false};
+        } else if (nat) {
+            chosen = {tiling: nat, patternRotated90: false};
+        } else if (rot) {
+            chosen = {tiling: rot, patternRotated90: true};
+        }
+
+        if (chosen) {
+            return chosen;
+        }
+    }
+
+    const nat = computeTilingInfo(squaresX, squaresY, squareMm, paperWMm, paperHMm);
+    const rot =
+        squaresX === squaresY ? null : computeTilingInfo(squaresY, squaresX, squareMm, paperWMm, paperHMm);
+
+    return pickBetterEffectiveLayout(
+        nat ? {tiling: nat, patternRotated90: false} : null,
+        rot ? {tiling: rot, patternRotated90: true} : null,
+    );
+}
+
 /** Effective tiling for UI (matches freemocap `CharucoPrintPage` useMemo). */
 export function computeEffectiveTiling(
     squaresX: number,
@@ -472,20 +591,15 @@ export function computeEffectiveTiling(
     autoGrid: boolean,
     targetPagesWhenAuto: number,
 ): TilingInfo | null {
-    if (autoGrid) {
-        const matched = computeTilingInfoMatchingPageCount(
-            squaresX,
-            squaresY,
-            squareMm,
-            paperWMm,
-            paperHMm,
-            targetPagesWhenAuto,
-        );
-        if (matched !== null) {
-            return matched;
-        }
-    }
-    return computeTilingInfo(squaresX, squaresY, squareMm, paperWMm, paperHMm);
+    return computeEffectivePrintLayout(
+        squaresX,
+        squaresY,
+        squareMm,
+        paperWMm,
+        paperHMm,
+        autoGrid,
+        targetPagesWhenAuto,
+    )?.tiling ?? null;
 }
 
 export function layoutSummaryText(

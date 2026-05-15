@@ -6,8 +6,8 @@ import {
     MM_JOIN_STRIP,
     MM_MARGIN_SHEET,
     ORIGIN_CORNER_MARKER_PAD_MM,
-    ORIGIN_PAGE_EXTRA_MM,
 } from './constants.js';
+import {estimateOriginBannerStripFromPrintableTopMm} from './originBannerEstimate.js';
 
 export interface TilingInfo {
     pageCount: number;
@@ -66,7 +66,13 @@ function computeTilingInfoSingle(
         const joinH0 = npyForJoin > 1 ? MM_JOIN_STRIP : 0;
         const joinHr = npyForJoin > 1 ? 2 * MM_JOIN_STRIP : 0;
 
-        const phOriginPattern = ph - ORIGIN_PAGE_EXTRA_MM - joinH0 - ORIGIN_CORNER_MARKER_PAD_MM;
+        const bannerStripMm = estimateOriginBannerStripFromPrintableTopMm({
+            paperWMm,
+            squaresX,
+            squaresY,
+            squareLengthMm: squareMm,
+        });
+        const phOriginPattern = ph - bannerStripMm - joinH0 - ORIGIN_CORNER_MARKER_PAD_MM;
         if (phOriginPattern <= squareMm) {
             return null;
         }

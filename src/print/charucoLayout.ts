@@ -161,7 +161,7 @@ export function resolveDistancePrintPlan(
     if (!large) {
         switch (tier) {
             case 'near':
-                return {squaresX: 4, squaresY: 5, targetPages: 1};
+                return {squaresX: 5, squaresY: 3, targetPages: 1};
             case 'mid':
                 return {squaresX: 4, squaresY: 5, targetPages: 2};
             case 'far':
@@ -170,7 +170,7 @@ export function resolveDistancePrintPlan(
     }
     switch (tier) {
         case 'near':
-            return {squaresX: 6, squaresY: 8, targetPages: 1};
+            return {squaresX: 5, squaresY: 3, targetPages: 1};
         case 'mid':
             return {squaresX: 4, squaresY: 5, targetPages: 1};
         case 'far':

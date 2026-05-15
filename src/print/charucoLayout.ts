@@ -157,54 +157,38 @@ export function resolveDistancePrintPlan(
     paperId: string,
 ): {squaresX: number; squaresY: number; targetPages: number} {
     const large = paperFormatClass(paperId) === 'large';
-    const tier = distanceId === 'near' ? 'near' : distanceId === 'far' ? 'far' : 'mid';
+    /** Two tiers only (`mid` preset removed — treat legacy `mid` like `near`). */
+    const tier: 'near' | 'far' = distanceId === 'far' ? 'far' : 'near';
     if (!large) {
-        switch (tier) {
-            case 'near':
-                return {squaresX: 5, squaresY: 3, targetPages: 1};
-            case 'mid':
-                return {squaresX: 4, squaresY: 5, targetPages: 2};
-            case 'far':
-                return {squaresX: 3, squaresY: 5, targetPages: 9};
-        }
+        return tier === 'far'
+            ? {squaresX: 3, squaresY: 5, targetPages: 9}
+            : {squaresX: 5, squaresY: 3, targetPages: 1};
     }
-    switch (tier) {
-        case 'near':
-            return {squaresX: 5, squaresY: 3, targetPages: 1};
-        case 'mid':
-            return {squaresX: 4, squaresY: 5, targetPages: 1};
-        case 'far':
-            return {squaresX: 3, squaresY: 5, targetPages: 3};
-    }
+    return tier === 'far'
+        ? {squaresX: 3, squaresY: 5, targetPages: 3}
+        : {squaresX: 5, squaresY: 3, targetPages: 1};
 }
 
 export const CHARUCO_SQUARE_MM_MIN = 10;
 export const CHARUCO_SQUARE_MM_MAX = 200;
 
-export const SQUARE_LENGTH_NEAR_MAX_MM = 50;
-export const SQUARE_LENGTH_MID_MAX_MM = 100;
+/** Square lengths up to this (mm) map to the `near` preset (UI: “1 - 4m”); larger squares map to `far` (“4m +”). */
+export const SQUARE_LENGTH_LT_4M_MAX_MM = 100;
 
-export type WorkingDistanceTierId = 'near' | 'mid' | 'far';
+export type WorkingDistanceTierId = 'near' | 'far';
 
 export function workingDistanceTierFromSquareLengthMm(squareMm: number): WorkingDistanceTierId {
     const m = Math.round(Math.max(CHARUCO_SQUARE_MM_MIN, Math.min(CHARUCO_SQUARE_MM_MAX, squareMm)));
-    if (m <= SQUARE_LENGTH_NEAR_MAX_MM) {
-        return 'near';
-    }
-    if (m <= SQUARE_LENGTH_MID_MAX_MM) {
-        return 'mid';
-    }
-    return 'far';
+    return m <= SQUARE_LENGTH_LT_4M_MAX_MM ? 'near' : 'far';
 }
 
-export function squareLengthTierBandEdgeFractions(): {nearMid: number; midFar: number} {
+export function squareLengthTierBandEdgeFractions(): {nearFar: number} {
     const span = CHARUCO_SQUARE_MM_MAX - CHARUCO_SQUARE_MM_MIN;
     if (span <= 0) {
-        return {nearMid: 0, midFar: 1};
+        return {nearFar: 1};
     }
     return {
-        nearMid: (SQUARE_LENGTH_NEAR_MAX_MM - CHARUCO_SQUARE_MM_MIN) / span,
-        midFar: (SQUARE_LENGTH_MID_MAX_MM - CHARUCO_SQUARE_MM_MIN) / span,
+        nearFar: (SQUARE_LENGTH_LT_4M_MAX_MM - CHARUCO_SQUARE_MM_MIN) / span,
     };
 }
 

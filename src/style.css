@@ -24,7 +24,6 @@
   --far-tier: #c66900;
   --surface-2: #0f1419;
   --near: var(--info);
-  --mid: var(--success);
   --far: var(--far-tier);
   --border: var(--divider);
   --primary-hover: var(--primary-light);
@@ -55,7 +54,6 @@
   --far-tier: #c66900;
   --surface-2: #f8f9fa;
   --near: var(--info);
-  --mid: var(--success);
   --far: var(--far-tier);
   --border: var(--divider);
   --primary-hover: var(--primary-light);

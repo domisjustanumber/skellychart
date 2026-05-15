@@ -39,12 +39,16 @@ import {
 } from './ui/theme.js';
 import {bandLabel, distanceLabel, interpolate, paperLabel, S, sheetCountPhrase} from './ui/strings.js';
 
-const PRESET_IDS = ['near', 'mid', 'far'] as const;
+const PRESET_IDS = ['near', 'far'] as const;
+
+function normalizeWorkingDistanceId(id: string): (typeof PRESET_IDS)[number] {
+    return id === 'far' ? 'far' : 'near';
+}
 
 function initialBoard(): {paperId: string; squareMm: number; squaresX: number; squaresY: number} {
     const paperId = defaultPaperId();
     const paper = paperById(paperId) ?? PAPER_OPTIONS[0]!;
-    const plan = resolveDistancePrintPlan('mid', paperId);
+    const plan = resolveDistancePrintPlan('near', paperId);
     const squareMm =
         maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, paper.wMm, paper.hMm, plan.targetPages) ?? 54;
     return {paperId, squareMm, squaresX: plan.squaresX, squaresY: plan.squaresY};
@@ -53,7 +57,7 @@ function initialBoard(): {paperId: string; squareMm: number; squaresX: number; s
 const defaultBoard = initialBoard();
 
 interface AppState {
-    distanceId: string;
+    distanceId: (typeof PRESET_IDS)[number];
     paperId: string;
     squareMm: number;
     squaresX: number;
@@ -62,7 +66,7 @@ interface AppState {
 }
 
 const state: AppState = {
-    distanceId: 'mid',
+    distanceId: 'near',
     paperId: defaultBoard.paperId,
     squareMm: defaultBoard.squareMm,
     squaresX: defaultBoard.squaresX,
@@ -202,6 +206,7 @@ let previewGeneration = 0;
 
 function syncUi(): void {
     const t0 = perfDev() ? performance.now() : 0;
+    state.distanceId = normalizeWorkingDistanceId(state.distanceId);
     applyAutoPreset();
     const imperial = shouldUseImperialWorkingDistanceUnits();
     const pd = paperDims();
@@ -224,27 +229,21 @@ function syncUi(): void {
     byId('printScaleHint').textContent = S.printScaleHint;
 
     const frac = squareLengthTierBandEdgeFractions();
+    const pNearEnd = frac.nearFar * 100;
     const tierEl = byId('tierLabels');
     tierEl.innerHTML = '';
-    const w1 = frac.nearMid * 100;
-    const w2 = (frac.midFar - frac.nearMid) * 100;
     const s1 = document.createElement('span');
-    s1.style.width = `${w1}%`;
+    s1.style.width = `${pNearEnd}%`;
     s1.style.color = 'var(--near)';
     s1.textContent = bandLabel('near', imperial);
     const s2 = document.createElement('span');
-    s2.style.width = `${w2}%`;
-    s2.style.color = 'var(--mid)';
-    s2.textContent = bandLabel('mid', imperial);
-    const s3 = document.createElement('span');
-    s3.style.flex = '1';
-    s3.style.color = 'var(--far)';
-    s3.textContent = bandLabel('far', imperial);
-    tierEl.append(s1, s2, s3);
+    s2.style.flex = '1';
+    s2.style.color = 'var(--far)';
+    s2.textContent = bandLabel('far', imperial);
+    tierEl.append(s1, s2);
 
-    const p1 = frac.nearMid * 100;
-    const p2 = frac.midFar * 100;
-    (byId('tierBar') as HTMLDivElement).style.background = `linear-gradient(to right, var(--near) 0%, var(--near) ${p1}%, var(--mid) ${p1}%, var(--mid) ${p2}%, var(--far) ${p2}%, var(--far) 100%)`;
+    (byId('tierBar') as HTMLDivElement).style.background =
+        `linear-gradient(to right, var(--near) 0%, var(--near) ${pNearEnd}%, var(--far) ${pNearEnd}%, var(--far) 100%)`;
 
     const sqmm = byId('sqmm') as HTMLInputElement;
     sqmm.min = String(CHARUCO_SQUARE_MM_MIN);
@@ -625,7 +624,6 @@ function downloadSvgString(content: string, filename: string): void {
 function exportSvgBasenamePrefix(): string {
     const parts = [
         'skellychart',
-        state.distanceId,
         state.paperId,
         `${state.squaresX}x${state.squaresY}`,
         `${state.squareMm}mm`,
@@ -669,7 +667,7 @@ async function saveSvgFiles(): Promise<void> {
                 await delay(staggerMs);
             }
             const n = i + 1;
-            downloadSvgString(svgs[i]!, `${prefix}-sheet-${n}-of-${svgs.length}.svg`);
+            downloadSvgString(svgs[i]!, `${prefix}-${n}-of-${svgs.length}.svg`);
         }
     } catch (e) {
         showErr(e instanceof Error ? e.message : String(e));
@@ -848,7 +846,7 @@ function syncQrVersionBanner(): void {
 
 function wireUi(): void {
     (byId('distance') as HTMLSelectElement).addEventListener('change', (e) => {
-        state.distanceId = (e.target as HTMLSelectElement).value;
+        state.distanceId = normalizeWorkingDistanceId((e.target as HTMLSelectElement).value);
         state.autoGrid = true;
         syncUi();
     });

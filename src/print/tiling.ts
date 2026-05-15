@@ -38,6 +38,7 @@ function computeTilingInfoSingle(
     squareMm: number,
     paperWMm: number,
     paperHMm: number,
+    portraitQrAboveCharucoInfo: boolean,
 ): Omit<TilingInfo, 'landscape'> | null {
     const ph = paperHMm - 2 * MM_MARGIN_SHEET;
     if (ph <= 0) {
@@ -71,6 +72,7 @@ function computeTilingInfoSingle(
             squaresX,
             squaresY,
             squareLengthMm: squareMm,
+            portraitQrAboveCharucoInfo,
         });
         const phOriginPattern = ph - bannerStripMm - joinH0 - ORIGIN_CORNER_MARKER_PAD_MM;
         if (phOriginPattern <= squareMm) {
@@ -126,11 +128,11 @@ export function computeTilingInfo(
     nominalHMm: number,
 ): TilingInfo | null {
     if (Math.abs(nominalWMm - nominalHMm) < 0.01) {
-        const t = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm);
+        const t = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm, true);
         return t ? {...t, landscape: false} : null;
     }
-    const portrait = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm);
-    const landscape = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalHMm, nominalWMm);
+    const portrait = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm, true);
+    const landscape = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalHMm, nominalWMm, false);
     const scored: {
         info: Omit<TilingInfo, 'landscape'>;
         landscape: boolean;
@@ -168,18 +170,18 @@ export function computeTilingInfoMatchingPageCount(
     targetPages: number,
 ): TilingInfo | null {
     if (Math.abs(nominalWMm - nominalHMm) < 0.01) {
-        const t = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm);
+        const t = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm, true);
         if (!t || t.pageCount !== targetPages) {
             return null;
         }
         return {...t, landscape: false};
     }
     const scored: {info: Omit<TilingInfo, 'landscape'>; landscape: boolean; prod: number}[] = [];
-    const portrait = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm);
+    const portrait = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm, true);
     if (portrait && portrait.pageCount === targetPages) {
         scored.push({info: portrait, landscape: false, prod: portrait.maxCx * portrait.maxCyRest});
     }
-    const landscape = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalHMm, nominalWMm);
+    const landscape = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalHMm, nominalWMm, false);
     if (landscape && landscape.pageCount === targetPages) {
         scored.push({info: landscape, landscape: true, prod: landscape.maxCx * landscape.maxCyRest});
     }

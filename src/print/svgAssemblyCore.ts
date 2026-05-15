@@ -227,15 +227,46 @@ function svgTextBlock(
 ): string {
     const weight = bold ? ' font-weight="bold"' : '';
     const anchorAttr = anchor === 'end' ? ' text-anchor="end"' : '';
-    const parts: string[] = [];
-    let y = yStart;
-    for (const line of lines) {
-        parts.push(
-            `<text x="${x}" y="${y}" fill="#000" font-size="${font.match(/\d+/)?.[0] ?? '26'}" font-family="${FONT}"${anchorAttr}${weight} dominant-baseline="hanging">${escapeXml(line)}</text>`,
-        );
-        y += lineLead;
+    const fontPx = font.match(/\d+/)?.[0] ?? '26';
+    const tspans: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const inner = line === '' ? '&#xa0;' : escapeXml(line);
+        if (i === 0) {
+            tspans.push(`<tspan>${inner}</tspan>`);
+        } else {
+            tspans.push(`<tspan x="${x}" dy="${lineLead}">${inner}</tspan>`);
+        }
     }
-    return parts.join('');
+    return `<text x="${x}" y="${yStart}" fill="#000" font-size="${fontPx}" font-family="${FONT}"${anchorAttr}${weight} dominant-baseline="hanging">${tspans.join('')}</text>`;
+}
+
+/** One right-aligned `<text>`: bold title line + wrapped body (smaller type), like `originChartInfoParts`. */
+function svgCharucoBoardInfoBlock(
+    x: number,
+    yStart: number,
+    titleLine: string,
+    titleFontPx: number,
+    bodyLines: string[],
+    bodyFontPx: number,
+    bodyLineLead: number,
+    vGapAfterTitle: number,
+): string {
+    const titleEscaped = escapeXml(titleLine);
+    const bodyTspans: string[] = [];
+    const titleToBodyDy = titleFontPx + vGapAfterTitle;
+    for (let i = 0; i < bodyLines.length; i++) {
+        const line = bodyLines[i];
+        const inner = line === '' ? '&#xa0;' : escapeXml(line);
+        if (i === 0) {
+            bodyTspans.push(
+                `<tspan x="${x}" dy="${titleToBodyDy}" font-size="${bodyFontPx}" font-weight="normal">${inner}</tspan>`,
+            );
+        } else {
+            bodyTspans.push(`<tspan x="${x}" dy="${bodyLineLead}" font-size="${bodyFontPx}">${inner}</tspan>`);
+        }
+    }
+    return `<text x="${x}" y="${yStart}" fill="#000" font-size="${titleFontPx}" font-family="${FONT}" text-anchor="end" dominant-baseline="hanging"><tspan font-weight="bold">${titleEscaped}</tspan>${bodyTspans.join('')}</text>`;
 }
 
 function pageCoordMap(
@@ -473,19 +504,27 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
         const pageObstacles: [number, number, number, number][] = [];
 
         if (spec.isOriginPage) {
+            const portraitQrAboveCharuco = !tiling.landscape;
             const sidePad = Math.round(ORIGIN_BANNER_CONTENT_SIDE_MM * ppm);
             const topPad = Math.round(ORIGIN_BANNER_CONTENT_TOP_MM * ppm);
             const bannerLeft = marginPx + sidePad;
             const bannerRightInner = pagePxW - marginPx - sidePad;
             const qrY = marginPx + topPad;
-            const qrX = bannerRightInner - qrSizePx;
             const bannerTitleTop = qrY;
             const gapBoardQr = Math.round(ORIGIN_GAP_QR_TO_BOARD_INFO_MM * ppm);
             const gapInstBoard = Math.round(ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM * ppm);
             const gapSkellyInst = Math.round(ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM * ppm);
-            const boardInfoRight = qrX - gapBoardQr;
-            let instrLeft = bannerLeft + skellyW + (skellyW > 0 ? gapSkellyInst : 0);
+
+            const qrX = bannerRightInner - qrSizePx;
+            const qrStackY = bannerTitleTop;
+            const instrLeft = bannerLeft + skellyW + (skellyW > 0 ? gapSkellyInst : 0);
+            const boardMetaTitleY = portraitQrAboveCharuco ? bannerTitleTop + qrSizePx + gapBoardQr : bannerTitleTop;
             const minInstColPx = Math.max(1, Math.round(12 * ppm));
+
+            const boardInfoRight = portraitQrAboveCharuco ? bannerRightInner : qrX - gapBoardQr;
+            const boardColMaxW = portraitQrAboveCharuco
+                ? Math.max(1, qrSizePx)
+                : Math.max(1, boardInfoRight - instrLeft - gapInstBoard - minInstColPx);
 
             const titleFont = `bold ${titleFontPx}px ${FONT}`;
             const bodyFont = `${bodyFontPx}px ${FONT}`;
@@ -497,26 +536,31 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
                 opencv_version: OPENCV_LABEL_VERSION,
                 dictionary_name: 'DICT_4X4_250',
             });
-            parts.push(
-                `<text x="${boardInfoRight}" y="${bannerTitleTop}" fill="#000" font-size="${titleFontPx}" font-family="${FONT}" font-weight="bold" text-anchor="end" dominant-baseline="hanging">${escapeXml(boardTitle)}</text>`,
-            );
-
-            const boardColMaxW = Math.max(1, boardInfoRight - instrLeft - gapInstBoard - minInstColPx);
             const boardInfoLines = wrapText(bodyFont, boardInfoBody, boardColMaxW);
             const vGap = Math.max(4, Math.round(ppm * bScale));
-            let by = bannerTitleTop + titleFontPx + vGap;
             let infoLeft = boardInfoRight;
             const mctx = measureCtx();
+            mctx.font = titleFont;
+            infoLeft = Math.min(infoLeft, boardInfoRight - mctx.measureText(boardTitle).width);
             mctx.font = bodyFont;
             for (const line of boardInfoLines) {
                 const w = mctx.measureText(line).width;
                 infoLeft = Math.min(infoLeft, boardInfoRight - w);
-                parts.push(
-                    `<text x="${boardInfoRight}" y="${by}" fill="#000" font-size="${bodyFontPx}" font-family="${FONT}" text-anchor="end" dominant-baseline="hanging">${escapeXml(line)}</text>`,
-                );
-                by += bodyLineLead;
             }
-            const lineBoardBottom = by;
+            const lineBoardBottom =
+                boardMetaTitleY + titleFontPx + vGap + boardInfoLines.length * bodyLineLead;
+            parts.push(
+                svgCharucoBoardInfoBlock(
+                    boardInfoRight,
+                    boardMetaTitleY,
+                    boardTitle,
+                    titleFontPx,
+                    boardInfoLines,
+                    bodyFontPx,
+                    bodyLineLead,
+                    vGap,
+                ),
+            );
 
             const instructionAllowRight = infoLeft - gapInstBoard;
             if (instructionAllowRight - instrLeft < minInstColPx) {
@@ -527,7 +571,7 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
 
             if (logoSvgInner && skellyW > 0) {
                 parts.push(
-                    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" x="${bannerLeft}" y="${qrY}" width="${skellyW}" height="${skellyH}" viewBox="0 0 ${SKELLY_LOGO_VIEWBOX_W} ${SKELLY_LOGO_VIEWBOX_H}" preserveAspectRatio="xMidYMid meet" overflow="hidden">${logoSvgInner}</svg>`,
+                    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" x="${bannerLeft}" y="${bannerTitleTop}" width="${skellyW}" height="${skellyH}" viewBox="0 0 ${SKELLY_LOGO_VIEWBOX_W} ${SKELLY_LOGO_VIEWBOX_H}" preserveAspectRatio="xMidYMid meet" overflow="hidden">${logoSvgInner}</svg>`,
                 );
             }
 
@@ -549,12 +593,13 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
             const instBottom = bodyY + instLines.length * bodyLineLead;
 
             parts.push(
-                `<svg x="${qrX}" y="${bannerTitleTop}" width="${qrSizePx}" height="${qrSizePx}" overflow="hidden">${qrSvgFragment}</svg>`,
+                `<svg x="${qrX}" y="${qrStackY}" width="${qrSizePx}" height="${qrSizePx}" overflow="hidden">${qrSvgFragment}</svg>`,
             );
 
-            const skellyBottomExtra = skellyW > 0 ? qrY + skellyH : qrY;
+            const qrBottom = qrStackY + qrSizePx;
+            const skellyBottomExtra = skellyW > 0 ? bannerTitleTop + skellyH : bannerTitleTop;
             const bannerBottom =
-                Math.max(lineBoardBottom, instBottom, qrY + qrSizePx, skellyBottomExtra) +
+                Math.max(lineBoardBottom, instBottom, qrBottom, skellyBottomExtra) +
                 Math.round(MM_ORIGIN_BANNER_BELOW_GAP_MM * ppm);
             bannerBottomPx = bannerBottom;
             const bannerMaxPx = marginPx + originTopReservePx + Math.max(2, layoutIntPx(2 * ppm));
@@ -564,10 +609,11 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
                 );
             }
             const padB = Math.max(2, Math.floor(ppm / 4));
+            const obstacleRight = qrX + qrSizePx + padB;
             pageObstacles.push([
                 bannerLeft - padB,
                 bannerTitleTop - padB,
-                qrX + qrSizePx + padB,
+                obstacleRight,
                 bannerBottom + padB,
             ]);
         }

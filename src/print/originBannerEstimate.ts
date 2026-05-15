@@ -85,6 +85,11 @@ export interface OriginBannerStripEstimateParams {
     squareLengthMm: number;
     /** Pixels per mm — must match PDF rasterization (`PIXELS_PER_MM`). */
     ppm?: number;
+    /**
+     * Physical portrait sheets: QR sits above the ChaRuCo metadata block (still top-right).
+     * Landscape keeps the QR on the same row as the metadata title.
+     */
+    portraitQrAboveCharucoInfo?: boolean;
 }
 
 /**
@@ -107,32 +112,33 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
     const bannerRightInner = pagePxW - marginPx - sidePad;
     const qrY = marginPx + topPad;
     const qrWidthPx = Math.max(32, Math.round(QR_SIZE_MM * ppm));
-    const qrX = bannerRightInner - qrWidthPx;
     const bannerTitleTop = qrY;
     const gapBoardQr = Math.round(ORIGIN_GAP_QR_TO_BOARD_INFO_MM * ppm);
     const gapInstBoard = Math.round(ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM * ppm);
     const gapSkellyInst = Math.round(ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM * ppm);
-    const boardInfoRight = qrX - gapBoardQr;
 
     const nh = Math.max(1, Math.round(SKELLY_TOP_HEIGHT_MM * ppm));
     const skellyW = Math.max(1, Math.round(SKELLY_LOGO_NATURAL_W_OVER_H * nh));
     const skellyH = nh;
 
+    const portraitQrAbove = params.portraitQrAboveCharucoInfo === true;
+    const qrX = bannerRightInner - qrWidthPx;
+    const qrStackY = bannerTitleTop;
     const instrLeft = bannerLeft + skellyW + (skellyW > 0 ? gapSkellyInst : 0);
+    const boardMetaTitleY = portraitQrAbove ? bannerTitleTop + qrWidthPx + gapBoardQr : bannerTitleTop;
     const minInstColPx = Math.max(1, Math.round(12 * ppm));
+
+    const boardInfoRight = portraitQrAbove ? bannerRightInner : qrX - gapBoardQr;
+    const boardColMaxW = portraitQrAbove
+        ? Math.max(1, qrWidthPx)
+        : Math.max(1, boardInfoRight - instrLeft - gapInstBoard - minInstColPx);
 
     const bScale = ORIGIN_BANNER_VISUAL_SCALE;
     const titleFontPx = Math.round(24 * (ppm / 12) * bScale);
     const bodyFontPx = Math.round(26 * (ppm / 12) * bScale);
     const bodyLineLead = bodyFontPx + Math.max(4, Math.round(0.52 * ppm * bScale));
 
-    ctx.font = `bold ${titleFontPx}px system-ui, Segoe UI, sans-serif`;
-
-    const boardColMaxW = Math.max(
-        1,
-        boardInfoRight - instrLeft - gapInstBoard - minInstColPx,
-    );
-    const {bodyBlock: boardInfoBody} = originChartInfoParts({
+    const {titleLine: boardTitle, bodyBlock: boardInfoBody} = originChartInfoParts({
         version: CHARUCO_PRINT_LABEL_SPEC_VERSION,
         mm: params.squareLengthMm,
         squaresX: params.squaresX,
@@ -144,8 +150,10 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
     ctx.font = `${bodyFontPx}px system-ui, Segoe UI, sans-serif`;
     const boardInfoLines = wrapText(ctx, boardInfoBody, boardColMaxW);
     const vGap = Math.max(4, Math.round(ppm * bScale));
-    let by = bannerTitleTop + titleFontPx + vGap;
-    let infoLeft = boardInfoRight;
+    let by = boardMetaTitleY + titleFontPx + vGap;
+    ctx.font = `bold ${titleFontPx}px system-ui, Segoe UI, sans-serif`;
+    let infoLeft = boardInfoRight - ctx.measureText(boardTitle).width;
+    ctx.font = `${bodyFontPx}px system-ui, Segoe UI, sans-serif`;
     for (const line of boardInfoLines) {
         const w = ctx.measureText(line).width;
         infoLeft = Math.min(infoLeft, boardInfoRight - w);
@@ -171,8 +179,8 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
     }
     const instBottom = iy;
 
+    const qrBottom = qrStackY + qrWidthPx;
     const skellyBottomExtra = skellyW > 0 ? qrY + skellyH : qrY;
-    const qrBottom = qrY + qrWidthPx;
 
     const bannerBottomPx =
         Math.max(lineBoardBottom, instBottom, qrBottom, skellyBottomExtra) +

@@ -17,7 +17,6 @@ export const pdfLabels = {
 Measure a black square with a ruler to ensure the printed size matches the "Square length" in the chart to the right.
 Curvature will affect camera calibration — mount the chart flat on a rigid board so it cannot bend or flop.
 Multi-sheet charts: cut along the dotted seam lines (remove the dashed line entirely), then assemble the chart on a rigid board.
-
 For instructions on how to use the chart, buy a pre-made one, or print another, scan the QR code in the top corner.`,
     /**
      * Single multi-line block for ChaRuCo metadata beside the QR code. First line is rendered bold;

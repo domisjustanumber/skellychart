@@ -8,6 +8,8 @@ import {
     MM_ORIGIN_BANNER_BELOW_GAP_MM,
     ORIGIN_BANNER_CONTENT_SIDE_MM,
     ORIGIN_BANNER_CONTENT_TOP_MM,
+    ORIGIN_BANNER_STRIP_FALLBACK_NO_CANVAS_LANDSCAPE_MM,
+    ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM,
     ORIGIN_BANNER_VISUAL_SCALE,
     ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM,
     ORIGIN_GAP_QR_TO_BOARD_INFO_MM,
@@ -86,22 +88,26 @@ export interface OriginBannerStripEstimateParams {
     /** Pixels per mm — must match PDF rasterization (`PIXELS_PER_MM`). */
     ppm?: number;
     /**
-     * Physical portrait sheets: QR sits above the ChaRuCo metadata block (still top-right).
-     * Landscape keeps the QR on the same row as the metadata title.
+     * Distinguishes portrait- vs landscape-shaped sheets only for **no-canvas** and insufficient-width
+     * fallbacks (slab constants). Layout matches `svgAssemblyCore`: one top-aligned banner row on both.
      */
     portraitQrAboveCharucoInfo?: boolean;
 }
 
 /**
  * Millimetres from the **top of the printable area** (below the sheet margin) down through the
- * banner block and {@link MM_ORIGIN_BANNER_BELOW_GAP_MM}, matching `pdfDocument.ts` placement.
- * Falls back to {@link ORIGIN_PAGE_EXTRA_MM} when canvas measurement is unavailable.
+ * banner block and {@link MM_ORIGIN_BANNER_BELOW_GAP_MM}, matching `svgAssemblyCore` placement.
+ * Without a canvas (Node / feasibility codegen), uses {@link ORIGIN_PAGE_EXTRA_MM} when the sheet
+ * is portrait-shaped vs {@link ORIGIN_BANNER_STRIP_FALLBACK_NO_CANVAS_LANDSCAPE_MM} when landscape-shaped —
+ * **not** a single 77 mm slab for both, or landscape tiling max square length is far too small.
  */
 export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBannerStripEstimateParams): number {
     const ppm = params.ppm ?? PIXELS_PER_MM;
     const ctx = getScratchContext(params.paperWMm * ppm);
     if (!ctx) {
-        return ORIGIN_PAGE_EXTRA_MM;
+        return params.portraitQrAboveCharucoInfo === true
+            ? ORIGIN_PAGE_EXTRA_MM
+            : ORIGIN_BANNER_STRIP_FALLBACK_NO_CANVAS_LANDSCAPE_MM;
     }
 
     const pagePxW = Math.max(1, Math.round(params.paperWMm * ppm));
@@ -113,6 +119,8 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
     const qrY = marginPx + topPad;
     const qrWidthPx = Math.max(32, Math.round(QR_SIZE_MM * ppm));
     const bannerTitleTop = qrY;
+    const bannerTextTop =
+        bannerTitleTop + Math.round(ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM * ppm);
     const gapBoardQr = Math.round(ORIGIN_GAP_QR_TO_BOARD_INFO_MM * ppm);
     const gapInstBoard = Math.round(ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM * ppm);
     const gapSkellyInst = Math.round(ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM * ppm);
@@ -121,17 +129,14 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
     const skellyW = Math.max(1, Math.round(SKELLY_LOGO_NATURAL_W_OVER_H * nh));
     const skellyH = nh;
 
-    const portraitQrAbove = params.portraitQrAboveCharucoInfo === true;
     const qrX = bannerRightInner - qrWidthPx;
     const qrStackY = bannerTitleTop;
     const instrLeft = bannerLeft + skellyW + (skellyW > 0 ? gapSkellyInst : 0);
-    const boardMetaTitleY = portraitQrAbove ? bannerTitleTop + qrWidthPx + gapBoardQr : bannerTitleTop;
+    const boardMetaTitleY = bannerTextTop;
     const minInstColPx = Math.max(1, Math.round(12 * ppm));
 
-    const boardInfoRight = portraitQrAbove ? bannerRightInner : qrX - gapBoardQr;
-    const boardColMaxW = portraitQrAbove
-        ? Math.max(1, qrWidthPx)
-        : Math.max(1, boardInfoRight - instrLeft - gapInstBoard - minInstColPx);
+    const boardInfoRight = qrX - gapBoardQr;
+    const boardColMaxW = Math.max(1, boardInfoRight - instrLeft - gapInstBoard - minInstColPx);
 
     const bScale = ORIGIN_BANNER_VISUAL_SCALE;
     const titleFontPx = Math.round(24 * (ppm / 12) * bScale);
@@ -164,12 +169,14 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
     ctx.textAlign = 'left';
     const instructionAllowRight = infoLeft - gapInstBoard;
     if (instructionAllowRight - instrLeft < minInstColPx) {
-        return ORIGIN_PAGE_EXTRA_MM;
+        return params.portraitQrAboveCharucoInfo === true
+            ? ORIGIN_PAGE_EXTRA_MM
+            : ORIGIN_BANNER_STRIP_FALLBACK_NO_CANVAS_LANDSCAPE_MM;
     }
 
     ctx.font = `bold ${titleFontPx}px system-ui, Segoe UI, sans-serif`;
     const titleBB = titleFontPx;
-    const bodyY = bannerTitleTop + titleBB + vGap;
+    const bodyY = bannerTextTop + titleBB + vGap;
     ctx.font = `${bodyFontPx}px system-ui, Segoe UI, sans-serif`;
     const colW = instructionAllowRight - instrLeft;
     const instLines = wrapText(ctx, pdfLabels.originInstructionsBody, colW);
@@ -180,7 +187,7 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
     const instBottom = iy;
 
     const qrBottom = qrStackY + qrWidthPx;
-    const skellyBottomExtra = skellyW > 0 ? qrY + skellyH : qrY;
+    const skellyBottomExtra = skellyW > 0 ? bannerTitleTop + skellyH : bannerTitleTop;
 
     const bannerBottomPx =
         Math.max(lineBoardBottom, instBottom, qrBottom, skellyBottomExtra) +

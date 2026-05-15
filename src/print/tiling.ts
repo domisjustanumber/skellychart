@@ -120,6 +120,21 @@ function computeTilingInfoSingle(
     };
 }
 
+/**
+ * When page count and per-sheet tile-area score (`maxCx * maxCyRest`) tie, prefer sheet orientation
+ * that matches grid aspect: wider boards (sx > sy) favor landscape paper; taller boards favor portrait.
+ * Square boards keep portrait (matches historical default).
+ */
+export function paperOrientationPreferenceTieBreak(squaresX: number, squaresY: number, landscape: boolean): number {
+    if (squaresX === squaresY) {
+        return landscape ? 1 : 0;
+    }
+    if (squaresX > squaresY) {
+        return landscape ? 0 : 1;
+    }
+    return landscape ? 1 : 0;
+}
+
 export function computeTilingInfo(
     squaresX: number,
     squaresY: number,
@@ -140,11 +155,19 @@ export function computeTilingInfo(
     }[] = [];
     if (portrait) {
         const prod = portrait.maxCx * portrait.maxCyRest;
-        scored.push({info: portrait, landscape: false, key: [portrait.pageCount, -prod, 0]});
+        scored.push({
+            info: portrait,
+            landscape: false,
+            key: [portrait.pageCount, -prod, paperOrientationPreferenceTieBreak(squaresX, squaresY, false)],
+        });
     }
     if (landscape) {
         const prod = landscape.maxCx * landscape.maxCyRest;
-        scored.push({info: landscape, landscape: true, key: [landscape.pageCount, -prod, 1]});
+        scored.push({
+            info: landscape,
+            landscape: true,
+            key: [landscape.pageCount, -prod, paperOrientationPreferenceTieBreak(squaresX, squaresY, true)],
+        });
     }
     if (scored.length === 0) {
         return null;
@@ -192,7 +215,10 @@ export function computeTilingInfoMatchingPageCount(
         if (b.prod !== a.prod) {
             return b.prod - a.prod;
         }
-        return (a.landscape ? 1 : 0) - (b.landscape ? 1 : 0);
+        return (
+            paperOrientationPreferenceTieBreak(squaresX, squaresY, a.landscape) -
+            paperOrientationPreferenceTieBreak(squaresX, squaresY, b.landscape)
+        );
     });
     const best = scored[0]!;
     return {...best.info, landscape: best.landscape};

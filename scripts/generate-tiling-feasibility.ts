@@ -1,7 +1,8 @@
 /**
  * Emits one feasibility blob per paper preset (four parallel `tsx` subprocesses).
  *
- * Node uses the no-canvas banner fallback — tables match that tiling path.
+ * Node has no canvas — banner strip uses {@link ORIGIN_PAGE_EXTRA_MM} (portrait layout) or
+ * {@link ORIGIN_BANNER_STRIP_FALLBACK_NO_CANVAS_LANDSCAPE_MM} (landscape layout), not a single 77 mm slab for both.
  *
  * Keep paper ids and mm dimensions aligned with `PAPER_OPTIONS` in charucoLayout.ts.
  */

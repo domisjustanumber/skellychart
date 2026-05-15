@@ -337,7 +337,7 @@ function syncUi(options: SyncUiOptions = {}): void {
     const pCloseEnd = frac.closeNear * 100;
     const pNearEnd = frac.nearFar * 100;
     const tierBandKey = `${imperial}:${pCloseEnd}:${pNearEnd}`;
-    const tierBar = byId('tierBar') as HTMLDivElement;
+    const sliderStack = byId('squareMmSliderStack') as HTMLDivElement;
     if (tierBandKey !== syncedTierBandKey) {
         syncedTierBandKey = tierBandKey;
         const tierEl = byId('tierLabels');
@@ -355,8 +355,8 @@ function syncUi(options: SyncUiOptions = {}): void {
         s3.style.color = 'var(--far)';
         s3.textContent = bandLabel('far', imperial);
         tierEl.append(s1, s2, s3);
-        tierBar.style.background =
-            `linear-gradient(to right, var(--close) 0%, var(--close) ${pCloseEnd}%, var(--near) ${pCloseEnd}%, var(--near) ${pNearEnd}%, var(--far) ${pNearEnd}%, var(--far) 100%)`;
+        sliderStack.style.setProperty('--tier-p-close-end', `${pCloseEnd}%`);
+        sliderStack.style.setProperty('--tier-p-near-end', `${pNearEnd}%`);
     }
 
     const sqmm = byId('sqmm') as HTMLInputElement;

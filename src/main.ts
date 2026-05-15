@@ -215,7 +215,8 @@ function syncUi(): void {
     byId('lbl-sy').textContent = interpolate(S.squaresInY, {n: state.squaresY});
     byId('preview-title').textContent = S.previewTitle;
     byId('lbl-fullchart').textContent = S.fullChart;
-    (byId('btnPdf') as HTMLButtonElement).textContent = S.downloadSvg;
+    (byId('btnPdf') as HTMLButtonElement).textContent = S.printCharts;
+    byId('printScaleHint').textContent = S.printScaleHint;
 
     const frac = squareLengthTierBandEdgeFractions();
     const tierEl = byId('tierLabels');
@@ -591,7 +592,63 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     }
 }
 
-async function downloadSvg(): Promise<void> {
+function stripXmlDeclaration(svg: string): string {
+    return svg.replace(/^\s*<\?xml[\s\S]*?\?>\s*/i, '').trimStart();
+}
+
+function printHtmlDocumentInHiddenIframe(html: string): void {
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.title = 'Print';
+    Object.assign(iframe.style, {
+        position: 'fixed',
+        right: '0',
+        bottom: '0',
+        width: '0',
+        height: '0',
+        border: '0',
+        visibility: 'hidden',
+    });
+    document.body.appendChild(iframe);
+
+    const printWin = iframe.contentWindow;
+    const printDoc = iframe.contentDocument;
+    if (!printWin || !printDoc) {
+        iframe.remove();
+        showErr(S.printInitFailed);
+        return;
+    }
+
+    printDoc.open();
+    printDoc.write(html);
+    printDoc.close();
+
+    let fallbackCleanup: number | undefined;
+    const tearDown = (): void => {
+        if (fallbackCleanup !== undefined) {
+            window.clearTimeout(fallbackCleanup);
+            fallbackCleanup = undefined;
+        }
+        if (iframe.isConnected) {
+            iframe.remove();
+        }
+    };
+
+    const invokePrint = (): void => {
+        printWin.addEventListener('afterprint', tearDown, {once: true});
+        fallbackCleanup = window.setTimeout(tearDown, 120_000);
+        printWin.focus();
+        printWin.print();
+    };
+
+    if (printDoc.readyState === 'complete') {
+        queueMicrotask(invokePrint);
+    } else {
+        printWin.addEventListener('load', () => queueMicrotask(invokePrint), {once: true});
+    }
+}
+
+async function openPrintDialog(): Promise<void> {
     showErr(null);
     const tiling = effectiveTiling();
     if (!tiling) {
@@ -599,13 +656,12 @@ async function downloadSvg(): Promise<void> {
         return;
     }
     const btnPdf = byId('btnPdf') as HTMLButtonElement;
-    const downloadLabel = S.downloadSvg;
+    const idleLabel = S.printCharts;
     btnPdf.disabled = true;
     btnPdf.classList.add('btn--busy');
-    btnPdf.textContent = S.generatingSvg;
+    btnPdf.textContent = S.preparingPrint;
     await yieldToMain();
 
-    const baseStem = `charuco_${state.squaresX}x${state.squaresY}_${state.paperId}`;
     const pd = paperDims();
     const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
     const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
@@ -621,22 +677,28 @@ async function downloadSvg(): Promise<void> {
             pages,
             cooperativeYield: false,
         });
-        for (let i = 0; i < svgs.length; i++) {
-            const blob = new Blob([svgs[i]!], {type: 'image/svg+xml;charset=utf-8'});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `${baseStem}_page${i + 1}.svg`;
-            a.click();
-            URL.revokeObjectURL(url);
-            await yieldToMain();
-        }
+        const sheetsHtml = svgs
+            .map((svg) => `<div class="sheet">${stripXmlDeclaration(svg)}</div>`)
+            .join('');
+        const html =
+            `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>` +
+            `<title>Charuco print</title><style>` +
+            `@page{size:${paperWMm}mm ${paperHMm}mm;margin:0}` +
+            `*{box-sizing:border-box}` +
+            `html,body{margin:0;padding:0}` +
+            `.sheet{width:${paperWMm}mm;height:${paperHMm}mm;margin:0;` +
+            `page-break-after:always;break-after:page;overflow:hidden}` +
+            `.sheet:last-child{page-break-after:auto;break-after:auto}` +
+            `.sheet>svg{display:block;width:${paperWMm}mm;height:${paperHMm}mm}` +
+            `</style></head><body>${sheetsHtml}</body></html>`;
+
+        printHtmlDocumentInHiddenIframe(html);
     } catch (e) {
         showErr(e instanceof Error ? e.message : String(e));
     }
 
     btnPdf.classList.remove('btn--busy');
-    btnPdf.textContent = downloadLabel;
+    btnPdf.textContent = idleLabel;
     const t = effectiveTiling();
     btnPdf.disabled = !t || t.pageCount < 1;
 }
@@ -691,7 +753,7 @@ function wireUi(): void {
         syncUi();
     });
 
-    byId('btnPdf').addEventListener('click', () => void downloadSvg());
+    byId('btnPdf').addEventListener('click', () => void openPrintDialog());
 
     const themeGroup = byId('themeToggle');
     for (const btn of themeGroup.querySelectorAll<HTMLButtonElement>('[data-theme-pick]')) {

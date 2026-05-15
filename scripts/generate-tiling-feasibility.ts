@@ -1,17 +1,31 @@
 /**
- * Emits one feasibility blob per {@link PAPER_OPTIONS} preset (see `src/print/charucoLayout.ts`).
+ * Emits one feasibility blob per paper preset (four parallel `tsx` subprocesses).
  *
  * Node uses the no-canvas banner fallback — tables match that tiling path.
  *
  * Keep paper ids and mm dimensions aligned with `PAPER_OPTIONS` in charucoLayout.ts.
  */
+import {spawn} from 'node:child_process';
 import {mkdirSync, unlinkSync, writeFileSync} from 'node:fs';
-import {fileURLToPath} from 'node:url';
 import {dirname, join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 
-import {computeTilingInfo, computeTilingInfoMatchingPageCount} from '../src/print/tiling.ts';
+import {
+    BOARD_GRID_MAX,
+    BOARD_GRID_MIN,
+    GRID_SPAN,
+    PAGE_COUNT_MAX,
+    PAGE_COUNT_MIN,
+    SLOT_COUNT_PER_PAPER,
+    SQ_BITMAP_BYTES,
+    SQ_MAX,
+    SQ_MIN,
+} from './feasibilityCompute.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const repoRoot = join(__dirname, '..');
+const tsxCli = join(repoRoot, 'node_modules/tsx/dist/cli.mjs');
+const onePaperScript = join(__dirname, 'generate-tiling-feasibility-one-paper.ts');
 
 const PAPER_OPTIONS: {id: string; wMm: number; hMm: number}[] = [
     {id: 'a4', wMm: 210, hMm: 297},
@@ -20,105 +34,7 @@ const PAPER_OPTIONS: {id: string; wMm: number; hMm: number}[] = [
     {id: 'tabloid', wMm: 279.4, hMm: 431.8},
 ];
 
-const BOARD_GRID_MIN = 2;
-const BOARD_GRID_MAX = 40;
-const PAGE_COUNT_MIN = 1;
-const PAGE_COUNT_MAX = 9;
-const SQ_MIN = 10;
-const SQ_MAX = 200;
-
-const GRID_SPAN = BOARD_GRID_MAX - BOARD_GRID_MIN + 1;
-const SLOT_COUNT_PER_PAPER = GRID_SPAN * GRID_SPAN;
-const SQ_BITMAP_BYTES = Math.ceil((SQ_MAX - SQ_MIN + 1) / 8);
-
-function gridSlotIndex(squaresX: number, squaresY: number): number {
-    return (squaresX - BOARD_GRID_MIN) * GRID_SPAN + (squaresY - BOARD_GRID_MIN);
-}
-
-function encodeMmListToBitmap(mmList: number[], dst: Uint8Array, byteOffset: number): void {
-    dst.fill(0, byteOffset, byteOffset + SQ_BITMAP_BYTES);
-    for (const mm of mmList) {
-        const bit = mm - SQ_MIN;
-        dst[byteOffset + (bit >> 3)]! |= 1 << (bit & 7);
-    }
-}
-
-function toBase64(u8: Uint8Array): string {
-    return Buffer.from(u8.buffer, u8.byteOffset, u8.byteLength).toString('base64');
-}
-
-function squareSizeFitsTargetPageCountEitherOrientation(
-    squaresX: number,
-    squaresY: number,
-    squareMm: number,
-    paperWMm: number,
-    paperHMm: number,
-    targetPages: number,
-): boolean {
-    if (computeTilingInfoMatchingPageCount(squaresX, squaresY, squareMm, paperWMm, paperHMm, targetPages) !== null) {
-        return true;
-    }
-    if (squaresX !== squaresY) {
-        return (
-            computeTilingInfoMatchingPageCount(squaresY, squaresX, squareMm, paperWMm, paperHMm, targetPages) !== null
-        );
-    }
-    return false;
-}
-
-function maxSquareMmForGridAndPages(
-    squaresX: number,
-    squaresY: number,
-    paperWMm: number,
-    paperHMm: number,
-    targetPages: number,
-): number | null {
-    for (let s = SQ_MAX; s >= SQ_MIN; s--) {
-        if (squareSizeFitsTargetPageCountEitherOrientation(squaresX, squaresY, s, paperWMm, paperHMm, targetPages)) {
-            return s;
-        }
-    }
-    return null;
-}
-
-function validTargetPageCountsForGrid(
-    squaresX: number,
-    squaresY: number,
-    paperWMm: number,
-    paperHMm: number,
-): number[] {
-    const out: number[] = [];
-    for (let p = PAGE_COUNT_MIN; p <= PAGE_COUNT_MAX; p++) {
-        let any = false;
-        for (let s = SQ_MIN; s <= SQ_MAX; s++) {
-            if (squareSizeFitsTargetPageCountEitherOrientation(squaresX, squaresY, s, paperWMm, paperHMm, p)) {
-                any = true;
-                break;
-            }
-        }
-        if (any) {
-            out.push(p);
-        }
-    }
-    return out;
-}
-
-function enumerateValidSquareSizes(
-    squaresX: number,
-    squaresY: number,
-    paperWMm: number,
-    paperHMm: number,
-): number[] {
-    const out = new Set<number>();
-    for (let s = SQ_MIN; s <= SQ_MAX; s++) {
-        if (computeTilingInfo(squaresX, squaresY, s, paperWMm, paperHMm) !== null) {
-            out.add(s);
-        } else if (squaresX !== squaresY && computeTilingInfo(squaresY, squaresX, s, paperWMm, paperHMm) !== null) {
-            out.add(s);
-        }
-    }
-    return [...out].sort((a, b) => a - b);
-}
+type PaperGenResult = {paperId: string; b64ValidPages: string; b64MaxSq: string; b64AnySq: string};
 
 function emitConstants(outDir: string): void {
     const rowsJson = JSON.stringify(PAPER_OPTIONS.map((p) => ({id: p.id, wMm: p.wMm, hMm: p.hMm})));
@@ -176,8 +92,37 @@ export const ANY_SQ_BITMAP = decodeBytesFromBase64(${JSON.stringify(b64AnySq)});
     writeFileSync(join(outDir, `tilingFeasibilityPaper-${paperId}.ts`), body, 'utf8');
 }
 
-function main(): void {
-    const outDir = join(__dirname, '..', 'src', 'print', 'generated');
+function runPaperSubprocess(paper: {id: string; wMm: number; hMm: number}): Promise<PaperGenResult> {
+    return new Promise((resolve, reject) => {
+        const proc = spawn(process.execPath, [tsxCli, onePaperScript, JSON.stringify(paper)], {
+            cwd: repoRoot,
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout?.on('data', (chunk: Buffer) => {
+            stdout += chunk.toString('utf8');
+        });
+        proc.stderr?.on('data', (chunk: Buffer) => {
+            stderr += chunk.toString('utf8');
+        });
+        proc.on('error', reject);
+        proc.on('close', (code) => {
+            if (code !== 0) {
+                reject(new Error(`paper ${paper.id}: subprocess exited ${code}${stderr ? `\n${stderr}` : ''}`));
+                return;
+            }
+            try {
+                resolve(JSON.parse(stdout.trim()) as PaperGenResult);
+            } catch (err) {
+                reject(new Error(`paper ${paper.id}: invalid JSON stdout (${String(err)})`));
+            }
+        });
+    });
+}
+
+async function main(): Promise<void> {
+    const outDir = join(repoRoot, 'src', 'print', 'generated');
     mkdirSync(outDir, {recursive: true});
 
     const legacyMonolith = join(outDir, 'tilingFeasibilityTables.ts');
@@ -188,45 +133,16 @@ function main(): void {
     }
 
     emitConstants(outDir);
+    console.warn('Wrote tilingFeasibilityConstants.ts');
 
-    for (const paper of PAPER_OPTIONS) {
-        const {id, wMm, hMm} = paper;
-        const validPagesBits = new Uint16Array(SLOT_COUNT_PER_PAPER);
-        const maxSqMmPacked = new Int8Array(SLOT_COUNT_PER_PAPER * 9);
-        const anySqBitmap = new Uint8Array(SLOT_COUNT_PER_PAPER * SQ_BITMAP_BYTES);
-
-        for (let sx = BOARD_GRID_MIN; sx <= BOARD_GRID_MAX; sx++) {
-            for (let sy = BOARD_GRID_MIN; sy <= BOARD_GRID_MAX; sy++) {
-                const slot = gridSlotIndex(sx, sy);
-
-                const targets = validTargetPageCountsForGrid(sx, sy, wMm, hMm);
-                let bits = 0;
-                for (const p of targets) {
-                    bits |= 1 << (p - 1);
-                }
-                validPagesBits[slot] = bits;
-
-                const squaresAny = enumerateValidSquareSizes(sx, sy, wMm, hMm);
-                encodeMmListToBitmap(squaresAny, anySqBitmap, slot * SQ_BITMAP_BYTES);
-
-                for (let p = PAGE_COUNT_MIN; p <= PAGE_COUNT_MAX; p++) {
-                    const maxSq = maxSquareMmForGridAndPages(sx, sy, wMm, hMm, p);
-                    maxSqMmPacked[slot * 9 + (p - 1)] = maxSq === null ? -1 : maxSq;
-                }
-            }
-        }
-
-        emitPaperFile(
-            outDir,
-            id,
-            toBase64(new Uint8Array(validPagesBits.buffer)),
-            toBase64(new Uint8Array(maxSqMmPacked.buffer)),
-            toBase64(anySqBitmap),
-        );
-        console.warn(`Wrote tilingFeasibilityPaper-${id}.ts`);
+    const results = await Promise.all(PAPER_OPTIONS.map((paper) => runPaperSubprocess(paper)));
+    for (const r of results) {
+        emitPaperFile(outDir, r.paperId, r.b64ValidPages, r.b64MaxSq, r.b64AnySq);
+        console.warn(`Wrote tilingFeasibilityPaper-${r.paperId}.ts`);
     }
-
-    console.warn(`Wrote tilingFeasibilityConstants.ts`);
 }
 
-main();
+main().catch((err) => {
+    console.error(err);
+    process.exitCode = 1;
+});

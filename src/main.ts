@@ -12,7 +12,7 @@ import {
     paperById,
     charucoPagePreviewBorderColor,
     computeCharucoPagePreviewRects,
-    computeEffectiveTiling,
+    computeEffectivePrintLayout,
     defaultPaperId,
     layoutSummaryText,
     maxSquareMmForGridAndPages,
@@ -24,11 +24,17 @@ import {
     validTargetPageCountsForGrid,
     workingDistanceTierFromSquareLengthMm,
 } from './print/charucoLayout.js';
+import {ensureTilingFeasibilityForPaperId} from './print/tilingFeasibilityTables.js';
 import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from './print/tiling.js';
 import {perfDev, perfLog} from './print/perfDebug.js';
 import {CHARUCO_MARKER_LENGTH_RATIO, CHARUCO_PRINT_LABEL_SPEC_VERSION} from './print/constants.js';
 import {expectedCharucoCv2QueryValue, parseCharucoQrSearchParams} from './print/charucoDocUrl.js';
-import {MAX_PREVIEW_PAGES, PREVIEW_DEBOUNCE_MS, svgToDataUrl} from './ui/previewSvg.js';
+import {
+    MAX_PREVIEW_PAGES,
+    PREVIEW_DEBOUNCE_IDLE_MS,
+    PREVIEW_DEBOUNCE_INTERACTIVE_MS,
+    svgToDataUrl,
+} from './ui/previewSvg.js';
 import {yieldToMain} from './ui/yieldToMain.js';
 import {
     applyThemePreference,
@@ -164,9 +170,9 @@ function applyAutoPreset(): void {
     }
 }
 
-function effectiveTiling() {
+function effectivePrintLayout() {
     const pd = paperDims();
-    return computeEffectiveTiling(
+    return computeEffectivePrintLayout(
         state.squaresX,
         state.squaresY,
         state.squareMm,
@@ -175,6 +181,17 @@ function effectiveTiling() {
         state.autoGrid,
         autoPlan().targetPages,
     );
+}
+
+function effectiveTiling() {
+    return effectivePrintLayout()?.tiling ?? null;
+}
+
+/** Grid dimensions passed to {@link buildPageSpecs} / {@link renderCharucoPrintSvg} when the pattern is transposed for tiling. */
+function printSquareDims(patternRotated90: boolean): {squaresX: number; squaresY: number} {
+    return patternRotated90
+        ? {squaresX: state.squaresY, squaresY: state.squaresX}
+        : {squaresX: state.squaresX, squaresY: state.squaresY};
 }
 
 function pagesSliderDisplay(tiling: ReturnType<typeof effectiveTiling>): number {
@@ -232,6 +249,21 @@ let syncedPaperSelectKey = '';
 let suppressDistanceSelectUiClamp = false;
 /** Square-length band labels + gradient only depend on locale (imperial vs m) and tier constants. */
 let syncedTierBandKey = '';
+/** While true, previews use a shorter debounce; range `pointerdown`/`pointerup` maintain this. */
+let rangePointerHeld = false;
+/** Last preview timer delay chosen (for perf logging). */
+let lastScheduledPreviewDelayMs = PREVIEW_DEBOUNCE_IDLE_MS;
+
+type SyncUiOptions = {
+    /**
+     * When true, skips static chrome (titles, intros, unmoving labels) so slider drags do less DOM work per frame.
+     */
+    lite?: boolean;
+    /**
+     * When set, overrides automatic interactive vs idle debounce for the preview scheduling at the end of this sync.
+     */
+    previewDelayMs?: number;
+};
 
 /**
  * Batches slider-driven DOM updates into the next animation frame so the UI thread can paint spinners,
@@ -243,11 +275,34 @@ function scheduleSyncUi(): void {
     }
     syncUiRafId = window.requestAnimationFrame(() => {
         syncUiRafId = null;
-        syncUi();
+        syncUi({lite: true});
     });
 }
 
-function syncUi(): void {
+function finalizeRangeGestureUi(): void {
+    rangePointerHeld = false;
+    if (syncUiRafId !== null) {
+        window.cancelAnimationFrame(syncUiRafId);
+        syncUiRafId = null;
+    }
+    syncUi({lite: false, previewDelayMs: 0});
+}
+
+function wireRangeResponsiveUi(el: HTMLInputElement): void {
+    el.addEventListener('pointerdown', () => {
+        rangePointerHeld = true;
+    });
+}
+
+function finalizeRangeGestureIfNeeded(): void {
+    if (!rangePointerHeld) {
+        return;
+    }
+    finalizeRangeGestureUi();
+}
+
+function syncUi(options: SyncUiOptions = {}): void {
+    const {lite = false, previewDelayMs} = options;
     const t0 = perfDev() ? performance.now() : 0;
     if (syncUiRafId !== null) {
         window.cancelAnimationFrame(syncUiRafId);
@@ -259,20 +314,24 @@ function syncUi(): void {
     const pd = paperDims();
     const tiling = effectiveTiling();
 
-    byId('pageTitle').textContent = S.title;
-    byId('intro').textContent = S.intro;
-    byId('lbl-distance').textContent = S.workingDistance;
-    byId('lbl-paper').textContent = S.paperSize;
-    byId('lbl-advanced').textContent = S.advanced;
+    if (!lite) {
+        byId('pageTitle').textContent = S.title;
+        byId('intro').textContent = S.intro;
+        byId('lbl-distance').textContent = S.workingDistance;
+        byId('lbl-paper').textContent = S.paperSize;
+        byId('lbl-advanced').textContent = S.advanced;
+    }
     byId('lbl-square').textContent = interpolate(S.squareLengthHeading, {mm: state.squareMm});
     byId('lbl-pages').textContent = interpolate(S.numberOfPages, {n: pagesSliderDisplay(tiling)});
     byId('lbl-sx').textContent = interpolate(S.squaresInX, {n: state.squaresX});
     byId('lbl-sy').textContent = interpolate(S.squaresInY, {n: state.squaresY});
-    byId('preview-title').textContent = S.previewTitle;
-    byId('lbl-fullchart').textContent = S.fullChart;
-    (byId('btnPdf') as HTMLButtonElement).textContent = S.printCharts;
-    (byId('btnSaveSvg') as HTMLButtonElement).textContent = S.saveSvgFiles;
-    byId('printScaleHint').textContent = S.printScaleHint;
+    if (!lite) {
+        byId('preview-title').textContent = S.previewTitle;
+        byId('lbl-fullchart').textContent = S.fullChart;
+        (byId('btnPdf') as HTMLButtonElement).textContent = S.printCharts;
+        (byId('btnSaveSvg') as HTMLButtonElement).textContent = S.saveSvgFiles;
+        byId('printScaleHint').textContent = S.printScaleHint;
+    }
 
     const frac = squareLengthTierBandEdgeFractions();
     const pCloseEnd = frac.closeNear * 100;
@@ -382,26 +441,38 @@ function syncUi(): void {
     btnPdf.disabled = exportDisabled;
     btnSaveSvg.disabled = exportDisabled;
 
-    syncThemeToggle();
-    showErr(null);
+    if (!lite) {
+        syncThemeToggle();
+        showErr(null);
+    }
     if (perfDev()) {
         const dt = performance.now() - t0;
         if (dt > 16) {
-            perfLog('syncUi (before schedulePreview debounce)', dt, 'slider/distance/paper → full DOM refresh');
+            perfLog(
+                'syncUi (before schedulePreview debounce)',
+                dt,
+                lite ? 'lite: sliders → reduced DOM refresh' : 'full: distance/paper / range release → DOM refresh',
+            );
         }
     }
-    schedulePreview();
+    schedulePreview(previewDelayMs);
 }
 
-function schedulePreview(): void {
+function schedulePreview(delayOverride?: number): void {
     if (previewTimer) {
         clearTimeout(previewTimer);
     }
     const scheduleBaselineMs = perfDev() ? performance.now() : undefined;
+    lastScheduledPreviewDelayMs =
+        delayOverride !== undefined
+            ? delayOverride
+            : rangePointerHeld
+              ? PREVIEW_DEBOUNCE_INTERACTIVE_MS
+              : PREVIEW_DEBOUNCE_IDLE_MS;
     previewTimer = setTimeout(() => {
         previewTimer = null;
         void runPreview(scheduleBaselineMs);
-    }, PREVIEW_DEBOUNCE_MS);
+    }, lastScheduledPreviewDelayMs);
 }
 
 function waitAnimationFrames(count: number): Promise<void> {
@@ -467,7 +538,8 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
         byId('panelPreview').setAttribute('aria-busy', 'false');
     };
 
-    const tiling = effectiveTiling();
+    const layout = effectivePrintLayout();
+    const tiling = layout?.tiling ?? null;
     const statusEl = byId('previewStatus') as HTMLParagraphElement;
     const panelPreview = byId('panelPreview');
     const fullBlock = byId('fullPreviewBlock');
@@ -476,7 +548,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     const thumbs = byId('thumbGrid');
     const trunc = byId('previewTruncated');
 
-    if (!tiling || tiling.pageCount < 1) {
+    if (!layout || !tiling || tiling.pageCount < 1) {
         statusEl.textContent = '';
         panelPreview.setAttribute('aria-busy', 'false');
         fullBlock.classList.add('hidden');
@@ -510,7 +582,14 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
             cW = Math.max(1, Math.round(cH * (wMm / hMm)));
         }
 
-        const rects = computeCharucoPagePreviewRects(state.squaresX, state.squaresY, tiling, cW, cH);
+        const rects = computeCharucoPagePreviewRects(
+            state.squaresX,
+            state.squaresY,
+            tiling,
+            cW,
+            cH,
+            layout.patternRotated90,
+        );
         const dark = isDarkMode();
 
         await yieldToMain();
@@ -539,13 +618,14 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
         const pd = paperDims();
         const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
 
-        const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
+        const {squaresX: px, squaresY: py} = printSquareDims(layout.patternRotated90);
+        const pages = buildPageSpecs(px, py, tiling).pages;
 
         let printResult: Awaited<ReturnType<typeof renderCharucoPrintSvg>>;
         try {
             printResult = await renderCharucoPrintSvg({
-                squaresX: state.squaresX,
-                squaresY: state.squaresY,
+                squaresX: px,
+                squaresY: py,
                 squareLengthMm: state.squareMm,
                 paperWMm,
                 paperHMm,
@@ -647,7 +727,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                     perfLog(
                         'wall: schedulePreview → paint proxy',
                         performance.now() - scheduleBaselineMs,
-                        `debounce target ${PREVIEW_DEBOUNCE_MS}ms`,
+                        `debounce target ${lastScheduledPreviewDelayMs}ms`,
                     );
                 }
             }
@@ -698,8 +778,9 @@ function exportSvgBasenamePrefix(): string {
 
 async function saveSvgFiles(): Promise<void> {
     showErr(null);
-    const tiling = effectiveTiling();
-    if (!tiling) {
+    const layout = effectivePrintLayout();
+    const tiling = layout?.tiling ?? null;
+    if (!tiling || !layout) {
         showErr(S.layoutCannotFit);
         return;
     }
@@ -712,11 +793,12 @@ async function saveSvgFiles(): Promise<void> {
 
     const pd = paperDims();
     const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
-    const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
+    const {squaresX: px, squaresY: py} = printSquareDims(layout.patternRotated90);
+    const pages = buildPageSpecs(px, py, tiling).pages;
     try {
         const {pages: svgs} = await renderCharucoPrintSvg({
-            squaresX: state.squaresX,
-            squaresY: state.squaresY,
+            squaresX: px,
+            squaresY: py,
             squareLengthMm: state.squareMm,
             paperWMm,
             paperHMm,
@@ -798,8 +880,9 @@ function printHtmlDocumentInHiddenIframe(html: string): void {
 
 async function openPrintDialog(): Promise<void> {
     showErr(null);
-    const tiling = effectiveTiling();
-    if (!tiling) {
+    const layout = effectivePrintLayout();
+    const tiling = layout?.tiling ?? null;
+    if (!tiling || !layout) {
         showErr(S.layoutCannotFit);
         return;
     }
@@ -812,11 +895,12 @@ async function openPrintDialog(): Promise<void> {
 
     const pd = paperDims();
     const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
-    const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
+    const {squaresX: px, squaresY: py} = printSquareDims(layout.patternRotated90);
+    const pages = buildPageSpecs(px, py, tiling).pages;
     try {
         const {pages: svgs} = await renderCharucoPrintSvg({
-            squaresX: state.squaresX,
-            squaresY: state.squaresY,
+            squaresX: px,
+            squaresY: py,
             squareLengthMm: state.squareMm,
             paperWMm,
             paperHMm,
@@ -910,6 +994,9 @@ function syncQrVersionBanner(): void {
 }
 
 function wireUi(): void {
+    window.addEventListener('pointerup', finalizeRangeGestureIfNeeded, true);
+    window.addEventListener('pointercancel', finalizeRangeGestureIfNeeded, true);
+
     const distanceSel = byId('distance') as HTMLSelectElement;
     /** Native `<select>` does not fire `change` when re-picking the same option; briefly clear selection so it always fires. */
     let pendingDistanceRestore: string | null = null;
@@ -954,9 +1041,12 @@ function wireUi(): void {
         state.paperId = (e.target as HTMLSelectElement).value;
         state.autoGrid = true;
         syncUi();
+        void ensureTilingFeasibilityForPaperId(state.paperId).then(() => syncUi({lite: true}));
     });
 
-    (byId('sqmm') as HTMLInputElement).addEventListener('input', (e) => {
+    const sqmmEl = byId('sqmm') as HTMLInputElement;
+    wireRangeResponsiveUi(sqmmEl);
+    sqmmEl.addEventListener('input', (e) => {
         state.autoGrid = false;
         const raw = Number((e.target as HTMLInputElement).value);
         const pd = paperDims();
@@ -965,7 +1055,9 @@ function wireUi(): void {
         scheduleSyncUi();
     });
 
-    (byId('pages') as HTMLInputElement).addEventListener('input', (e) => {
+    const pagesEl = byId('pages') as HTMLInputElement;
+    wireRangeResponsiveUi(pagesEl);
+    pagesEl.addEventListener('input', (e) => {
         state.autoGrid = false;
         const raw = Math.round(Number((e.target as HTMLInputElement).value));
         const pd = paperDims();
@@ -977,13 +1069,17 @@ function wireUi(): void {
         scheduleSyncUi();
     });
 
-    (byId('sx') as HTMLInputElement).addEventListener('input', (e) => {
+    const sxEl = byId('sx') as HTMLInputElement;
+    wireRangeResponsiveUi(sxEl);
+    sxEl.addEventListener('input', (e) => {
         state.autoGrid = false;
         state.squaresX = clampInt(Number((e.target as HTMLInputElement).value), BOARD_GRID_MIN, BOARD_GRID_MAX);
         scheduleSyncUi();
     });
 
-    (byId('sy') as HTMLInputElement).addEventListener('input', (e) => {
+    const syEl = byId('sy') as HTMLInputElement;
+    wireRangeResponsiveUi(syEl);
+    syEl.addEventListener('input', (e) => {
         state.autoGrid = false;
         state.squaresY = clampInt(Number((e.target as HTMLInputElement).value), BOARD_GRID_MIN, BOARD_GRID_MAX);
         scheduleSyncUi();
@@ -1009,6 +1105,7 @@ function boot(): void {
     applyQrQueryFromLocation();
     syncQrVersionBanner();
     syncUi();
+    void ensureTilingFeasibilityForPaperId(state.paperId).then(() => syncUi({lite: true}));
 }
 
 boot();

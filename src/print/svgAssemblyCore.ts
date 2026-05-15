@@ -33,7 +33,7 @@ import type {PageSpec, TilingInfo} from './tiling.js';
 import type {PrintSvgAssemblyParams, PrintSvgResult} from './svgAssemblyTypes.js';
 import {perfDev, perfLog, perfNote, perfSync} from './perfDebug.js';
 import {SKELLY_LOGO_VIEWBOX_H, SKELLY_LOGO_VIEWBOX_W} from './originBannerEstimate.js';
-import {escapeXml, rgbCss, svgRootOpen, SVG_ROOT_CLOSE} from './svgUtils.js';
+import {escapeXml, rgbCss, svgRootOpen, svgRootOuterSizeAttrs, SVG_ROOT_CLOSE} from './svgUtils.js';
 import {yieldToMain} from '../ui/yieldToMain.js';
 
 const FONT = 'system-ui, Segoe UI, sans-serif';
@@ -428,6 +428,7 @@ function svgHorizontalTapeLabel(
 export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams): Promise<PrintSvgResult> {
     const ppm = PIXELS_PER_MM;
     const {
+        paperId,
         squaresX,
         squaresY,
         squareLengthMm,
@@ -476,6 +477,7 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
     const boardPxLayout = charucoBoardPixelLayout(fullWPx, fullHPx, squaresX, squaresY);
     const pagePxW = Math.max(1, Math.round(paperWMm * ppm));
     const pagePxH = Math.max(1, Math.round(paperHMm * ppm));
+    const [svgWidthAttr, svgHeightAttr] = svgRootOuterSizeAttrs(paperWMm, paperHMm, paperId);
     const marginPx = layoutIntPx(MM_MARGIN_SHEET * ppm);
     const joinPx = tiling.npx > 1 ? Math.round(MM_JOIN_STRIP * ppm) : 0;
     const joinPy = tiling.npy > 1 ? Math.round(MM_JOIN_STRIP * ppm) : 0;
@@ -712,7 +714,7 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
             parts.push(svgFooterPageNumber(pn, pagePxW, pagePxH, marginPx, ppm, tileBox, pageObstacles, bodyFontPx));
         }
 
-        pageSvgs.push(svgRootOpen(pagePxW, pagePxH, paperWMm, paperHMm) + parts.join('') + SVG_ROOT_CLOSE);
+        pageSvgs.push(svgRootOpen(pagePxW, pagePxH, svgWidthAttr, svgHeightAttr) + parts.join('') + SVG_ROOT_CLOSE);
         abortIfNeeded();
         await yieldStep();
     }

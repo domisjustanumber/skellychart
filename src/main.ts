@@ -28,6 +28,7 @@ import {ensureTilingFeasibilityForPaperId} from './print/tilingFeasibilityTables
 import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from './print/tiling.js';
 import {perfDev, perfLog} from './print/perfDebug.js';
 import {CHARUCO_MARKER_LENGTH_RATIO, CHARUCO_PRINT_LABEL_SPEC_VERSION} from './print/constants.js';
+import {svgRootOuterSizeAttrs} from './print/svgUtils.js';
 import {
     expectedCharucoCv2QueryValue,
     mergeCharucoQrParamsInto,
@@ -53,6 +54,7 @@ import {
     distanceSelectLabel,
     interpolate,
     paperLabel,
+    paperOptionDimensions,
     S,
     sheetCountPhrase,
 } from './ui/strings.js';
@@ -455,8 +457,7 @@ function syncUi(options: SyncUiOptions = {}): void {
             o.value = p.id;
             o.textContent = interpolate(S.paperOption, {
                 paper: paperLabel(p.id),
-                wMm: p.wMm,
-                hMm: p.hMm,
+                dims: paperOptionDimensions(p.id, p.wMm, p.hMm),
             });
             paperSel.appendChild(o);
         }
@@ -670,6 +671,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
         let printResult: Awaited<ReturnType<typeof renderCharucoPrintSvg>>;
         try {
             printResult = await renderCharucoPrintSvg({
+                paperId: state.paperId,
                 squaresX: px,
                 squaresY: py,
                 squareLengthMm: state.squareMm,
@@ -843,6 +845,7 @@ async function saveSvgFiles(): Promise<void> {
     const pages = buildPageSpecs(px, py, tiling).pages;
     try {
         const {pages: svgs} = await renderCharucoPrintSvg({
+            paperId: state.paperId,
             squaresX: px,
             squaresY: py,
             squareLengthMm: state.squareMm,
@@ -945,6 +948,7 @@ async function openPrintDialog(): Promise<void> {
     const pages = buildPageSpecs(px, py, tiling).pages;
     try {
         const {pages: svgs} = await renderCharucoPrintSvg({
+            paperId: state.paperId,
             squaresX: px,
             squaresY: py,
             squareLengthMm: state.squareMm,
@@ -955,19 +959,20 @@ async function openPrintDialog(): Promise<void> {
             pages,
             cooperativeYield: false,
         });
+        const [pageWCss, pageHCss] = svgRootOuterSizeAttrs(paperWMm, paperHMm, state.paperId);
         const sheetsHtml = svgs
             .map((svg) => `<div class="sheet">${stripXmlDeclaration(svg)}</div>`)
             .join('');
         const html =
             `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>` +
             `<title>ChArUco print</title><style>` +
-            `@page{size:${paperWMm}mm ${paperHMm}mm;margin:0}` +
+            `@page{size:${pageWCss} ${pageHCss};margin:0}` +
             `*{box-sizing:border-box}` +
             `html,body{margin:0;padding:0}` +
-            `.sheet{width:${paperWMm}mm;height:${paperHMm}mm;margin:0;` +
+            `.sheet{width:${pageWCss};height:${pageHCss};margin:0;` +
             `page-break-after:always;break-after:page;overflow:hidden}` +
             `.sheet:last-child{page-break-after:auto;break-after:auto}` +
-            `.sheet>svg{display:block;width:${paperWMm}mm;height:${paperHMm}mm}` +
+            `.sheet>svg{display:block;width:${pageWCss};height:${pageHCss}}` +
             `</style></head><body>${sheetsHtml}</body></html>`;
 
         printHtmlDocumentInHiddenIframe(html);

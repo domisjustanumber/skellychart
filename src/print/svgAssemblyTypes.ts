@@ -1,6 +1,8 @@
 import type {PageSpec, TilingInfo} from './tiling.js';
 
 export interface PrintSvgParams {
+    /** Paper preset (`letter`, `tabloid`, …) — selects inch vs mm for root SVG / print page box only. */
+    paperId: string;
     squaresX: number;
     squaresY: number;
     squareLengthMm: number;

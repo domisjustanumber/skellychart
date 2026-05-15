@@ -14,6 +14,18 @@ export function interpolate(template: string, vars: Record<string, string | numb
     );
 }
 
+/** Paper size line in the paper dropdown: US formats in inches, ISO in mm. */
+export function paperOptionDimensions(id: string, wMm: number, hMm: number): string {
+    switch (id) {
+        case 'letter':
+            return '8.5 × 11 in';
+        case 'tabloid':
+            return '11 × 17 in';
+        default:
+            return `${wMm} × ${hMm} mm`;
+    }
+}
+
 export const S = {
     /** Theme toggle (header) */
     colorTheme: 'Colour theme',
@@ -28,7 +40,7 @@ export const S = {
     introDocsSuffix: '.',
     workingDistance: 'Working distance from camera',
     paperSize: 'Paper size',
-    paperOption: '{{paper}} ({{wMm}} × {{hMm}} mm)',
+    paperOption: '{{paper}} ({{dims}})',
     advanced: 'Advanced',
     squareLengthHeading: 'Square length ({{mm}} mm)',
     numberOfPages: 'Number of pages ({{n}})',
@@ -38,7 +50,8 @@ export const S = {
         'Cannot fit this combination — try another square length, number of sheets, or grid.',
     printCharts: 'Print',
     saveSvgFiles: 'Save SVG files',
-    printScaleHint: 'Ensure you print at 1:1 or 100% scaling!',
+    printScaleHint:
+        'Print at 1:1 or 100% scaling, and measure your black squares after printing',
     preparingPrint: 'Preparing print…',
     preparingSvgExport: 'Preparing SVG…',
     printInitFailed: 'Could not prepare printing in this browser. Try refreshing the page.',

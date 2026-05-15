@@ -1,5 +1,6 @@
 /**
  * Runs scripts/export_dict4x4_250_ts.py (OpenCV → src/skelly-charuco/dict4x4_250_rot0.ts).
+ * Used by `npm run generate:aruco-dict` only — not part of `npm run build` / `npm run generate`.
  * Tries, in order: project .venv Python, `python`, Windows `py -3`, then `uv run --with opencv-contrib-python-headless`.
  */
 import {spawnSync} from 'node:child_process';

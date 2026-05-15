@@ -1,5 +1,6 @@
-import {putGrayOnCanvas, renderCharucoBoardGray} from './charuco/board.js';
-import {renderCharucoPrintPdf} from './print/pdfDocument.js';
+import freemocapLogoUrl from './freemocapLogoUrl.js';
+import {renderCharucoBoardSvg} from './charuco/board.js';
+import {renderCharucoPrintSvg} from './print/svgDocument.js';
 import {
     BOARD_GRID_MAX,
     BOARD_GRID_MIN,
@@ -24,13 +25,10 @@ import {
     workingDistanceTierFromSquareLengthMm,
 } from './print/charucoLayout.js';
 import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from './print/tiling.js';
-import {CHARUCO_MARKER_LENGTH_RATIO} from './print/constants.js';
-import {decodePdfThumbnails, PREVIEW_DEBOUNCE_MS} from './ui/previewPdf.js';
-import {
-    loadPresetPreviewManifest,
-    presetPreviewKey,
-    resolvePresetAssetUrl,
-} from './ui/presetPreviewManifest.js';
+import {perfDev, perfLog} from './print/perfDebug.js';
+import {CHARUCO_MARKER_LENGTH_RATIO, CHARUCO_PRINT_LABEL_SPEC_VERSION} from './print/constants.js';
+import {expectedCharucoCv2QueryValue, parseCharucoQrSearchParams} from './print/charucoDocUrl.js';
+import {MAX_PREVIEW_PAGES, PREVIEW_DEBOUNCE_MS, svgToDataUrl} from './ui/previewSvg.js';
 import {yieldToMain} from './ui/yieldToMain.js';
 import {
     applyThemePreference,
@@ -41,12 +39,16 @@ import {
 } from './ui/theme.js';
 import {bandLabel, distanceLabel, interpolate, paperLabel, S, sheetCountPhrase} from './ui/strings.js';
 
-const PRESET_IDS = ['near', 'mid', 'far'] as const;
+const PRESET_IDS = ['near', 'far'] as const;
+
+function normalizeWorkingDistanceId(id: string): (typeof PRESET_IDS)[number] {
+    return id === 'far' ? 'far' : 'near';
+}
 
 function initialBoard(): {paperId: string; squareMm: number; squaresX: number; squaresY: number} {
     const paperId = defaultPaperId();
     const paper = paperById(paperId) ?? PAPER_OPTIONS[0]!;
-    const plan = resolveDistancePrintPlan('mid', paperId);
+    const plan = resolveDistancePrintPlan('near', paperId);
     const squareMm =
         maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, paper.wMm, paper.hMm, plan.targetPages) ?? 54;
     return {paperId, squareMm, squaresX: plan.squaresX, squaresY: plan.squaresY};
@@ -55,7 +57,7 @@ function initialBoard(): {paperId: string; squareMm: number; squaresX: number; s
 const defaultBoard = initialBoard();
 
 interface AppState {
-    distanceId: string;
+    distanceId: (typeof PRESET_IDS)[number];
     paperId: string;
     squareMm: number;
     squaresX: number;
@@ -64,13 +66,16 @@ interface AppState {
 }
 
 const state: AppState = {
-    distanceId: 'mid',
+    distanceId: 'near',
     paperId: defaultBoard.paperId,
     squareMm: defaultBoard.squareMm,
     squaresX: defaultBoard.squaresX,
     squaresY: defaultBoard.squaresY,
     autoGrid: true,
 };
+
+/** Set from chart QR link query params; shown once at load (not cleared by `syncUi`). */
+let qrVersionBannerMessage: string | null = null;
 
 function byId(id: string): HTMLElement {
     const el = document.getElementById(id);
@@ -198,9 +203,10 @@ let previewTimer: ReturnType<typeof setTimeout> | null = null;
 let previewAbort: AbortController | null = null;
 /** Bumped when a new preview run starts so stale async completions do not clear the busy UI. */
 let previewGeneration = 0;
-const previewCanvas = document.createElement('canvas');
 
 function syncUi(): void {
+    const t0 = perfDev() ? performance.now() : 0;
+    state.distanceId = normalizeWorkingDistanceId(state.distanceId);
     applyAutoPreset();
     const imperial = shouldUseImperialWorkingDistanceUnits();
     const pd = paperDims();
@@ -218,30 +224,26 @@ function syncUi(): void {
     byId('lbl-sy').textContent = interpolate(S.squaresInY, {n: state.squaresY});
     byId('preview-title').textContent = S.previewTitle;
     byId('lbl-fullchart').textContent = S.fullChart;
-    (byId('btnPdf') as HTMLButtonElement).textContent = S.generatePdf;
+    (byId('btnPdf') as HTMLButtonElement).textContent = S.printCharts;
+    (byId('btnSaveSvg') as HTMLButtonElement).textContent = S.saveSvgFiles;
+    byId('printScaleHint').textContent = S.printScaleHint;
 
     const frac = squareLengthTierBandEdgeFractions();
+    const pNearEnd = frac.nearFar * 100;
     const tierEl = byId('tierLabels');
     tierEl.innerHTML = '';
-    const w1 = frac.nearMid * 100;
-    const w2 = (frac.midFar - frac.nearMid) * 100;
     const s1 = document.createElement('span');
-    s1.style.width = `${w1}%`;
+    s1.style.width = `${pNearEnd}%`;
     s1.style.color = 'var(--near)';
     s1.textContent = bandLabel('near', imperial);
     const s2 = document.createElement('span');
-    s2.style.width = `${w2}%`;
-    s2.style.color = 'var(--mid)';
-    s2.textContent = bandLabel('mid', imperial);
-    const s3 = document.createElement('span');
-    s3.style.flex = '1';
-    s3.style.color = 'var(--far)';
-    s3.textContent = bandLabel('far', imperial);
-    tierEl.append(s1, s2, s3);
+    s2.style.flex = '1';
+    s2.style.color = 'var(--far)';
+    s2.textContent = bandLabel('far', imperial);
+    tierEl.append(s1, s2);
 
-    const p1 = frac.nearMid * 100;
-    const p2 = frac.midFar * 100;
-    (byId('tierBar') as HTMLDivElement).style.background = `linear-gradient(to right, var(--near) 0%, var(--near) ${p1}%, var(--mid) ${p1}%, var(--mid) ${p2}%, var(--far) ${p2}%, var(--far) 100%)`;
+    (byId('tierBar') as HTMLDivElement).style.background =
+        `linear-gradient(to right, var(--near) 0%, var(--near) ${pNearEnd}%, var(--far) ${pNearEnd}%, var(--far) 100%)`;
 
     const sqmm = byId('sqmm') as HTMLInputElement;
     sqmm.min = String(CHARUCO_SQUARE_MM_MIN);
@@ -310,10 +312,19 @@ function syncUi(): void {
     byId('layoutSummary').textContent = summary;
 
     const btnPdf = byId('btnPdf') as HTMLButtonElement;
-    btnPdf.disabled = !tiling || tiling.pageCount < 1;
+    const btnSaveSvg = byId('btnSaveSvg') as HTMLButtonElement;
+    const exportDisabled = !tiling || tiling.pageCount < 1;
+    btnPdf.disabled = exportDisabled;
+    btnSaveSvg.disabled = exportDisabled;
 
     syncThemeToggle();
     showErr(null);
+    if (perfDev()) {
+        const dt = performance.now() - t0;
+        if (dt > 16) {
+            perfLog('syncUi (before schedulePreview debounce)', dt, 'slider/distance/paper → full DOM refresh');
+        }
+    }
     schedulePreview();
 }
 
@@ -321,10 +332,64 @@ function schedulePreview(): void {
     if (previewTimer) {
         clearTimeout(previewTimer);
     }
-    previewTimer = setTimeout(() => void runPreview(), PREVIEW_DEBOUNCE_MS);
+    const scheduleBaselineMs = perfDev() ? performance.now() : undefined;
+    previewTimer = setTimeout(() => {
+        previewTimer = null;
+        void runPreview(scheduleBaselineMs);
+    }, PREVIEW_DEBOUNCE_MS);
 }
 
-async function runPreview(): Promise<void> {
+function waitAnimationFrames(count: number): Promise<void> {
+    if (count <= 0) {
+        return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+        const step = (left: number): void => {
+            if (left <= 0) {
+                resolve();
+                return;
+            }
+            requestAnimationFrame(() => step(left - 1));
+        };
+        step(count);
+    });
+}
+
+function flushPreviewImgLayoutReads(boardImg: HTMLImageElement, thumbsRoot: HTMLElement): void {
+    void boardImg.offsetWidth;
+    for (const img of thumbsRoot.querySelectorAll<HTMLImageElement>('img.thumb-img')) {
+        void img.offsetWidth;
+    }
+}
+
+/**
+ * After assigning SVG data URLs to `<img>`, the slow part is often **paint/composite**, which
+ * happens *after* `decode()` resolves. We still `decode()` (readiness), force layout reads, then
+ * wait **2× requestAnimationFrame** as a rough proxy for “about to paint”.
+ */
+async function awaitPreviewImagesDecodedAndPaint(boardImg: HTMLImageElement, thumbsRoot: HTMLElement): Promise<void> {
+    const tDecode = perfDev() ? performance.now() : 0;
+    const pending: Promise<void>[] = [
+        boardImg.decode().catch(() => {}),
+        ...Array.from(thumbsRoot.querySelectorAll<HTMLImageElement>('img.thumb-img'), (im) =>
+            im.decode().catch(() => {}),
+        ),
+    ];
+    await Promise.all(pending);
+    if (perfDev()) {
+        perfLog('browser <img> decode()', performance.now() - tDecode, `${pending.length} images`);
+    }
+
+    flushPreviewImgLayoutReads(boardImg, thumbsRoot);
+
+    const tRaf = perfDev() ? performance.now() : 0;
+    await waitAnimationFrames(2);
+    if (perfDev()) {
+        perfLog('2× requestAnimationFrame after decode (paint proxy)', performance.now() - tRaf);
+    }
+}
+
+async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     previewAbort?.abort();
     previewAbort = new AbortController();
     const signal = previewAbort.signal;
@@ -364,6 +429,8 @@ async function runPreview(): Promise<void> {
     await yieldToMain();
 
     try {
+        const previewWallStart = perfDev() ? performance.now() : 0;
+
         const markerMm = state.squareMm * CHARUCO_MARKER_LENGTH_RATIO;
         const maxEdge = 560;
         const wMm = state.squaresX * state.squareMm;
@@ -386,114 +453,18 @@ async function runPreview(): Promise<void> {
             return;
         }
 
-        const manifest = await loadPresetPreviewManifest();
-        const presetKey = state.autoGrid ? presetPreviewKey(state.distanceId, state.paperId) : '';
-        const baked = presetKey && manifest ? manifest[presetKey] : undefined;
-
-        if (baked) {
-            try {
-                const boardSrc = resolvePresetAssetUrl(baked.board);
-                const fetches: Promise<Response>[] = [fetch(boardSrc, {signal})];
-                for (const t of baked.thumbs) {
-                    fetches.push(fetch(resolvePresetAssetUrl(t), {signal}));
-                }
-                const responses = await Promise.all(fetches);
-                for (const r of responses) {
-                    if (!r.ok) {
-                        throw new Error(`Preset preview fetch failed (${r.status})`);
-                    }
-                }
-
-                const toDataUrl = (blob: Blob) =>
-                    new Promise<string>((resolve, reject) => {
-                        const fr = new FileReader();
-                        fr.onload = () => resolve(fr.result as string);
-                        fr.onerror = () => reject(fr.error);
-                        fr.readAsDataURL(blob);
-                    });
-
-                const boardDataUrl = await toDataUrl(await responses[0]!.blob());
-
-                if (signal.aborted) {
-                    return;
-                }
-
-                hideFullPreviewPlaceholder();
-                boardImg.src = boardDataUrl;
-                boardImg.alt = S.fullChart;
-                boardImg.classList.remove('board-img--hidden');
-
-                overlays.innerHTML = '';
-                if (rects) {
-                    for (const r of rects) {
-                        const d = document.createElement('div');
-                        d.className = 'sheet-rect';
-                        d.style.left = `${r.left * 100}%`;
-                        d.style.top = `${r.top * 100}%`;
-                        d.style.width = `${r.width * 100}%`;
-                        d.style.height = `${r.height * 100}%`;
-                        d.style.borderColor = charucoPagePreviewBorderColor(r.sheetIndex, tiling.pageCount, dark);
-                        overlays.appendChild(d);
-                    }
-                }
-
-                trunc.classList.toggle('hidden', !baked.truncated);
-                if (baked.truncated) {
-                    trunc.textContent = interpolate(S.truncatedPreview, {
-                        shown: baked.thumbs.length,
-                        total: baked.totalPages,
-                    });
-                }
-
-                thumbs.innerHTML = '';
-                if (baked.totalPages > 1) {
-                    const hdr = document.createElement('p');
-                    hdr.className = 'caption';
-                    hdr.textContent = interpolate(S.pageCountLabel, {count: baked.totalPages});
-                    hdr.style.gridColumn = '1 / -1';
-                    thumbs.appendChild(hdr);
-                }
-                const layoutN = tiling.pageCount;
-                for (let i = 0; i < responses.length - 1; i++) {
-                    const src = await toDataUrl(await responses[i + 1]!.blob());
-                    const wrap = document.createElement('div');
-                    wrap.className = 'thumb-wrap';
-                    const cap = document.createElement('p');
-                    cap.className = 'cap';
-                    cap.textContent = interpolate(S.pageLabel, {n: i + 1});
-                    const img = document.createElement('img');
-                    img.className = 'thumb-img';
-                    img.src = src;
-                    img.alt = interpolate(S.pageLabel, {n: i + 1});
-                    if (layoutN > 1 && baked.totalPages > 1) {
-                        img.style.border = `2px solid ${charucoPagePreviewBorderColor(i + 1, layoutN, dark)}`;
-                    } else {
-                        img.style.border = '1px solid var(--border)';
-                    }
-                    wrap.append(cap, img);
-                    thumbs.appendChild(wrap);
-                }
-                statusEl.textContent = '';
-                endPreviewBusyIfCurrent();
-                return;
-            } catch (e) {
-                if ((e as Error).name === 'AbortError') {
-                    return;
-                }
-                /* Missing baked assets or fetch error: fall through to live render. */
-            }
+        const tBoardSvg = perfDev() ? performance.now() : 0;
+        const boardDataUrl = svgToDataUrl(
+            renderCharucoBoardSvg(cW, cH, {
+                squaresX: state.squaresX,
+                squaresY: state.squaresY,
+                squareLength: state.squareMm,
+                markerLength: markerMm,
+            }),
+        );
+        if (perfDev()) {
+            perfLog('live board (renderCharucoBoardSvg + data URL)', performance.now() - tBoardSvg, `${cW}×${cH}px`);
         }
-
-        previewCanvas.width = cW;
-        previewCanvas.height = cH;
-        const gray = renderCharucoBoardGray(cW, cH, {
-            squaresX: state.squaresX,
-            squaresY: state.squaresY,
-            squareLength: state.squareMm,
-            markerLength: markerMm,
-        });
-        putGrayOnCanvas(previewCanvas, gray);
-        const boardDataUrl = previewCanvas.toDataURL('image/png');
 
         await yieldToMain();
         if (signal.aborted) {
@@ -505,9 +476,9 @@ async function runPreview(): Promise<void> {
 
         const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
 
-        let blob: Blob;
+        let printResult: Awaited<ReturnType<typeof renderCharucoPrintSvg>>;
         try {
-            blob = await renderCharucoPrintPdf({
+            printResult = await renderCharucoPrintSvg({
                 squaresX: state.squaresX,
                 squaresY: state.squaresY,
                 squareLengthMm: state.squareMm,
@@ -517,6 +488,7 @@ async function runPreview(): Promise<void> {
                 tiling,
                 pages,
                 signal,
+                cooperativeYield: false,
             });
         } catch (e) {
             if ((e as Error).name === 'AbortError') {
@@ -535,7 +507,17 @@ async function runPreview(): Promise<void> {
         await yieldToMain();
 
         try {
-            const decoded = await decodePdfThumbnails(await blob.arrayBuffer(), signal);
+            const tThumbs = perfDev() ? performance.now() : 0;
+            const pageImages = printResult.pages.slice(0, MAX_PREVIEW_PAGES).map((svg) => svgToDataUrl(svg));
+            if (perfDev()) {
+                perfLog(
+                    'preview thumbs (svgToDataUrl × N)',
+                    performance.now() - tThumbs,
+                    `${pageImages.length} thumbs — each encodes full sheet SVG`,
+                );
+            }
+            const totalPages = printResult.totalPages;
+            const truncated = totalPages > MAX_PREVIEW_PAGES;
             if (signal.aborted) {
                 return;
             }
@@ -559,23 +541,23 @@ async function runPreview(): Promise<void> {
                 }
             }
 
-            trunc.classList.toggle('hidden', !decoded.truncated);
-            if (decoded.truncated) {
+            trunc.classList.toggle('hidden', !truncated);
+            if (truncated) {
                 trunc.textContent = interpolate(S.truncatedPreview, {
-                    shown: decoded.images.length,
-                    total: decoded.totalPages,
+                    shown: pageImages.length,
+                    total: totalPages,
                 });
             }
             thumbs.innerHTML = '';
-            if (decoded.totalPages > 1) {
+            if (totalPages > 1) {
                 const hdr = document.createElement('p');
                 hdr.className = 'caption';
-                hdr.textContent = interpolate(S.pageCountLabel, {count: decoded.totalPages});
+                hdr.textContent = interpolate(S.pageCountLabel, {count: totalPages});
                 hdr.style.gridColumn = '1 / -1';
                 thumbs.appendChild(hdr);
             }
             const layoutN = tiling.pageCount;
-            decoded.images.forEach((src, i) => {
+            pageImages.forEach((src, i) => {
                 const wrap = document.createElement('div');
                 wrap.className = 'thumb-wrap';
                 const cap = document.createElement('p');
@@ -585,7 +567,7 @@ async function runPreview(): Promise<void> {
                 img.className = 'thumb-img';
                 img.src = src;
                 img.alt = interpolate(S.pageLabel, {n: i + 1});
-                if (layoutN > 1 && decoded.totalPages > 1) {
+                if (layoutN > 1 && totalPages > 1) {
                     img.style.border = `2px solid ${charucoPagePreviewBorderColor(i + 1, layoutN, dark)}`;
                 } else {
                     img.style.border = '1px solid var(--border)';
@@ -593,6 +575,17 @@ async function runPreview(): Promise<void> {
                 wrap.append(cap, img);
                 thumbs.appendChild(wrap);
             });
+            await awaitPreviewImagesDecodedAndPaint(boardImg, thumbs);
+            if (perfDev()) {
+                perfLog('runPreview JS through paint proxy', performance.now() - previewWallStart, '');
+                if (scheduleBaselineMs !== undefined) {
+                    perfLog(
+                        'wall: schedulePreview → paint proxy',
+                        performance.now() - scheduleBaselineMs,
+                        `debounce target ${PREVIEW_DEBOUNCE_MS}ms`,
+                    );
+                }
+            }
             statusEl.textContent = '';
         } catch (e) {
             if ((e as Error).name === 'AbortError') {
@@ -606,7 +599,139 @@ async function runPreview(): Promise<void> {
     }
 }
 
-async function downloadPdf(): Promise<void> {
+function stripXmlDeclaration(svg: string): string {
+    return svg.replace(/^\s*<\?xml[\s\S]*?\?>\s*/i, '').trimStart();
+}
+
+function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Trigger a file download from string contents (UTF-8 SVG). */
+function downloadSvgString(content: string, filename: string): void {
+    const blob = new Blob([content], {type: 'image/svg+xml;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}
+
+function exportSvgBasenamePrefix(): string {
+    const parts = [
+        'skellychart',
+        state.paperId,
+        `${state.squaresX}x${state.squaresY}`,
+        `${state.squareMm}mm`,
+    ];
+    return parts.join('-').replace(/[^\w.-]+/g, '_');
+}
+
+async function saveSvgFiles(): Promise<void> {
+    showErr(null);
+    const tiling = effectiveTiling();
+    if (!tiling) {
+        showErr(S.layoutCannotFit);
+        return;
+    }
+    const btnSave = byId('btnSaveSvg') as HTMLButtonElement;
+    const idleLabel = S.saveSvgFiles;
+    btnSave.disabled = true;
+    btnSave.classList.add('btn--busy');
+    btnSave.textContent = S.preparingSvgExport;
+    await yieldToMain();
+
+    const pd = paperDims();
+    const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
+    const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
+    try {
+        const {pages: svgs} = await renderCharucoPrintSvg({
+            squaresX: state.squaresX,
+            squaresY: state.squaresY,
+            squareLengthMm: state.squareMm,
+            paperWMm,
+            paperHMm,
+            markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
+            tiling,
+            pages,
+            cooperativeYield: false,
+        });
+        const prefix = exportSvgBasenamePrefix();
+        const staggerMs = 120;
+        for (let i = 0; i < svgs.length; i++) {
+            if (i > 0) {
+                await delay(staggerMs);
+            }
+            const n = i + 1;
+            downloadSvgString(svgs[i]!, `${prefix}-${n}-of-${svgs.length}.svg`);
+        }
+    } catch (e) {
+        showErr(e instanceof Error ? e.message : String(e));
+    }
+
+    btnSave.classList.remove('btn--busy');
+    btnSave.textContent = idleLabel;
+    const t = effectiveTiling();
+    btnSave.disabled = !t || t.pageCount < 1;
+}
+
+function printHtmlDocumentInHiddenIframe(html: string): void {
+    const iframe = document.createElement('iframe');
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.title = 'Print';
+    Object.assign(iframe.style, {
+        position: 'fixed',
+        right: '0',
+        bottom: '0',
+        width: '0',
+        height: '0',
+        border: '0',
+        visibility: 'hidden',
+    });
+    document.body.appendChild(iframe);
+
+    const printWin = iframe.contentWindow;
+    const printDoc = iframe.contentDocument;
+    if (!printWin || !printDoc) {
+        iframe.remove();
+        showErr(S.printInitFailed);
+        return;
+    }
+
+    printDoc.open();
+    printDoc.write(html);
+    printDoc.close();
+
+    let fallbackCleanup: number | undefined;
+    const tearDown = (): void => {
+        if (fallbackCleanup !== undefined) {
+            window.clearTimeout(fallbackCleanup);
+            fallbackCleanup = undefined;
+        }
+        if (iframe.isConnected) {
+            iframe.remove();
+        }
+    };
+
+    const invokePrint = (): void => {
+        printWin.addEventListener('afterprint', tearDown, {once: true});
+        fallbackCleanup = window.setTimeout(tearDown, 120_000);
+        printWin.focus();
+        printWin.print();
+    };
+
+    if (printDoc.readyState === 'complete') {
+        queueMicrotask(invokePrint);
+    } else {
+        printWin.addEventListener('load', () => queueMicrotask(invokePrint), {once: true});
+    }
+}
+
+async function openPrintDialog(): Promise<void> {
     showErr(null);
     const tiling = effectiveTiling();
     if (!tiling) {
@@ -614,63 +739,49 @@ async function downloadPdf(): Promise<void> {
         return;
     }
     const btnPdf = byId('btnPdf') as HTMLButtonElement;
-    const pdfLabel = S.generatePdf;
+    const idleLabel = S.printCharts;
     btnPdf.disabled = true;
     btnPdf.classList.add('btn--busy');
-    btnPdf.textContent = S.generatingPdf;
+    btnPdf.textContent = S.preparingPrint;
     await yieldToMain();
 
-    const presetKey = state.autoGrid ? presetPreviewKey(state.distanceId, state.paperId) : '';
-    const manifest = await loadPresetPreviewManifest();
-    const bakedPdfPath = presetKey && manifest?.[presetKey]?.pdf;
+    const pd = paperDims();
+    const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
+    const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
+    try {
+        const {pages: svgs} = await renderCharucoPrintSvg({
+            squaresX: state.squaresX,
+            squaresY: state.squaresY,
+            squareLengthMm: state.squareMm,
+            paperWMm,
+            paperHMm,
+            markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
+            tiling,
+            pages,
+            cooperativeYield: false,
+        });
+        const sheetsHtml = svgs
+            .map((svg) => `<div class="sheet">${stripXmlDeclaration(svg)}</div>`)
+            .join('');
+        const html =
+            `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>` +
+            `<title>Charuco print</title><style>` +
+            `@page{size:${paperWMm}mm ${paperHMm}mm;margin:0}` +
+            `*{box-sizing:border-box}` +
+            `html,body{margin:0;padding:0}` +
+            `.sheet{width:${paperWMm}mm;height:${paperHMm}mm;margin:0;` +
+            `page-break-after:always;break-after:page;overflow:hidden}` +
+            `.sheet:last-child{page-break-after:auto;break-after:auto}` +
+            `.sheet>svg{display:block;width:${paperWMm}mm;height:${paperHMm}mm}` +
+            `</style></head><body>${sheetsHtml}</body></html>`;
 
-    let downloaded = false;
-    if (bakedPdfPath) {
-        try {
-            const res = await fetch(resolvePresetAssetUrl(bakedPdfPath));
-            if (res.ok) {
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `charuco_${state.squaresX}x${state.squaresY}_${state.paperId}.pdf`;
-                a.click();
-                URL.revokeObjectURL(url);
-                downloaded = true;
-            }
-        } catch {
-            /* fall through to live render */
-        }
-    }
-
-    if (!downloaded) {
-        const pd = paperDims();
-        const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
-        const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
-        try {
-            const blob = await renderCharucoPrintPdf({
-                squaresX: state.squaresX,
-                squaresY: state.squaresY,
-                squareLengthMm: state.squareMm,
-                paperWMm,
-                paperHMm,
-                markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
-                tiling,
-                pages,
-            });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `charuco_${state.squaresX}x${state.squaresY}_${state.paperId}.pdf`;
-            a.click();
-            URL.revokeObjectURL(url);
-        } catch (e) {
-            showErr(e instanceof Error ? e.message : String(e));
-        }
+        printHtmlDocumentInHiddenIframe(html);
+    } catch (e) {
+        showErr(e instanceof Error ? e.message : String(e));
     }
 
     btnPdf.classList.remove('btn--busy');
-    btnPdf.textContent = pdfLabel;
+    btnPdf.textContent = idleLabel;
     const t = effectiveTiling();
     btnPdf.disabled = !t || t.pageCount < 1;
 }
@@ -679,9 +790,63 @@ function clampInt(n: number, lo: number, hi: number): number {
     return Math.round(Math.max(lo, Math.min(hi, n)));
 }
 
+function applyQrQueryFromLocation(): void {
+    const sp = new URLSearchParams(window.location.search);
+    const parsed = parseCharucoQrSearchParams(sp);
+    const warnings: string[] = [];
+
+    if (parsed.labelSpecVersion !== null && parsed.labelSpecVersion !== CHARUCO_PRINT_LABEL_SPEC_VERSION) {
+        warnings.push(
+            interpolate(S.qrChartSpecMismatch, {
+                theirs: parsed.labelSpecVersion,
+                ours: CHARUCO_PRINT_LABEL_SPEC_VERSION,
+            }),
+        );
+    }
+
+    const expectedCv2 = expectedCharucoCv2QueryValue(CHARUCO_MARKER_LENGTH_RATIO);
+    if (parsed.cv2 !== null && parsed.cv2 !== expectedCv2) {
+        warnings.push(
+            interpolate(S.qrOpenCvMismatch, {
+                theirs: parsed.cv2,
+                ours: expectedCv2,
+            }),
+        );
+    }
+
+    if (parsed.squaresX !== null || parsed.squaresY !== null || parsed.squareLengthMm !== null) {
+        state.autoGrid = false;
+        if (parsed.squaresX !== null) {
+            state.squaresX = clampInt(parsed.squaresX, BOARD_GRID_MIN, BOARD_GRID_MAX);
+        }
+        if (parsed.squaresY !== null) {
+            state.squaresY = clampInt(parsed.squaresY, BOARD_GRID_MIN, BOARD_GRID_MAX);
+        }
+        const pd = paperDims();
+        if (parsed.squareLengthMm !== null) {
+            state.squareMm = Math.round(parsed.squareLengthMm);
+        }
+        state.squareMm = snapSquareMm(state.squareMm, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
+        syncDistanceFromSquareIfManual();
+    }
+
+    qrVersionBannerMessage = warnings.length ? warnings.join(' ') : null;
+}
+
+function syncQrVersionBanner(): void {
+    const el = byId('qrVersionBanner');
+    if (qrVersionBannerMessage) {
+        el.textContent = qrVersionBannerMessage;
+        el.classList.remove('hidden');
+    } else {
+        el.classList.add('hidden');
+        el.textContent = '';
+    }
+}
+
 function wireUi(): void {
     (byId('distance') as HTMLSelectElement).addEventListener('change', (e) => {
-        state.distanceId = (e.target as HTMLSelectElement).value;
+        state.distanceId = normalizeWorkingDistanceId((e.target as HTMLSelectElement).value);
         state.autoGrid = true;
         syncUi();
     });
@@ -725,7 +890,8 @@ function wireUi(): void {
         syncUi();
     });
 
-    byId('btnPdf').addEventListener('click', () => void downloadPdf());
+    byId('btnPdf').addEventListener('click', () => void openPrintDialog());
+    byId('btnSaveSvg').addEventListener('click', () => void saveSvgFiles());
 
     const themeGroup = byId('themeToggle');
     for (const btn of themeGroup.querySelectorAll<HTMLButtonElement>('[data-theme-pick]')) {
@@ -737,11 +903,13 @@ function wireUi(): void {
     }
 }
 
-async function boot(): Promise<void> {
-    await loadPresetPreviewManifest();
+function boot(): void {
+    (byId('brandLogo') as HTMLImageElement).src = freemocapLogoUrl;
     initTheme(() => schedulePreview());
     wireUi();
+    applyQrQueryFromLocation();
+    syncQrVersionBanner();
     syncUi();
 }
 
-void boot();
+boot();

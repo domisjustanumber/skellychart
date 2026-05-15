@@ -3,10 +3,12 @@
  * height as the rendered PDF (instead of a flat {@link ORIGIN_PAGE_EXTRA_MM} slab).
  */
 import {
+    CHARUCO_PRINT_LABEL_SPEC_VERSION,
     MM_MARGIN_SHEET,
     MM_ORIGIN_BANNER_BELOW_GAP_MM,
     ORIGIN_BANNER_CONTENT_SIDE_MM,
     ORIGIN_BANNER_CONTENT_TOP_MM,
+    ORIGIN_BANNER_VISUAL_SCALE,
     ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM,
     ORIGIN_GAP_QR_TO_BOARD_INFO_MM,
     ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM,
@@ -16,10 +18,13 @@ import {
     QR_SIZE_MM,
     SKELLY_TOP_HEIGHT_MM,
 } from './constants.js';
-import {interpolate, pdfLabels} from './labels.js';
+import {originChartInfoParts, pdfLabels} from './labels.js';
 
-/** `viewBox` aspect from `public/freemocap-logo.svg` — keeps logo width in sync with PDF raster sizing. */
-const SKELLY_LOGO_NATURAL_W_OVER_H = 461.4 / 584.5;
+/** Matches `public/freemocap-logo.svg` — width/height used for nested `<svg viewBox>` on the print sheet. */
+export const SKELLY_LOGO_VIEWBOX_W = 461.4;
+export const SKELLY_LOGO_VIEWBOX_H = 584.5;
+/** Natural aspect for layout when only height in mm is fixed. */
+export const SKELLY_LOGO_NATURAL_W_OVER_H = SKELLY_LOGO_VIEWBOX_W / SKELLY_LOGO_VIEWBOX_H;
 
 function layoutIntPx(x: number): number {
     return Math.max(0, Math.floor(x));
@@ -80,6 +85,11 @@ export interface OriginBannerStripEstimateParams {
     squareLengthMm: number;
     /** Pixels per mm — must match PDF rasterization (`PIXELS_PER_MM`). */
     ppm?: number;
+    /**
+     * Physical portrait sheets: QR sits above the ChaRuCo metadata block (still top-right).
+     * Landscape keeps the QR on the same row as the metadata title.
+     */
+    portraitQrAboveCharucoInfo?: boolean;
 }
 
 /**
@@ -102,44 +112,48 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
     const bannerRightInner = pagePxW - marginPx - sidePad;
     const qrY = marginPx + topPad;
     const qrWidthPx = Math.max(32, Math.round(QR_SIZE_MM * ppm));
-    const qrX = bannerRightInner - qrWidthPx;
     const bannerTitleTop = qrY;
     const gapBoardQr = Math.round(ORIGIN_GAP_QR_TO_BOARD_INFO_MM * ppm);
     const gapInstBoard = Math.round(ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM * ppm);
     const gapSkellyInst = Math.round(ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM * ppm);
-    const boardInfoRight = qrX - gapBoardQr;
 
     const nh = Math.max(1, Math.round(SKELLY_TOP_HEIGHT_MM * ppm));
     const skellyW = Math.max(1, Math.round(SKELLY_LOGO_NATURAL_W_OVER_H * nh));
     const skellyH = nh;
 
+    const portraitQrAbove = params.portraitQrAboveCharucoInfo === true;
+    const qrX = bannerRightInner - qrWidthPx;
+    const qrStackY = bannerTitleTop;
     const instrLeft = bannerLeft + skellyW + (skellyW > 0 ? gapSkellyInst : 0);
+    const boardMetaTitleY = portraitQrAbove ? bannerTitleTop + qrWidthPx + gapBoardQr : bannerTitleTop;
     const minInstColPx = Math.max(1, Math.round(12 * ppm));
 
-    const titleFontPx = Math.round(24 * (ppm / 12));
-    const bodyFontPx = Math.round(26 * (ppm / 12));
-    const bodyLineLead = bodyFontPx + Math.max(4, Math.round(0.52 * ppm));
+    const boardInfoRight = portraitQrAbove ? bannerRightInner : qrX - gapBoardQr;
+    const boardColMaxW = portraitQrAbove
+        ? Math.max(1, qrWidthPx)
+        : Math.max(1, boardInfoRight - instrLeft - gapInstBoard - minInstColPx);
 
-    ctx.font = `bold ${titleFontPx}px system-ui, Segoe UI, sans-serif`;
+    const bScale = ORIGIN_BANNER_VISUAL_SCALE;
+    const titleFontPx = Math.round(24 * (ppm / 12) * bScale);
+    const bodyFontPx = Math.round(26 * (ppm / 12) * bScale);
+    const bodyLineLead = bodyFontPx + Math.max(4, Math.round(0.52 * ppm * bScale));
 
-    const boardColMaxW = Math.max(
-        1,
-        boardInfoRight - instrLeft - gapInstBoard - minInstColPx,
-    );
-    const boardInfoBlock = [
-        interpolate(pdfLabels.originSquareSizeLine, {mm: params.squareLengthMm}),
-        interpolate(pdfLabels.originWidthLine, {n: params.squaresX}),
-        interpolate(pdfLabels.originHeightLine, {n: params.squaresY}),
-        interpolate(pdfLabels.originOpenCvLine, {
-            opencv_version: OPENCV_LABEL_VERSION,
-            dictionary_name: 'DICT_4X4_250',
-        }),
-    ].join('\n');
+    const {titleLine: boardTitle, bodyBlock: boardInfoBody} = originChartInfoParts({
+        version: CHARUCO_PRINT_LABEL_SPEC_VERSION,
+        mm: params.squareLengthMm,
+        squaresX: params.squaresX,
+        squaresY: params.squaresY,
+        opencv_version: OPENCV_LABEL_VERSION,
+        dictionary_name: 'DICT_4X4_250',
+    });
 
     ctx.font = `${bodyFontPx}px system-ui, Segoe UI, sans-serif`;
-    const boardInfoLines = wrapText(ctx, boardInfoBlock, boardColMaxW);
-    let by = bannerTitleTop + titleFontPx + Math.max(4, ppm);
-    let infoLeft = boardInfoRight;
+    const boardInfoLines = wrapText(ctx, boardInfoBody, boardColMaxW);
+    const vGap = Math.max(4, Math.round(ppm * bScale));
+    let by = boardMetaTitleY + titleFontPx + vGap;
+    ctx.font = `bold ${titleFontPx}px system-ui, Segoe UI, sans-serif`;
+    let infoLeft = boardInfoRight - ctx.measureText(boardTitle).width;
+    ctx.font = `${bodyFontPx}px system-ui, Segoe UI, sans-serif`;
     for (const line of boardInfoLines) {
         const w = ctx.measureText(line).width;
         infoLeft = Math.min(infoLeft, boardInfoRight - w);
@@ -155,22 +169,18 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
 
     ctx.font = `bold ${titleFontPx}px system-ui, Segoe UI, sans-serif`;
     const titleBB = titleFontPx;
-    const bodyY = bannerTitleTop + titleBB + Math.max(4, ppm);
+    const bodyY = bannerTitleTop + titleBB + vGap;
     ctx.font = `${bodyFontPx}px system-ui, Segoe UI, sans-serif`;
     const colW = instructionAllowRight - instrLeft;
-    const instLines = wrapText(
-        ctx,
-        pdfLabels.originInstructions + '\n' + pdfLabels.originInstructionsDocumentationFooter,
-        colW,
-    );
+    const instLines = wrapText(ctx, pdfLabels.originInstructionsBody, colW);
     let iy = bodyY;
     for (let i = 0; i < instLines.length; i++) {
         iy += bodyLineLead;
     }
     const instBottom = iy;
 
+    const qrBottom = qrStackY + qrWidthPx;
     const skellyBottomExtra = skellyW > 0 ? qrY + skellyH : qrY;
-    const qrBottom = qrY + qrWidthPx;
 
     const bannerBottomPx =
         Math.max(lineBoardBottom, instBottom, qrBottom, skellyBottomExtra) +

@@ -24,7 +24,6 @@
   --far-tier: #c66900;
   --surface-2: #0f1419;
   --near: var(--info);
-  --mid: var(--success);
   --far: var(--far-tier);
   --border: var(--divider);
   --primary-hover: var(--primary-light);
@@ -55,7 +54,6 @@
   --far-tier: #c66900;
   --surface-2: #f8f9fa;
   --near: var(--info);
-  --mid: var(--success);
   --far: var(--far-tier);
   --border: var(--divider);
   --primary-hover: var(--primary-light);
@@ -317,7 +315,19 @@ body {
 .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
+  align-items: center;
+  gap: 0.75rem 1rem;
+}
+
+.print-scale-hint {
+  flex: 1 1 14rem;
+  margin: 0;
+  max-width: 28rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.005em;
+  color: var(--text);
 }
 
 .btn {
@@ -367,6 +377,12 @@ body {
   background: color-mix(in srgb, var(--danger) 14%, transparent);
   color: var(--danger);
   border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent);
+}
+
+.banner-warning {
+  background: color-mix(in srgb, var(--warning-fg) 16%, transparent);
+  color: var(--warning-fg);
+  border: 1px solid color-mix(in srgb, var(--warning-fg) 40%, transparent);
 }
 
 .hidden {
@@ -425,11 +441,13 @@ body {
 }
 
 .preview-frame {
+  --preview-mat-px: 5px;
   position: relative;
   display: inline-block;
   max-width: 100%;
+  padding: var(--preview-mat-px);
   border: 1px solid var(--divider);
-  border-radius: 4px;
+  border-radius: 0;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
   line-height: 0;
   background: #fff;
@@ -450,7 +468,7 @@ body {
   font-weight: 500;
   color: var(--muted);
   text-align: center;
-  border-radius: 2px;
+  border-radius: 0;
   background: color-mix(in srgb, var(--muted) 8%, transparent);
 }
 
@@ -479,7 +497,7 @@ body {
   font-weight: 500;
   color: var(--muted);
   text-align: center;
-  border-radius: 4px;
+  border-radius: 0;
   background: color-mix(in srgb, var(--muted) 8%, transparent);
 }
 
@@ -506,12 +524,12 @@ body {
   max-height: min(360px, 50vh);
   width: auto;
   image-rendering: pixelated;
-  border-radius: 2px;
+  border-radius: 0;
 }
 
 .sheet-overlays {
   position: absolute;
-  inset: 0;
+  inset: var(--preview-mat-px, 0);
   pointer-events: none;
 }
 
@@ -543,7 +561,7 @@ body {
   height: auto;
   display: block;
   margin: 0 auto;
-  border-radius: 4px;
+  border-radius: 0;
   background: var(--thumb-bg);
 }
 

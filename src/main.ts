@@ -1,6 +1,6 @@
 import freemocapLogoUrl from './freemocapLogoUrl.js';
 import {renderCharucoBoardSvg} from './charuco/board.js';
-import {renderCharucoPrintSvg, renderCharucoPrintSvgZip} from './print/svgDocument.js';
+import {renderCharucoPrintSvg} from './print/svgDocument.js';
 import {
     BOARD_GRID_MAX,
     BOARD_GRID_MIN,
@@ -25,13 +25,9 @@ import {
     workingDistanceTierFromSquareLengthMm,
 } from './print/charucoLayout.js';
 import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from './print/tiling.js';
+import {perfDev, perfLog} from './print/perfDebug.js';
 import {CHARUCO_MARKER_LENGTH_RATIO} from './print/constants.js';
 import {MAX_PREVIEW_PAGES, PREVIEW_DEBOUNCE_MS, svgToDataUrl} from './ui/previewSvg.js';
-import {
-    loadPresetPreviewManifest,
-    presetPreviewKey,
-    resolvePresetAssetUrl,
-} from './ui/presetPreviewManifest.js';
 import {yieldToMain} from './ui/yieldToMain.js';
 import {
     applyThemePreference,
@@ -201,6 +197,7 @@ let previewAbort: AbortController | null = null;
 let previewGeneration = 0;
 
 function syncUi(): void {
+    const t0 = perfDev() ? performance.now() : 0;
     applyAutoPreset();
     const imperial = shouldUseImperialWorkingDistanceUnits();
     const pd = paperDims();
@@ -314,6 +311,12 @@ function syncUi(): void {
 
     syncThemeToggle();
     showErr(null);
+    if (perfDev()) {
+        const dt = performance.now() - t0;
+        if (dt > 16) {
+            perfLog('syncUi (before schedulePreview debounce)', dt, 'slider/distance/paper → full DOM refresh');
+        }
+    }
     schedulePreview();
 }
 
@@ -321,10 +324,64 @@ function schedulePreview(): void {
     if (previewTimer) {
         clearTimeout(previewTimer);
     }
-    previewTimer = setTimeout(() => void runPreview(), PREVIEW_DEBOUNCE_MS);
+    const scheduleBaselineMs = perfDev() ? performance.now() : undefined;
+    previewTimer = setTimeout(() => {
+        previewTimer = null;
+        void runPreview(scheduleBaselineMs);
+    }, PREVIEW_DEBOUNCE_MS);
 }
 
-async function runPreview(): Promise<void> {
+function waitAnimationFrames(count: number): Promise<void> {
+    if (count <= 0) {
+        return Promise.resolve();
+    }
+    return new Promise((resolve) => {
+        const step = (left: number): void => {
+            if (left <= 0) {
+                resolve();
+                return;
+            }
+            requestAnimationFrame(() => step(left - 1));
+        };
+        step(count);
+    });
+}
+
+function flushPreviewImgLayoutReads(boardImg: HTMLImageElement, thumbsRoot: HTMLElement): void {
+    void boardImg.offsetWidth;
+    for (const img of thumbsRoot.querySelectorAll<HTMLImageElement>('img.thumb-img')) {
+        void img.offsetWidth;
+    }
+}
+
+/**
+ * After assigning SVG data URLs to `<img>`, the slow part is often **paint/composite**, which
+ * happens *after* `decode()` resolves. We still `decode()` (readiness), force layout reads, then
+ * wait **2× requestAnimationFrame** as a rough proxy for “about to paint”.
+ */
+async function awaitPreviewImagesDecodedAndPaint(boardImg: HTMLImageElement, thumbsRoot: HTMLElement): Promise<void> {
+    const tDecode = perfDev() ? performance.now() : 0;
+    const pending: Promise<void>[] = [
+        boardImg.decode().catch(() => {}),
+        ...Array.from(thumbsRoot.querySelectorAll<HTMLImageElement>('img.thumb-img'), (im) =>
+            im.decode().catch(() => {}),
+        ),
+    ];
+    await Promise.all(pending);
+    if (perfDev()) {
+        perfLog('browser <img> decode()', performance.now() - tDecode, `${pending.length} images`);
+    }
+
+    flushPreviewImgLayoutReads(boardImg, thumbsRoot);
+
+    const tRaf = perfDev() ? performance.now() : 0;
+    await waitAnimationFrames(2);
+    if (perfDev()) {
+        perfLog('2× requestAnimationFrame after decode (paint proxy)', performance.now() - tRaf);
+    }
+}
+
+async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     previewAbort?.abort();
     previewAbort = new AbortController();
     const signal = previewAbort.signal;
@@ -364,6 +421,8 @@ async function runPreview(): Promise<void> {
     await yieldToMain();
 
     try {
+        const previewWallStart = perfDev() ? performance.now() : 0;
+
         const markerMm = state.squareMm * CHARUCO_MARKER_LENGTH_RATIO;
         const maxEdge = 560;
         const wMm = state.squaresX * state.squareMm;
@@ -386,96 +445,7 @@ async function runPreview(): Promise<void> {
             return;
         }
 
-        const manifest = await loadPresetPreviewManifest();
-        const presetKey = state.autoGrid ? presetPreviewKey(state.distanceId, state.paperId) : '';
-        const baked = presetKey && manifest ? manifest[presetKey] : undefined;
-
-        if (baked) {
-            try {
-                const boardSrc = resolvePresetAssetUrl(baked.board);
-                const fetches: Promise<Response>[] = [fetch(boardSrc, {signal})];
-                for (const t of baked.thumbs) {
-                    fetches.push(fetch(resolvePresetAssetUrl(t), {signal}));
-                }
-                const responses = await Promise.all(fetches);
-                for (const r of responses) {
-                    if (!r.ok) {
-                        throw new Error(`Preset preview fetch failed (${r.status})`);
-                    }
-                }
-
-                const boardDataUrl = svgToDataUrl(await responses[0]!.text());
-
-                if (signal.aborted) {
-                    return;
-                }
-
-                hideFullPreviewPlaceholder();
-                boardImg.src = boardDataUrl;
-                boardImg.alt = S.fullChart;
-                boardImg.classList.remove('board-img--hidden');
-
-                overlays.innerHTML = '';
-                if (rects) {
-                    for (const r of rects) {
-                        const d = document.createElement('div');
-                        d.className = 'sheet-rect';
-                        d.style.left = `${r.left * 100}%`;
-                        d.style.top = `${r.top * 100}%`;
-                        d.style.width = `${r.width * 100}%`;
-                        d.style.height = `${r.height * 100}%`;
-                        d.style.borderColor = charucoPagePreviewBorderColor(r.sheetIndex, tiling.pageCount, dark);
-                        overlays.appendChild(d);
-                    }
-                }
-
-                trunc.classList.toggle('hidden', !baked.truncated);
-                if (baked.truncated) {
-                    trunc.textContent = interpolate(S.truncatedPreview, {
-                        shown: baked.thumbs.length,
-                        total: baked.totalPages,
-                    });
-                }
-
-                thumbs.innerHTML = '';
-                if (baked.totalPages > 1) {
-                    const hdr = document.createElement('p');
-                    hdr.className = 'caption';
-                    hdr.textContent = interpolate(S.pageCountLabel, {count: baked.totalPages});
-                    hdr.style.gridColumn = '1 / -1';
-                    thumbs.appendChild(hdr);
-                }
-                const layoutN = tiling.pageCount;
-                for (let i = 0; i < responses.length - 1; i++) {
-                    const src = svgToDataUrl(await responses[i + 1]!.text());
-                    const wrap = document.createElement('div');
-                    wrap.className = 'thumb-wrap';
-                    const cap = document.createElement('p');
-                    cap.className = 'cap';
-                    cap.textContent = interpolate(S.pageLabel, {n: i + 1});
-                    const img = document.createElement('img');
-                    img.className = 'thumb-img';
-                    img.src = src;
-                    img.alt = interpolate(S.pageLabel, {n: i + 1});
-                    if (layoutN > 1 && baked.totalPages > 1) {
-                        img.style.border = `2px solid ${charucoPagePreviewBorderColor(i + 1, layoutN, dark)}`;
-                    } else {
-                        img.style.border = '1px solid var(--border)';
-                    }
-                    wrap.append(cap, img);
-                    thumbs.appendChild(wrap);
-                }
-                statusEl.textContent = '';
-                endPreviewBusyIfCurrent();
-                return;
-            } catch (e) {
-                if ((e as Error).name === 'AbortError') {
-                    return;
-                }
-                /* Missing baked assets or fetch error: fall through to live render. */
-            }
-        }
-
+        const tBoardSvg = perfDev() ? performance.now() : 0;
         const boardDataUrl = svgToDataUrl(
             renderCharucoBoardSvg(cW, cH, {
                 squaresX: state.squaresX,
@@ -484,6 +454,9 @@ async function runPreview(): Promise<void> {
                 markerLength: markerMm,
             }),
         );
+        if (perfDev()) {
+            perfLog('live board (renderCharucoBoardSvg + data URL)', performance.now() - tBoardSvg, `${cW}×${cH}px`);
+        }
 
         await yieldToMain();
         if (signal.aborted) {
@@ -507,6 +480,7 @@ async function runPreview(): Promise<void> {
                 tiling,
                 pages,
                 signal,
+                cooperativeYield: false,
             });
         } catch (e) {
             if ((e as Error).name === 'AbortError') {
@@ -525,7 +499,15 @@ async function runPreview(): Promise<void> {
         await yieldToMain();
 
         try {
+            const tThumbs = perfDev() ? performance.now() : 0;
             const pageImages = printResult.pages.slice(0, MAX_PREVIEW_PAGES).map((svg) => svgToDataUrl(svg));
+            if (perfDev()) {
+                perfLog(
+                    'preview thumbs (svgToDataUrl × N)',
+                    performance.now() - tThumbs,
+                    `${pageImages.length} thumbs — each encodes full sheet SVG`,
+                );
+            }
             const totalPages = printResult.totalPages;
             const truncated = totalPages > MAX_PREVIEW_PAGES;
             if (signal.aborted) {
@@ -585,6 +567,17 @@ async function runPreview(): Promise<void> {
                 wrap.append(cap, img);
                 thumbs.appendChild(wrap);
             });
+            await awaitPreviewImagesDecodedAndPaint(boardImg, thumbs);
+            if (perfDev()) {
+                perfLog('runPreview JS through paint proxy', performance.now() - previewWallStart, '');
+                if (scheduleBaselineMs !== undefined) {
+                    perfLog(
+                        'wall: schedulePreview → paint proxy',
+                        performance.now() - scheduleBaselineMs,
+                        `debounce target ${PREVIEW_DEBOUNCE_MS}ms`,
+                    );
+                }
+            }
             statusEl.textContent = '';
         } catch (e) {
             if ((e as Error).name === 'AbortError') {
@@ -612,53 +605,34 @@ async function downloadSvg(): Promise<void> {
     btnPdf.textContent = S.generatingSvg;
     await yieldToMain();
 
-    const presetKey = state.autoGrid ? presetPreviewKey(state.distanceId, state.paperId) : '';
-    const manifest = await loadPresetPreviewManifest();
-    const bakedZipPath = presetKey && manifest?.[presetKey]?.chartZip;
-
-    let downloaded = false;
-    if (bakedZipPath) {
-        try {
-            const res = await fetch(resolvePresetAssetUrl(bakedZipPath));
-            if (res.ok) {
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `charuco_${state.squaresX}x${state.squaresY}_${state.paperId}.zip`;
-                a.click();
-                URL.revokeObjectURL(url);
-                downloaded = true;
-            }
-        } catch {
-            /* fall through to live render */
-        }
-    }
-
-    if (!downloaded) {
-        const pd = paperDims();
-        const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
-        const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
-        try {
-            const blob = await renderCharucoPrintSvgZip({
-                squaresX: state.squaresX,
-                squaresY: state.squaresY,
-                squareLengthMm: state.squareMm,
-                paperWMm,
-                paperHMm,
-                markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
-                tiling,
-                pages,
-            });
+    const baseStem = `charuco_${state.squaresX}x${state.squaresY}_${state.paperId}`;
+    const pd = paperDims();
+    const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
+    const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
+    try {
+        const {pages: svgs} = await renderCharucoPrintSvg({
+            squaresX: state.squaresX,
+            squaresY: state.squaresY,
+            squareLengthMm: state.squareMm,
+            paperWMm,
+            paperHMm,
+            markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
+            tiling,
+            pages,
+            cooperativeYield: false,
+        });
+        for (let i = 0; i < svgs.length; i++) {
+            const blob = new Blob([svgs[i]!], {type: 'image/svg+xml;charset=utf-8'});
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `charuco_${state.squaresX}x${state.squaresY}_${state.paperId}.zip`;
+            a.download = `${baseStem}_page${i + 1}.svg`;
             a.click();
             URL.revokeObjectURL(url);
-        } catch (e) {
-            showErr(e instanceof Error ? e.message : String(e));
+            await yieldToMain();
         }
+    } catch (e) {
+        showErr(e instanceof Error ? e.message : String(e));
     }
 
     btnPdf.classList.remove('btn--busy');
@@ -729,12 +703,11 @@ function wireUi(): void {
     }
 }
 
-async function boot(): Promise<void> {
+function boot(): void {
     (byId('brandLogo') as HTMLImageElement).src = freemocapLogoUrl;
-    await loadPresetPreviewManifest();
     initTheme(() => schedulePreview());
     wireUi();
     syncUi();
 }
 
-void boot();
+boot();

@@ -61,12 +61,19 @@ export function generateImageMarker(id: number, sidePixels: number, borderBits: 
         }
     }
     const out = new Uint8Array(sidePixels * sidePixels);
-    const scale = sidePixels / tiny;
-    for (let y = 0; y < sidePixels; y++) {
-        for (let x = 0; x < sidePixels; x++) {
-            const sx = Math.min(tiny - 1, Math.floor(x / scale));
-            const sy = Math.min(tiny - 1, Math.floor(y / scale));
-            out[y * sidePixels + x] = tinyMarker[sy * tiny + sx]!;
+    for (let sy = 0; sy < tiny; sy++) {
+        const y0 = Math.round((sy * sidePixels) / tiny);
+        const y1 = Math.round(((sy + 1) * sidePixels) / tiny);
+        for (let sx = 0; sx < tiny; sx++) {
+            const x0 = Math.round((sx * sidePixels) / tiny);
+            const x1 = Math.round(((sx + 1) * sidePixels) / tiny);
+            const v = tinyMarker[sy * tiny + sx]!;
+            for (let y = y0; y < y1; y++) {
+                const rowOff = y * sidePixels;
+                for (let x = x0; x < x1; x++) {
+                    out[rowOff + x] = v;
+                }
+            }
         }
     }
     return out;

@@ -1,7 +1,6 @@
 node_modules/
 .playwright-mcp/
 dist/
-public/generated-presets/
 .venv/
 *.local
 .DS_Store

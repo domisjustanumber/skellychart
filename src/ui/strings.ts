@@ -31,14 +31,14 @@ export const S = {
     squaresInY: 'Squares in Y ({{n}})',
     layoutCannotFit:
         'Cannot fit this combination — try another square length, number of sheets, or grid.',
-    downloadSvg: 'Download SVG (ZIP)',
+    downloadSvg: 'Download SVG',
     generatingSvg: 'Generating SVG…',
     previewTitle: 'Preview',
     fullChart: 'Full ChaRuCo pattern',
     buildingPreview: 'Building preview…',
     buildingPreviews: 'Building previews…',
     truncatedPreview:
-        'Showing first {{shown}} of {{total}} pages in the preview. Download the ZIP for the full document.',
+        'Showing first {{shown}} of {{total}} pages in the preview. Download SVG to save every sheet.',
     pageCountLabel: '{{count}} pages',
     pageLabel: 'Page {{n}}',
     near: '1–2 m',

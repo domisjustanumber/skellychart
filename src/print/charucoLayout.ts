@@ -216,6 +216,13 @@ export const PAGE_COUNT_MAX = 9;
 const SQ_MIN = CHARUCO_SQUARE_MM_MIN;
 const SQ_MAX = CHARUCO_SQUARE_MM_MAX;
 
+/** Full scan is ~191 tiling checks; runs on every slider `input` — cache per grid + paper. */
+let validSquareSizesCacheKey = '';
+let validSquareSizesCache: number[] = [];
+const validSquareSizesForSheetsCache = new Map<string, number[]>();
+/** `validTargetPageCountsForGrid` + `applyAutoPreset` each scan all square sizes per page target — memoize. */
+const maxSquareMmForGridAndPagesCache = new Map<string, number | null>();
+
 export function maxSquareMmForGridAndPages(
     squaresX: number,
     squaresY: number,
@@ -223,6 +230,10 @@ export function maxSquareMmForGridAndPages(
     paperHMm: number,
     targetPages: number,
 ): number | null {
+    const key = `${squaresX}:${squaresY}:${paperWMm}:${paperHMm}:${targetPages}`;
+    if (maxSquareMmForGridAndPagesCache.has(key)) {
+        return maxSquareMmForGridAndPagesCache.get(key)!;
+    }
     let best: number | null = null;
     for (let s = SQ_MIN; s <= SQ_MAX; s++) {
         const t = computeTilingInfoMatchingPageCount(squaresX, squaresY, s, paperWMm, paperHMm, targetPages);
@@ -230,6 +241,7 @@ export function maxSquareMmForGridAndPages(
             best = s;
         }
     }
+    maxSquareMmForGridAndPagesCache.set(key, best);
     return best;
 }
 
@@ -254,13 +266,19 @@ export function enumerateValidSquareSizes(
     paperWMm: number,
     paperHMm: number,
 ): number[] {
+    const key = `${squaresX}:${squaresY}:${paperWMm}:${paperHMm}`;
+    if (key === validSquareSizesCacheKey) {
+        return validSquareSizesCache;
+    }
     const out = new Set<number>();
     for (let s = SQ_MIN; s <= SQ_MAX; s++) {
         if (computeTilingInfo(squaresX, squaresY, s, paperWMm, paperHMm) !== null) {
             out.add(s);
         }
     }
-    return [...out].sort((a, b) => a - b);
+    validSquareSizesCache = [...out].sort((a, b) => a - b);
+    validSquareSizesCacheKey = key;
+    return validSquareSizesCache;
 }
 
 export function enumerateValidSquareSizesForGridMatchingSheetsTarget(
@@ -270,6 +288,11 @@ export function enumerateValidSquareSizesForGridMatchingSheetsTarget(
     paperHMm: number,
     targetSheets: number,
 ): number[] {
+    const key = `${squaresX}:${squaresY}:${paperWMm}:${paperHMm}:${targetSheets}`;
+    const hit = validSquareSizesForSheetsCache.get(key);
+    if (hit) {
+        return hit;
+    }
     const out = new Set<number>();
     for (let s = SQ_MIN; s <= SQ_MAX; s++) {
         if (
@@ -278,7 +301,9 @@ export function enumerateValidSquareSizesForGridMatchingSheetsTarget(
             out.add(s);
         }
     }
-    return [...out].sort((a, b) => a - b);
+    const sorted = [...out].sort((a, b) => a - b);
+    validSquareSizesForSheetsCache.set(key, sorted);
+    return sorted;
 }
 
 export function nearestValidTargetPages(

@@ -3,6 +3,7 @@
  * height as the rendered PDF (instead of a flat {@link ORIGIN_PAGE_EXTRA_MM} slab).
  */
 import {
+    CHARUCO_PRINT_LABEL_SPEC_VERSION,
     MM_MARGIN_SHEET,
     MM_ORIGIN_BANNER_BELOW_GAP_MM,
     ORIGIN_BANNER_CONTENT_SIDE_MM,
@@ -16,10 +17,13 @@ import {
     QR_SIZE_MM,
     SKELLY_TOP_HEIGHT_MM,
 } from './constants.js';
-import {interpolate, pdfLabels} from './labels.js';
+import {originChartInfoParts, pdfLabels} from './labels.js';
 
-/** `viewBox` aspect from `public/freemocap-logo.svg` — keeps logo width in sync with PDF raster sizing. */
-const SKELLY_LOGO_NATURAL_W_OVER_H = 461.4 / 584.5;
+/** Matches `public/freemocap-logo.svg` — width/height used for nested `<svg viewBox>` on the print sheet. */
+export const SKELLY_LOGO_VIEWBOX_W = 461.4;
+export const SKELLY_LOGO_VIEWBOX_H = 584.5;
+/** Natural aspect for layout when only height in mm is fixed. */
+export const SKELLY_LOGO_NATURAL_W_OVER_H = SKELLY_LOGO_VIEWBOX_W / SKELLY_LOGO_VIEWBOX_H;
 
 function layoutIntPx(x: number): number {
     return Math.max(0, Math.floor(x));
@@ -126,18 +130,17 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
         1,
         boardInfoRight - instrLeft - gapInstBoard - minInstColPx,
     );
-    const boardInfoBlock = [
-        interpolate(pdfLabels.originSquareSizeLine, {mm: params.squareLengthMm}),
-        interpolate(pdfLabels.originWidthLine, {n: params.squaresX}),
-        interpolate(pdfLabels.originHeightLine, {n: params.squaresY}),
-        interpolate(pdfLabels.originOpenCvLine, {
-            opencv_version: OPENCV_LABEL_VERSION,
-            dictionary_name: 'DICT_4X4_250',
-        }),
-    ].join('\n');
+    const {bodyBlock: boardInfoBody} = originChartInfoParts({
+        version: CHARUCO_PRINT_LABEL_SPEC_VERSION,
+        mm: params.squareLengthMm,
+        squaresX: params.squaresX,
+        squaresY: params.squaresY,
+        opencv_version: OPENCV_LABEL_VERSION,
+        dictionary_name: 'DICT_4X4_250',
+    });
 
     ctx.font = `${bodyFontPx}px system-ui, Segoe UI, sans-serif`;
-    const boardInfoLines = wrapText(ctx, boardInfoBlock, boardColMaxW);
+    const boardInfoLines = wrapText(ctx, boardInfoBody, boardColMaxW);
     let by = bannerTitleTop + titleFontPx + Math.max(4, ppm);
     let infoLeft = boardInfoRight;
     for (const line of boardInfoLines) {
@@ -158,11 +161,7 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
     const bodyY = bannerTitleTop + titleBB + Math.max(4, ppm);
     ctx.font = `${bodyFontPx}px system-ui, Segoe UI, sans-serif`;
     const colW = instructionAllowRight - instrLeft;
-    const instLines = wrapText(
-        ctx,
-        pdfLabels.originInstructions + '\n' + pdfLabels.originInstructionsDocumentationFooter,
-        colW,
-    );
+    const instLines = wrapText(ctx, pdfLabels.originInstructionsBody, colW);
     let iy = bodyY;
     for (let i = 0; i < instLines.length; i++) {
         iy += bodyLineLead;

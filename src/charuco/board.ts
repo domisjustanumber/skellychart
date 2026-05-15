@@ -243,13 +243,18 @@ export function putGrayOnCanvas(canvas: HTMLCanvasElement, gray: Uint8Array): vo
 function arucoMarkerSvgRects(id: number, sidePx: number, borderBits: number): string {
     const markerSize = ARUCO_MARKER_SIZE_4X4;
     const tiny = markerSize + 2 * borderBits;
-    const cell = sidePx / tiny;
     const byte0 = DICT_4X4_250_ROT0_BYTES[id * 2]!;
     const byte1 = DICT_4X4_250_ROT0_BYTES[id * 2 + 1]!;
     const bits = getBitsFromByteList(new Uint8Array([byte0, byte1]), markerSize);
     const parts: string[] = [];
     for (let row = 0; row < tiny; row++) {
+        const y0 = Math.round((row * sidePx) / tiny);
+        const y1 = Math.round(((row + 1) * sidePx) / tiny);
+        const rh = Math.max(0, y1 - y0);
         for (let col = 0; col < tiny; col++) {
+            const x0 = Math.round((col * sidePx) / tiny);
+            const x1 = Math.round(((col + 1) * sidePx) / tiny);
+            const rw = Math.max(0, x1 - x0);
             let black = false;
             if (row < borderBits || row >= tiny - borderBits || col < borderBits || col >= tiny - borderBits) {
                 black = true;
@@ -258,10 +263,8 @@ function arucoMarkerSvgRects(id: number, sidePx: number, borderBits: number): st
                 const bc = col - borderBits;
                 black = bits[br * markerSize + bc]! === 1;
             }
-            if (black) {
-                parts.push(
-                    `<rect x="${col * cell}" y="${row * cell}" width="${cell}" height="${cell}" fill="#000"/>`,
-                );
+            if (black && rw > 0 && rh > 0) {
+                parts.push(`<rect x="${x0}" y="${y0}" width="${rw}" height="${rh}" fill="#000"/>`);
             }
         }
     }
@@ -305,25 +308,9 @@ export function renderCharucoBoardSvgFragment(
     const zoneOffX = startX + arucoX0;
     const zoneOffY = startY + arucoY0;
 
-    for (const m of markers) {
-        const oc0 = m.cornersMm[0]!;
-        const oc2 = m.cornersMm[2]!;
-        const p0 = {x: ((oc0.x - minX) / sizeX) * arucoW, y: ((oc0.y - minY) / sizeY) * arucoH};
-        const p2 = {x: ((oc2.x - minX) / sizeX) * arucoW, y: ((oc2.y - minY) / sizeY) * arucoH};
-        const dstW = Math.round(p2.x - p0.x);
-        const dstH = Math.round(p2.y - p0.y);
-        const side = Math.min(dstW, dstH);
-        if (side < 6) {
-            continue;
-        }
-        const dx = zoneOffX + Math.round(p0.x);
-        const dy = zoneOffY + Math.round(p0.y);
-        parts.push(`<g transform="translate(${dx} ${dy})">${arucoMarkerSvgRects(m.id, side, 1)}</g>`);
-    }
-
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
-            if (y % 2 === x % 2) {
+            if (y % 2 !== x % 2) {
                 continue;
             }
             const x0 = Math.round(x * pixInSquare);
@@ -338,6 +325,24 @@ export function renderCharucoBoardSvgFragment(
                 );
             }
         }
+    }
+
+    for (const m of markers) {
+        const oc0 = m.cornersMm[0]!;
+        const oc2 = m.cornersMm[2]!;
+        const p0 = {x: ((oc0.x - minX) / sizeX) * arucoW, y: ((oc0.y - minY) / sizeY) * arucoH};
+        const p2 = {x: ((oc2.x - minX) / sizeX) * arucoW, y: ((oc2.y - minY) / sizeY) * arucoH};
+        const dstW = Math.round(p2.x - p0.x);
+        const dstH = Math.round(p2.y - p0.y);
+        const side = Math.min(dstW, dstH);
+        if (side < 6) {
+            continue;
+        }
+        const dx = zoneOffX + Math.round(p0.x);
+        const dy = zoneOffY + Math.round(p0.y);
+        parts.push(
+            `<g transform="translate(${dx} ${dy})" shape-rendering="crispEdges">${arucoMarkerSvgRects(m.id, side, 1)}</g>`,
+        );
     }
     parts.push('</g>');
     return parts.join('');

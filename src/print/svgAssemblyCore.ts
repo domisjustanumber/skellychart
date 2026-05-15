@@ -26,9 +26,11 @@ import {
     PIXELS_PER_MM,
     QR_SIZE_MM,
 } from './constants.js';
-import {interpolate, pdfLabels} from './labels.js';
+import {interpolate, originChartInfoParts, pdfLabels} from './labels.js';
 import type {PageSpec, TilingInfo} from './tiling.js';
 import type {PrintSvgAssemblyParams, PrintSvgResult} from './svgAssemblyTypes.js';
+import {perfDev, perfLog, perfNote, perfSync} from './perfDebug.js';
+import {SKELLY_LOGO_VIEWBOX_H, SKELLY_LOGO_VIEWBOX_W} from './originBannerEstimate.js';
 import {escapeXml, rgbCss, svgRootOpen, SVG_ROOT_CLOSE} from './svgUtils.js';
 import {yieldToMain} from '../ui/yieldToMain.js';
 
@@ -398,10 +400,14 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
         pages,
         signal,
         qrSvgFragment,
-        logoHref,
+        logoSvgInner,
         logoWidthPx,
         logoHeightPx,
+        cooperativeYield,
     } = params;
+
+    const yieldStep = (): Promise<void> =>
+        cooperativeYield !== false ? yieldToMain() : Promise.resolve();
 
     const abortIfNeeded = (): void => {
         if (signal?.aborted) {
@@ -419,9 +425,15 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
 
     const fullWPx = Math.max(1, layoutIntPx(squaresX * squareLengthMm * ppm));
     const fullHPx = Math.max(1, layoutIntPx(squaresY * squareLengthMm * ppm));
-    const boardInner = renderCharucoBoardSvgFragment(fullWPx, fullHPx, geom);
+    const boardInner = perfSync(`renderCharucoBoardSvgFragment (${fullWPx}×${fullHPx}px)`, () =>
+        renderCharucoBoardSvgFragment(fullWPx, fullHPx, geom),
+    );
+    perfNote(
+        'Full board embedded per sheet',
+        `${(boardInner.length / 1e6).toFixed(2)} MB SVG substring × ${pages.length} pages ≈ ${((boardInner.length * pages.length) / 1e6).toFixed(2)} MB total duplication`,
+    );
     abortIfNeeded();
-    await yieldToMain();
+    await yieldStep();
 
     const boardPxLayout = charucoBoardPixelLayout(fullWPx, fullHPx, squaresX, squaresY);
     const pagePxW = Math.max(1, Math.round(paperWMm * ppm));
@@ -437,14 +449,15 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
     const joinFontPx = bodyFontPx;
     const qrSizePx = Math.max(32, Math.round(QR_SIZE_MM * ppm));
 
-    const skellyW = logoHref ? logoWidthPx : 0;
-    const skellyH = logoHref ? logoHeightPx : 0;
+    const skellyW = logoSvgInner ? logoWidthPx : 0;
+    const skellyH = logoSvgInner ? logoHeightPx : 0;
 
     const pageSvgs: string[] = [];
+    const pageLoopT0 = perfDev() ? performance.now() : 0;
 
     for (const spec of pages) {
         abortIfNeeded();
-        await yieldToMain();
+        await yieldStep();
 
         let [l, r] = charucoCropXRange(spec.gx0, spec.gx1, boardPxLayout);
         let [t, b] = charucoCropYRange(spec.gy0, spec.gy1, boardPxLayout);
@@ -474,24 +487,20 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
 
             const titleFont = `bold ${titleFontPx}px ${FONT}`;
             const bodyFont = `${bodyFontPx}px ${FONT}`;
-            const boardTitle = interpolate(pdfLabels.originTitleLine, {
+            const {titleLine: boardTitle, bodyBlock: boardInfoBody} = originChartInfoParts({
                 version: CHARUCO_PRINT_LABEL_SPEC_VERSION,
+                mm: squareLengthMm,
+                squaresX,
+                squaresY,
+                opencv_version: OPENCV_LABEL_VERSION,
+                dictionary_name: 'DICT_4X4_250',
             });
             parts.push(
                 `<text x="${boardInfoRight}" y="${bannerTitleTop}" fill="#000" font-size="${titleFontPx}" font-family="${FONT}" font-weight="bold" text-anchor="end" dominant-baseline="hanging">${escapeXml(boardTitle)}</text>`,
             );
 
             const boardColMaxW = Math.max(1, boardInfoRight - instrLeft - gapInstBoard - minInstColPx);
-            const boardInfoBlock = [
-                interpolate(pdfLabels.originSquareSizeLine, {mm: squareLengthMm}),
-                interpolate(pdfLabels.originWidthLine, {n: squaresX}),
-                interpolate(pdfLabels.originHeightLine, {n: squaresY}),
-                interpolate(pdfLabels.originOpenCvLine, {
-                    opencv_version: OPENCV_LABEL_VERSION,
-                    dictionary_name: 'DICT_4X4_250',
-                }),
-            ].join('\n');
-            const boardInfoLines = wrapText(bodyFont, boardInfoBlock, boardColMaxW);
+            const boardInfoLines = wrapText(bodyFont, boardInfoBody, boardColMaxW);
             let by = bannerTitleTop + titleFontPx + Math.max(4, ppm);
             let infoLeft = boardInfoRight;
             const mctx = measureCtx();
@@ -513,9 +522,9 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
                 );
             }
 
-            if (logoHref && skellyW > 0) {
+            if (logoSvgInner && skellyW > 0) {
                 parts.push(
-                    `<image href="${escapeXml(logoHref)}" x="${bannerLeft}" y="${qrY}" width="${skellyW}" height="${skellyH}" preserveAspectRatio="xMidYMid meet"/>`,
+                    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" x="${bannerLeft}" y="${qrY}" width="${skellyW}" height="${skellyH}" viewBox="0 0 ${SKELLY_LOGO_VIEWBOX_W} ${SKELLY_LOGO_VIEWBOX_H}" preserveAspectRatio="xMidYMid meet" overflow="hidden">${logoSvgInner}</svg>`,
                 );
             }
 
@@ -532,16 +541,12 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
             );
             const bodyY = bannerTitleTop + titleFontPx + Math.max(4, ppm);
             const colW = instructionAllowRight - instrLeft;
-            const instLines = wrapText(
-                bodyFont,
-                pdfLabels.originInstructions + '\n' + pdfLabels.originInstructionsDocumentationFooter,
-                colW,
-            );
+            const instLines = wrapText(bodyFont, pdfLabels.originInstructionsBody, colW);
             parts.push(svgTextBlock(instLines, instrLeft, bodyY, bodyLineLead, 'start', bodyFont));
             const instBottom = bodyY + instLines.length * bodyLineLead;
 
             parts.push(
-                `<svg x="${qrX}" y="${bannerTitleTop}" width="${qrSizePx}" height="${qrSizePx}" viewBox="0 0 ${qrSizePx} ${qrSizePx}" overflow="hidden">${qrSvgFragment}</svg>`,
+                `<svg x="${qrX}" y="${bannerTitleTop}" width="${qrSizePx}" height="${qrSizePx}" overflow="hidden">${qrSvgFragment}</svg>`,
             );
 
             const skellyBottomExtra = skellyW > 0 ? qrY + skellyH : qrY;
@@ -651,7 +656,11 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
 
         pageSvgs.push(svgRootOpen(pagePxW, pagePxH, paperWMm, paperHMm) + parts.join('') + SVG_ROOT_CLOSE);
         abortIfNeeded();
-        await yieldToMain();
+        await yieldStep();
+    }
+
+    if (perfDev()) {
+        perfLog('assemble all page SVG strings', performance.now() - pageLoopT0, `${pages.length} pages`);
     }
 
     return {pages: pageSvgs, totalPages};

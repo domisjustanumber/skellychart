@@ -1,54 +1,92 @@
 import freemocapLogoUrl from '../freemocapLogoUrl.js';
 import {CHARUCO_PRINT_SOURCE_URL, PIXELS_PER_MM, QR_SIZE_MM, SKELLY_TOP_HEIGHT_MM} from './constants.js';
 import {buildCharucoDocumentationUrl} from './charucoDocUrl.js';
+import {SKELLY_LOGO_NATURAL_W_OVER_H} from './originBannerEstimate.js';
 import {generateQrSvgFragment} from './qrSvg.js';
+import {perfAsync} from './perfDebug.js';
 import {renderCharucoPrintSvgCore} from './svgAssemblyCore.js';
 import type {PrintSvgParams, PrintSvgResult} from './svgAssemblyTypes.js';
-import {zipSvgPages} from './svgZip.js';
-import {yieldToMain} from '../ui/yieldToMain.js';
 
 export type {PrintSvgParams} from './svgAssemblyTypes.js';
 export {buildCharucoDocumentationUrl} from './charucoDocUrl.js';
 
-async function resolveLogoHref(): Promise<string | null> {
-    if (typeof window !== 'undefined') {
-        return freemocapLogoUrl;
-    }
-    const logoFile = typeof process !== 'undefined' ? process.env.CHARUCO_LOGO_FILE?.trim() : '';
-    if (logoFile) {
-        const {pathToFileURL} = await import(/* @vite-ignore */ 'node:url');
-        return pathToFileURL(logoFile).href;
-    }
-    return null;
+/** One resolved XML fetch/read per runtime (browser tab or Node process). */
+let memoLogoXmlPromise: Promise<string | null> | undefined;
+
+/** Inner fragment (no wrapper) after first successful parse — reused for every print SVG. */
+let memoLogoSvgInner: string | undefined;
+
+function stripOuterSvgWrapper(svgXml: string): string {
+    const t = svgXml.trim().replace(/^<\?xml[\s\S]*?\?>/, '').trimStart();
+    const m = t.match(/<svg\b[\s\S]*?>([\s\S]*)<\/svg>\s*$/i);
+    return m?.[1]?.trim() ?? t;
 }
 
-function loadImage(src: string): Promise<HTMLImageElement> {
-    return new Promise((resolve, reject) => {
-        const im = new Image();
-        im.crossOrigin = 'anonymous';
-        im.onload = () => resolve(im);
-        im.onerror = reject;
-        im.src = src;
-    });
+/**
+ * Embedded `<image xlink:href="*.png">` from Illustrator export — files are not shipped; drop so
+ * Inkscape does not show missing-image tiles when editing the chart.
+ */
+function stripEmbeddedPngImages(svgInner: string): string {
+    return svgInner.replace(
+        /<image\b[\s\S]*?(?:xlink:href|href)\s*=\s*["'][^"']*\.png["'][\s\S]*?(?:\/>|>[\s\S]*?<\/image>)/gi,
+        '',
+    );
 }
 
-async function resolveLogoDimensions(ppm: number): Promise<{
-    href: string | null;
+function logoInnerMarkupFromXml(xml: string): string {
+    return stripEmbeddedPngImages(stripOuterSvgWrapper(xml));
+}
+
+async function fetchFreemocapLogoSvgXmlOnce(): Promise<string | null> {
+    try {
+        if (typeof window !== 'undefined') {
+            const url = new URL(freemocapLogoUrl, window.location.href).href;
+            const res = await fetch(url, {cache: 'force-cache'});
+            if (!res.ok) {
+                return null;
+            }
+            return await res.text();
+        }
+        const logoFile = typeof process !== 'undefined' ? process.env.CHARUCO_LOGO_FILE?.trim() : '';
+        if (!logoFile) {
+            return null;
+        }
+        const {readFileSync} = await import(/* @vite-ignore */ 'node:fs');
+        return readFileSync(logoFile, 'utf8');
+    } catch {
+        return null;
+    }
+}
+
+async function loadFreemocapLogoSvgXml(): Promise<string | null> {
+    memoLogoXmlPromise ??= fetchFreemocapLogoSvgXmlOnce();
+    return memoLogoXmlPromise;
+}
+
+function warmupFreemocapLogoCache(): void {
+    void loadFreemocapLogoSvgXml().catch(() => {});
+}
+
+/**
+ * Inline logo markup (nested `<svg>`) so exported charts open in Inkscape; a top-level `<image
+ * href="data:image/svg+xml,...">` is often shown as broken there, and `xlink:href` on `<image>` is
+ * still what many SVG 1.1 tools expect for external images.
+ */
+async function resolveLogoForPrint(ppm: number): Promise<{
+    logoSvgInner: string | null;
     widthPx: number;
     heightPx: number;
 }> {
-    const href = await resolveLogoHref();
-    if (!href) {
-        return {href: null, widthPx: 0, heightPx: 0};
+    const xml = await loadFreemocapLogoSvgXml();
+    if (!xml) {
+        return {logoSvgInner: null, widthPx: 0, heightPx: 0};
     }
-    try {
-        const img = await loadImage(href);
-        const nh = Math.max(1, Math.round(SKELLY_TOP_HEIGHT_MM * ppm));
-        const nw = Math.max(1, Math.round((img.naturalWidth * nh) / Math.max(1, img.naturalHeight)));
-        return {href, widthPx: nw, heightPx: nh};
-    } catch {
-        return {href: null, widthPx: 0, heightPx: 0};
+    if (memoLogoSvgInner === undefined) {
+        memoLogoSvgInner = logoInnerMarkupFromXml(xml);
     }
+    const nh = Math.max(1, Math.round(SKELLY_TOP_HEIGHT_MM * ppm));
+    const nw = Math.max(1, Math.round(SKELLY_LOGO_NATURAL_W_OVER_H * nh));
+    return {logoSvgInner: memoLogoSvgInner || null, widthPx: nw, heightPx: nh};
 }
 
 export async function renderCharucoPrintSvg(params: PrintSvgParams): Promise<PrintSvgResult> {
@@ -61,22 +99,20 @@ export async function renderCharucoPrintSvg(params: PrintSvgParams): Promise<Pri
         params.markerLengthRatio,
     );
     const qrSizePx = Math.max(32, Math.round(QR_SIZE_MM * ppm));
-    const qrSvgFragment = await generateQrSvgFragment(docUrl, qrSizePx);
-    const logo = await resolveLogoDimensions(ppm);
+    const qrSvgFragment = await perfAsync('QR SVG fragment', () => generateQrSvgFragment(docUrl, qrSizePx));
+    const logo = await perfAsync('Logo SVG inner fragment (cached after first fetch)', () => resolveLogoForPrint(ppm));
 
-    return renderCharucoPrintSvgCore({
-        ...params,
-        qrSvgFragment,
-        logoHref: logo.href,
-        logoWidthPx: logo.widthPx,
-        logoHeightPx: logo.heightPx,
-    });
+    return perfAsync('renderCharucoPrintSvgCore (board + all sheets)', () =>
+        renderCharucoPrintSvgCore({
+            ...params,
+            qrSvgFragment,
+            logoSvgInner: logo.logoSvgInner,
+            logoWidthPx: logo.widthPx,
+            logoHeightPx: logo.heightPx,
+        }),
+    );
 }
 
-/** ZIP archive of per-page SVG files (download / baked preset). */
-export async function renderCharucoPrintSvgZip(params: PrintSvgParams): Promise<Blob> {
-    const {pages} = await renderCharucoPrintSvg(params);
-    params.signal?.throwIfAborted();
-    await yieldToMain();
-    return zipSvgPages(pages);
+if (typeof window !== 'undefined') {
+    queueMicrotask(() => warmupFreemocapLogoCache());
 }

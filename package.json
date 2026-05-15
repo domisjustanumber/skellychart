@@ -3,20 +3,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "bake-presets": "tsx scripts/bake-preset-previews.ts",
-    "dev": "npm run bake-presets && vite",
-    "build": "npm run bake-presets && tsc -b && vite build",
+    "dev": "vite",
+    "build": "tsc -b && vite build",
     "preview": "vite preview"
   },
   "devDependencies": {
-    "@napi-rs/canvas": "^1.0.0",
     "@types/qrcode": "^1.5.6",
-    "tsx": "^4.22.0",
     "typescript": "~6.0.3",
     "vite": "^8.0.13"
   },
   "dependencies": {
-    "fflate": "^0.8.2",
     "qrcode": "^1.5.4"
   }
 }

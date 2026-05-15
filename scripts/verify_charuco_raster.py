@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare ChAruCo raster from OpenCV generateImage to skellychart TypeScript renderCharucoBoardGray."""
+"""Compare ChArUco raster from OpenCV generateImage to skellychart TypeScript renderCharucoBoardGray."""
 
 from __future__ import annotations
 

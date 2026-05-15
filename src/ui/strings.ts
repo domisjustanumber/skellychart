@@ -40,7 +40,7 @@ export const S = {
     qrOpenCvMismatch:
         'This link’s OpenCV line (cv2) does not match this generator (expected {{ours}}; got {{theirs}}). Board detection or geometry may differ.',
     previewTitle: 'Preview',
-    fullChart: 'Full ChAruCo pattern',
+    fullChart: 'Full ChArUco pattern',
     loadingPreview: 'Loading preview',
     loadingPreviews: 'Loading previews',
     truncatedPreview:

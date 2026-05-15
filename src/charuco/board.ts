@@ -9,7 +9,7 @@ export interface CharucoGeometry {
 }
 
 /**
- * Pixel layout for a ChAruCo bitmap (same math as `renderCharucoBoardGray`).
+ * Pixel layout for a ChArUco bitmap (same math as `renderCharucoBoardGray`).
  * Crops for multi-page PDF must use this so page seams never bisect a rendered square
  * (`charuco_board_print.py` splits only on whole square indices; pixel cuts must match).
  */
@@ -271,7 +271,7 @@ function arucoMarkerSvgRects(id: number, sidePx: number, borderBits: number): st
     return parts.join('');
 }
 
-/** Inner `<g>` for a ChAruCo board in pixel coordinates (same layout as `renderCharucoBoardGray`). */
+/** Inner `<g>` for a ChArUco board in pixel coordinates (same layout as `renderCharucoBoardGray`). */
 export function renderCharucoBoardSvgFragment(
     widthPx: number,
     heightPx: number,
@@ -348,7 +348,7 @@ export function renderCharucoBoardSvgFragment(
     return parts.join('');
 }
 
-/** Standalone SVG document for a ChAruCo board at pixel resolution. */
+/** Standalone SVG document for a ChArUco board at pixel resolution. */
 export function renderCharucoBoardSvg(
     widthPx: number,
     heightPx: number,

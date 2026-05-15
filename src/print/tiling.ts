@@ -1,5 +1,5 @@
 /**
- * Sheet tiling for ChAruCo print PDFs — same convergence as `charucoPrintLayout.ts` /
+ * Sheet tiling for ChArUco print PDFs — same convergence as `charucoPrintLayout.ts` /
  * `_compute_tiling` in `charuco_board_print.py`.
  */
 import {
@@ -228,7 +228,7 @@ export function computeTilingInfoMatchingPageCount(
  * PDF / physical sheet width×height (mm) for a nominal paper size from presets (`wMm`×`hMm`, short×long).
  * Must match the orientation used when `tiling` was computed (`computeTilingInfo*` swaps dimensions
  * when `landscape` is true); otherwise `maxCx` / row caps assume the wrong printable width and tiles
- * bisect ChAruCo squares on the raster.
+ * bisect ChArUco squares on the raster.
  */
 export function nominalPaperToPdfDimensionsMm(
     nominalWMm: number,

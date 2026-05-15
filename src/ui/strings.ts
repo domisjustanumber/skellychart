@@ -45,8 +45,8 @@ export const S = {
         'This link’s OpenCV line (cv2) does not match this generator (expected {{ours}}; got {{theirs}}). Board detection or geometry may differ.',
     previewTitle: 'Preview',
     fullChart: 'Full ChaRuCo pattern',
-    buildingPreview: 'Building preview…',
-    buildingPreviews: 'Building previews…',
+    loadingPreview: 'Loading preview',
+    loadingPreviews: 'Loading previews',
     truncatedPreview:
         'Showing first {{shown}} of {{total}} pages in the preview. Use Print to output every sheet.',
     pageCountLabel: '{{count}} pages',

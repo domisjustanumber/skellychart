@@ -204,8 +204,10 @@ const SQ_MAX = CHARUCO_SQUARE_MM_MAX;
 let validSquareSizesCacheKey = '';
 let validSquareSizesCache: number[] = [];
 const validSquareSizesForSheetsCache = new Map<string, number[]>();
-/** `validTargetPageCountsForGrid` + `applyAutoPreset` each scan all square sizes per page target — memoize. */
+/** `maxSquareMmForGridAndPages` memo; scan order is optimised (descending) for typical hit rate. */
 const maxSquareMmForGridAndPagesCache = new Map<string, number | null>();
+/** Memo: `syncUi` called every frame while dragging squares — avoid re-walking targets 1..9 repeatedly. */
+const validTargetPageCountsForGridCache = new Map<string, number[]>();
 
 export function maxSquareMmForGridAndPages(
     squaresX: number,
@@ -218,15 +220,15 @@ export function maxSquareMmForGridAndPages(
     if (maxSquareMmForGridAndPagesCache.has(key)) {
         return maxSquareMmForGridAndPagesCache.get(key)!;
     }
-    let best: number | null = null;
-    for (let s = SQ_MIN; s <= SQ_MAX; s++) {
+    for (let s = SQ_MAX; s >= SQ_MIN; s--) {
         const t = computeTilingInfoMatchingPageCount(squaresX, squaresY, s, paperWMm, paperHMm, targetPages);
         if (t !== null) {
-            best = s;
+            maxSquareMmForGridAndPagesCache.set(key, s);
+            return s;
         }
     }
-    maxSquareMmForGridAndPagesCache.set(key, best);
-    return best;
+    maxSquareMmForGridAndPagesCache.set(key, null);
+    return null;
 }
 
 export function validTargetPageCountsForGrid(
@@ -235,12 +237,27 @@ export function validTargetPageCountsForGrid(
     paperWMm: number,
     paperHMm: number,
 ): number[] {
+    const key = `${squaresX}:${squaresY}:${paperWMm}:${paperHMm}`;
+    const cached = validTargetPageCountsForGridCache.get(key);
+    if (cached !== undefined) {
+        return cached;
+    }
     const out: number[] = [];
     for (let p = PAGE_COUNT_MIN; p <= PAGE_COUNT_MAX; p++) {
-        if (maxSquareMmForGridAndPages(squaresX, squaresY, paperWMm, paperHMm, p) !== null) {
+        let any = false;
+        for (let s = SQ_MIN; s <= SQ_MAX; s++) {
+            // Existence-only: stops as soon as *some* square length satisfies `p` sheets (much cheaper than
+            // walking all `s` to find the maximum, which `maxSquareMmForGridAndPages` does when needed).
+            if (computeTilingInfoMatchingPageCount(squaresX, squaresY, s, paperWMm, paperHMm, p) !== null) {
+                any = true;
+                break;
+            }
+        }
+        if (any) {
             out.push(p);
         }
     }
+    validTargetPageCountsForGridCache.set(key, out);
     return out;
 }
 

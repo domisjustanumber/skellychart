@@ -261,7 +261,8 @@ function arucoMarkerSvgRects(id: number, sidePx: number, borderBits: number): st
             } else {
                 const br = row - borderBits;
                 const bc = col - borderBits;
-                black = bits[br * markerSize + bc]! === 1;
+                // Match `generateImageMarker`: bit 1 → white, bit 0 → black (OpenCV getBitsFromByteList).
+                black = bits[br * markerSize + bc]! === 0;
             }
             if (black && rw > 0 && rh > 0) {
                 parts.push(`<rect x="${x0}" y="${y0}" width="${rw}" height="${rh}" fill="#000"/>`);

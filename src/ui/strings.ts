@@ -2,6 +2,10 @@
 
 import type {WorkingDistanceTierId} from '../print/charucoLayout.js';
 
+/** FreeMoCap multi-camera calibration (using the chart). */
+export const FREEMOCAP_CALIBRATION_DOCS_MULTI_CAM_URL =
+    'https://docs.freemocap.org/documentation/multi-camera-calibration.html#setting-up-cameras';
+
 const PLACEHOLDER = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
 
 export function interpolate(template: string, vars: Record<string, string | number>): string {
@@ -17,8 +21,11 @@ export const S = {
     themeLight: 'Light',
     themeSystem: 'System',
     title: 'FreeMoCap Calibration Chart Generator',
-    intro:
+    introMain:
         'Create a printable calibration chart that can be used with FreeMoCap. Select the distance your subject will be from the camera and your paper size. Use the Advanced settings if you want to fine-tune settings.\n\nThe QR code in the top corner can be scanned with your phone to bring you back here with all of the settings pre-configured.',
+    introDocsPrefix: '\n\nTo find out how to use the chart, check out the ',
+    introDocsLinkLabel: 'FreeMoCap documentation',
+    introDocsSuffix: '.',
     workingDistance: 'Working distance from camera',
     paperSize: 'Paper size',
     paperOption: '{{paper}} ({{wMm}} × {{hMm}} mm)',

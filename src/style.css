@@ -183,6 +183,15 @@ body {
   white-space: pre-line;
 }
 
+.intro a {
+  color: var(--primary);
+  text-underline-offset: 2px;
+}
+
+.intro a:hover {
+  color: var(--primary-hover);
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;

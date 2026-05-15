@@ -43,7 +43,15 @@ import {
     setStoredPreference,
     type ThemePreference,
 } from './ui/theme.js';
-import {bandLabel, distanceSelectLabel, interpolate, paperLabel, S, sheetCountPhrase} from './ui/strings.js';
+import {
+    FREEMOCAP_CALIBRATION_DOCS_MULTI_CAM_URL,
+    bandLabel,
+    distanceSelectLabel,
+    interpolate,
+    paperLabel,
+    S,
+    sheetCountPhrase,
+} from './ui/strings.js';
 
 const PRESET_IDS = ['close', 'near', 'far'] as const;
 
@@ -301,6 +309,17 @@ function finalizeRangeGestureIfNeeded(): void {
     finalizeRangeGestureUi();
 }
 
+function setIntroElement(el: HTMLElement): void {
+    const prefix = document.createTextNode(S.introMain + S.introDocsPrefix);
+    const a = document.createElement('a');
+    a.href = FREEMOCAP_CALIBRATION_DOCS_MULTI_CAM_URL;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = S.introDocsLinkLabel;
+    const suffix = document.createTextNode(S.introDocsSuffix);
+    el.replaceChildren(prefix, a, suffix);
+}
+
 function syncUi(options: SyncUiOptions = {}): void {
     const {lite = false, previewDelayMs} = options;
     const t0 = perfDev() ? performance.now() : 0;
@@ -316,7 +335,7 @@ function syncUi(options: SyncUiOptions = {}): void {
 
     if (!lite) {
         byId('pageTitle').textContent = S.title;
-        byId('intro').textContent = S.intro;
+        setIntroElement(byId('intro'));
         byId('lbl-distance').textContent = S.workingDistance;
         byId('lbl-paper').textContent = S.paperSize;
         byId('lbl-advanced').textContent = S.advanced;

@@ -370,7 +370,7 @@ function svgVerticalTapeLabel(
     const py = Math.max(0, Math.min(centerY - rh / 2, pagePxH - rh));
     const cx = px + rw / 2;
     const cy = py + rh / 2;
-    const angle = side === 'left' ? -90 : 90;
+    const angle = (side === 'left' ? -90 : 90) + 180;
     return (
         `<text transform="rotate(${angle} ${cx} ${cy})" x="${cx}" y="${cy}" fill="#000" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle" dominant-baseline="middle">${escapeXml(text)}</text>`
     );
@@ -415,6 +415,11 @@ function svgHorizontalTapeLabel(
             const joinStripTop = pagePxH - marginPx - joinPy;
             pyTop = joinStripTop + Math.max(0, (joinPy - rh) / 2);
         }
+    }
+    if (placement === 'above') {
+        const cx = px + m.width / 2;
+        const cy = pyTop + rh / 2;
+        return `<text transform="rotate(180 ${cx} ${cy})" x="${cx}" y="${cy}" fill="#000" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle" dominant-baseline="middle">${escapeXml(text)}</text>`;
     }
     return `<text x="${px}" y="${pyTop}" fill="#000" font-size="${fontPx}" font-family="${FONT}" dominant-baseline="hanging">${escapeXml(text)}</text>`;
 }

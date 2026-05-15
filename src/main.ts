@@ -28,7 +28,12 @@ import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from './print/tiling.js';
 import {perfDev, perfLog} from './print/perfDebug.js';
 import {CHARUCO_MARKER_LENGTH_RATIO, CHARUCO_PRINT_LABEL_SPEC_VERSION} from './print/constants.js';
 import {expectedCharucoCv2QueryValue, parseCharucoQrSearchParams} from './print/charucoDocUrl.js';
-import {MAX_PREVIEW_PAGES, PREVIEW_DEBOUNCE_MS, svgToDataUrl} from './ui/previewSvg.js';
+import {
+    MAX_PREVIEW_PAGES,
+    PREVIEW_DEBOUNCE_IDLE_MS,
+    PREVIEW_DEBOUNCE_INTERACTIVE_MS,
+    svgToDataUrl,
+} from './ui/previewSvg.js';
 import {yieldToMain} from './ui/yieldToMain.js';
 import {
     applyThemePreference,
@@ -232,6 +237,21 @@ let syncedPaperSelectKey = '';
 let suppressDistanceSelectUiClamp = false;
 /** Square-length band labels + gradient only depend on locale (imperial vs m) and tier constants. */
 let syncedTierBandKey = '';
+/** While true, previews use a shorter debounce; range `pointerdown`/`pointerup` maintain this. */
+let rangePointerHeld = false;
+/** Last preview timer delay chosen (for perf logging). */
+let lastScheduledPreviewDelayMs = PREVIEW_DEBOUNCE_IDLE_MS;
+
+type SyncUiOptions = {
+    /**
+     * When true, skips static chrome (titles, intros, unmoving labels) so slider drags do less DOM work per frame.
+     */
+    lite?: boolean;
+    /**
+     * When set, overrides automatic interactive vs idle debounce for the preview scheduling at the end of this sync.
+     */
+    previewDelayMs?: number;
+};
 
 /**
  * Batches slider-driven DOM updates into the next animation frame so the UI thread can paint spinners,
@@ -243,11 +263,34 @@ function scheduleSyncUi(): void {
     }
     syncUiRafId = window.requestAnimationFrame(() => {
         syncUiRafId = null;
-        syncUi();
+        syncUi({lite: true});
     });
 }
 
-function syncUi(): void {
+function finalizeRangeGestureUi(): void {
+    rangePointerHeld = false;
+    if (syncUiRafId !== null) {
+        window.cancelAnimationFrame(syncUiRafId);
+        syncUiRafId = null;
+    }
+    syncUi({lite: false, previewDelayMs: 0});
+}
+
+function wireRangeResponsiveUi(el: HTMLInputElement): void {
+    el.addEventListener('pointerdown', () => {
+        rangePointerHeld = true;
+    });
+}
+
+function finalizeRangeGestureIfNeeded(): void {
+    if (!rangePointerHeld) {
+        return;
+    }
+    finalizeRangeGestureUi();
+}
+
+function syncUi(options: SyncUiOptions = {}): void {
+    const {lite = false, previewDelayMs} = options;
     const t0 = perfDev() ? performance.now() : 0;
     if (syncUiRafId !== null) {
         window.cancelAnimationFrame(syncUiRafId);
@@ -259,20 +302,24 @@ function syncUi(): void {
     const pd = paperDims();
     const tiling = effectiveTiling();
 
-    byId('pageTitle').textContent = S.title;
-    byId('intro').textContent = S.intro;
-    byId('lbl-distance').textContent = S.workingDistance;
-    byId('lbl-paper').textContent = S.paperSize;
-    byId('lbl-advanced').textContent = S.advanced;
+    if (!lite) {
+        byId('pageTitle').textContent = S.title;
+        byId('intro').textContent = S.intro;
+        byId('lbl-distance').textContent = S.workingDistance;
+        byId('lbl-paper').textContent = S.paperSize;
+        byId('lbl-advanced').textContent = S.advanced;
+    }
     byId('lbl-square').textContent = interpolate(S.squareLengthHeading, {mm: state.squareMm});
     byId('lbl-pages').textContent = interpolate(S.numberOfPages, {n: pagesSliderDisplay(tiling)});
     byId('lbl-sx').textContent = interpolate(S.squaresInX, {n: state.squaresX});
     byId('lbl-sy').textContent = interpolate(S.squaresInY, {n: state.squaresY});
-    byId('preview-title').textContent = S.previewTitle;
-    byId('lbl-fullchart').textContent = S.fullChart;
-    (byId('btnPdf') as HTMLButtonElement).textContent = S.printCharts;
-    (byId('btnSaveSvg') as HTMLButtonElement).textContent = S.saveSvgFiles;
-    byId('printScaleHint').textContent = S.printScaleHint;
+    if (!lite) {
+        byId('preview-title').textContent = S.previewTitle;
+        byId('lbl-fullchart').textContent = S.fullChart;
+        (byId('btnPdf') as HTMLButtonElement).textContent = S.printCharts;
+        (byId('btnSaveSvg') as HTMLButtonElement).textContent = S.saveSvgFiles;
+        byId('printScaleHint').textContent = S.printScaleHint;
+    }
 
     const frac = squareLengthTierBandEdgeFractions();
     const pCloseEnd = frac.closeNear * 100;
@@ -382,26 +429,38 @@ function syncUi(): void {
     btnPdf.disabled = exportDisabled;
     btnSaveSvg.disabled = exportDisabled;
 
-    syncThemeToggle();
-    showErr(null);
+    if (!lite) {
+        syncThemeToggle();
+        showErr(null);
+    }
     if (perfDev()) {
         const dt = performance.now() - t0;
         if (dt > 16) {
-            perfLog('syncUi (before schedulePreview debounce)', dt, 'slider/distance/paper → full DOM refresh');
+            perfLog(
+                'syncUi (before schedulePreview debounce)',
+                dt,
+                lite ? 'lite: sliders → reduced DOM refresh' : 'full: distance/paper / range release → DOM refresh',
+            );
         }
     }
-    schedulePreview();
+    schedulePreview(previewDelayMs);
 }
 
-function schedulePreview(): void {
+function schedulePreview(delayOverride?: number): void {
     if (previewTimer) {
         clearTimeout(previewTimer);
     }
     const scheduleBaselineMs = perfDev() ? performance.now() : undefined;
+    lastScheduledPreviewDelayMs =
+        delayOverride !== undefined
+            ? delayOverride
+            : rangePointerHeld
+              ? PREVIEW_DEBOUNCE_INTERACTIVE_MS
+              : PREVIEW_DEBOUNCE_IDLE_MS;
     previewTimer = setTimeout(() => {
         previewTimer = null;
         void runPreview(scheduleBaselineMs);
-    }, PREVIEW_DEBOUNCE_MS);
+    }, lastScheduledPreviewDelayMs);
 }
 
 function waitAnimationFrames(count: number): Promise<void> {
@@ -647,7 +706,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                     perfLog(
                         'wall: schedulePreview → paint proxy',
                         performance.now() - scheduleBaselineMs,
-                        `debounce target ${PREVIEW_DEBOUNCE_MS}ms`,
+                        `debounce target ${lastScheduledPreviewDelayMs}ms`,
                     );
                 }
             }
@@ -910,6 +969,9 @@ function syncQrVersionBanner(): void {
 }
 
 function wireUi(): void {
+    window.addEventListener('pointerup', finalizeRangeGestureIfNeeded, true);
+    window.addEventListener('pointercancel', finalizeRangeGestureIfNeeded, true);
+
     const distanceSel = byId('distance') as HTMLSelectElement;
     /** Native `<select>` does not fire `change` when re-picking the same option; briefly clear selection so it always fires. */
     let pendingDistanceRestore: string | null = null;
@@ -956,7 +1018,9 @@ function wireUi(): void {
         syncUi();
     });
 
-    (byId('sqmm') as HTMLInputElement).addEventListener('input', (e) => {
+    const sqmmEl = byId('sqmm') as HTMLInputElement;
+    wireRangeResponsiveUi(sqmmEl);
+    sqmmEl.addEventListener('input', (e) => {
         state.autoGrid = false;
         const raw = Number((e.target as HTMLInputElement).value);
         const pd = paperDims();
@@ -965,7 +1029,9 @@ function wireUi(): void {
         scheduleSyncUi();
     });
 
-    (byId('pages') as HTMLInputElement).addEventListener('input', (e) => {
+    const pagesEl = byId('pages') as HTMLInputElement;
+    wireRangeResponsiveUi(pagesEl);
+    pagesEl.addEventListener('input', (e) => {
         state.autoGrid = false;
         const raw = Math.round(Number((e.target as HTMLInputElement).value));
         const pd = paperDims();
@@ -977,13 +1043,17 @@ function wireUi(): void {
         scheduleSyncUi();
     });
 
-    (byId('sx') as HTMLInputElement).addEventListener('input', (e) => {
+    const sxEl = byId('sx') as HTMLInputElement;
+    wireRangeResponsiveUi(sxEl);
+    sxEl.addEventListener('input', (e) => {
         state.autoGrid = false;
         state.squaresX = clampInt(Number((e.target as HTMLInputElement).value), BOARD_GRID_MIN, BOARD_GRID_MAX);
         scheduleSyncUi();
     });
 
-    (byId('sy') as HTMLInputElement).addEventListener('input', (e) => {
+    const syEl = byId('sy') as HTMLInputElement;
+    wireRangeResponsiveUi(syEl);
+    syEl.addEventListener('input', (e) => {
         state.autoGrid = false;
         state.squaresY = clampInt(Number((e.target as HTMLInputElement).value), BOARD_GRID_MIN, BOARD_GRID_MAX);
         scheduleSyncUi();

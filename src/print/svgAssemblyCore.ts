@@ -16,6 +16,7 @@ import {
     OPENCV_LABEL_VERSION,
     ORIGIN_BANNER_CONTENT_SIDE_MM,
     ORIGIN_BANNER_CONTENT_TOP_MM,
+    ORIGIN_BANNER_VISUAL_SCALE,
     ORIGIN_CORNER_MARKER_PAD_MM,
     ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM,
     ORIGIN_GAP_QR_TO_BOARD_INFO_MM,
@@ -443,9 +444,10 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
     const joinPy = tiling.npy > 1 ? Math.round(MM_JOIN_STRIP * ppm) : 0;
     const totalPages = pages.length;
     const originTopReservePx = layoutIntPx(ORIGIN_PAGE_EXTRA_MM * ppm);
-    const bodyFontPx = Math.round(26 * (ppm / 12));
-    const titleFontPx = Math.round(24 * (ppm / 12));
-    const bodyLineLead = bodyFontPx + Math.max(4, Math.round(0.52 * ppm));
+    const bScale = ORIGIN_BANNER_VISUAL_SCALE;
+    const bodyFontPx = Math.round(26 * (ppm / 12) * bScale);
+    const titleFontPx = Math.round(24 * (ppm / 12) * bScale);
+    const bodyLineLead = bodyFontPx + Math.max(4, Math.round(0.52 * ppm * bScale));
     const joinFontPx = bodyFontPx;
     const qrSizePx = Math.max(32, Math.round(QR_SIZE_MM * ppm));
 
@@ -501,7 +503,8 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
 
             const boardColMaxW = Math.max(1, boardInfoRight - instrLeft - gapInstBoard - minInstColPx);
             const boardInfoLines = wrapText(bodyFont, boardInfoBody, boardColMaxW);
-            let by = bannerTitleTop + titleFontPx + Math.max(4, ppm);
+            const vGap = Math.max(4, Math.round(ppm * bScale));
+            let by = bannerTitleTop + titleFontPx + vGap;
             let infoLeft = boardInfoRight;
             const mctx = measureCtx();
             mctx.font = bodyFont;
@@ -539,7 +542,7 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
                     true,
                 ),
             );
-            const bodyY = bannerTitleTop + titleFontPx + Math.max(4, ppm);
+            const bodyY = bannerTitleTop + titleFontPx + vGap;
             const colW = instructionAllowRight - instrLeft;
             const instLines = wrapText(bodyFont, pdfLabels.originInstructionsBody, colW);
             parts.push(svgTextBlock(instLines, instrLeft, bodyY, bodyLineLead, 'start', bodyFont));

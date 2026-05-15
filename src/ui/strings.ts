@@ -32,9 +32,15 @@ export const S = {
     layoutCannotFit:
         'Cannot fit this combination — try another square length, number of sheets, or grid.',
     printCharts: 'Print',
+    saveSvgFiles: 'Save SVG files',
     printScaleHint: 'Ensure you print at 1:1 or 100 scaling!',
     preparingPrint: 'Preparing print…',
+    preparingSvgExport: 'Preparing SVG…',
     printInitFailed: 'Could not prepare printing in this browser. Try refreshing the page.',
+    qrChartSpecMismatch:
+        'This link’s chart metadata version (v={{theirs}}) does not match this generator (v={{ours}}). The sheet layout or labels may not match what FreeMoCap produced.',
+    qrOpenCvMismatch:
+        'This link’s OpenCV line (cv2) does not match this generator (expected {{ours}}; got {{theirs}}). Board detection or geometry may differ.',
     previewTitle: 'Preview',
     fullChart: 'Full ChaRuCo pattern',
     buildingPreview: 'Building preview…',

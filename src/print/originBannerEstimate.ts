@@ -8,6 +8,7 @@ import {
     MM_ORIGIN_BANNER_BELOW_GAP_MM,
     ORIGIN_BANNER_CONTENT_SIDE_MM,
     ORIGIN_BANNER_CONTENT_TOP_MM,
+    ORIGIN_BANNER_VISUAL_SCALE,
     ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM,
     ORIGIN_GAP_QR_TO_BOARD_INFO_MM,
     ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM,
@@ -120,9 +121,10 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
     const instrLeft = bannerLeft + skellyW + (skellyW > 0 ? gapSkellyInst : 0);
     const minInstColPx = Math.max(1, Math.round(12 * ppm));
 
-    const titleFontPx = Math.round(24 * (ppm / 12));
-    const bodyFontPx = Math.round(26 * (ppm / 12));
-    const bodyLineLead = bodyFontPx + Math.max(4, Math.round(0.52 * ppm));
+    const bScale = ORIGIN_BANNER_VISUAL_SCALE;
+    const titleFontPx = Math.round(24 * (ppm / 12) * bScale);
+    const bodyFontPx = Math.round(26 * (ppm / 12) * bScale);
+    const bodyLineLead = bodyFontPx + Math.max(4, Math.round(0.52 * ppm * bScale));
 
     ctx.font = `bold ${titleFontPx}px system-ui, Segoe UI, sans-serif`;
 
@@ -141,7 +143,8 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
 
     ctx.font = `${bodyFontPx}px system-ui, Segoe UI, sans-serif`;
     const boardInfoLines = wrapText(ctx, boardInfoBody, boardColMaxW);
-    let by = bannerTitleTop + titleFontPx + Math.max(4, ppm);
+    const vGap = Math.max(4, Math.round(ppm * bScale));
+    let by = bannerTitleTop + titleFontPx + vGap;
     let infoLeft = boardInfoRight;
     for (const line of boardInfoLines) {
         const w = ctx.measureText(line).width;
@@ -158,7 +161,7 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
 
     ctx.font = `bold ${titleFontPx}px system-ui, Segoe UI, sans-serif`;
     const titleBB = titleFontPx;
-    const bodyY = bannerTitleTop + titleBB + Math.max(4, ppm);
+    const bodyY = bannerTitleTop + titleBB + vGap;
     ctx.font = `${bodyFontPx}px system-ui, Segoe UI, sans-serif`;
     const colW = instructionAllowRight - instrLeft;
     const instLines = wrapText(ctx, pdfLabels.originInstructionsBody, colW);

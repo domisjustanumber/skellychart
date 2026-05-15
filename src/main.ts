@@ -26,7 +26,8 @@ import {
 } from './print/charucoLayout.js';
 import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from './print/tiling.js';
 import {perfDev, perfLog} from './print/perfDebug.js';
-import {CHARUCO_MARKER_LENGTH_RATIO} from './print/constants.js';
+import {CHARUCO_MARKER_LENGTH_RATIO, CHARUCO_PRINT_LABEL_SPEC_VERSION} from './print/constants.js';
+import {expectedCharucoCv2QueryValue, parseCharucoQrSearchParams} from './print/charucoDocUrl.js';
 import {MAX_PREVIEW_PAGES, PREVIEW_DEBOUNCE_MS, svgToDataUrl} from './ui/previewSvg.js';
 import {yieldToMain} from './ui/yieldToMain.js';
 import {
@@ -68,6 +69,9 @@ const state: AppState = {
     squaresY: defaultBoard.squaresY,
     autoGrid: true,
 };
+
+/** Set from chart QR link query params; shown once at load (not cleared by `syncUi`). */
+let qrVersionBannerMessage: string | null = null;
 
 function byId(id: string): HTMLElement {
     const el = document.getElementById(id);
@@ -216,6 +220,7 @@ function syncUi(): void {
     byId('preview-title').textContent = S.previewTitle;
     byId('lbl-fullchart').textContent = S.fullChart;
     (byId('btnPdf') as HTMLButtonElement).textContent = S.printCharts;
+    (byId('btnSaveSvg') as HTMLButtonElement).textContent = S.saveSvgFiles;
     byId('printScaleHint').textContent = S.printScaleHint;
 
     const frac = squareLengthTierBandEdgeFractions();
@@ -308,7 +313,10 @@ function syncUi(): void {
     byId('layoutSummary').textContent = summary;
 
     const btnPdf = byId('btnPdf') as HTMLButtonElement;
-    btnPdf.disabled = !tiling || tiling.pageCount < 1;
+    const btnSaveSvg = byId('btnSaveSvg') as HTMLButtonElement;
+    const exportDisabled = !tiling || tiling.pageCount < 1;
+    btnPdf.disabled = exportDisabled;
+    btnSaveSvg.disabled = exportDisabled;
 
     syncThemeToggle();
     showErr(null);
@@ -596,6 +604,83 @@ function stripXmlDeclaration(svg: string): string {
     return svg.replace(/^\s*<\?xml[\s\S]*?\?>\s*/i, '').trimStart();
 }
 
+function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Trigger a file download from string contents (UTF-8 SVG). */
+function downloadSvgString(content: string, filename: string): void {
+    const blob = new Blob([content], {type: 'image/svg+xml;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}
+
+function exportSvgBasenamePrefix(): string {
+    const parts = [
+        'skellychart',
+        state.distanceId,
+        state.paperId,
+        `${state.squaresX}x${state.squaresY}`,
+        `${state.squareMm}mm`,
+    ];
+    return parts.join('-').replace(/[^\w.-]+/g, '_');
+}
+
+async function saveSvgFiles(): Promise<void> {
+    showErr(null);
+    const tiling = effectiveTiling();
+    if (!tiling) {
+        showErr(S.layoutCannotFit);
+        return;
+    }
+    const btnSave = byId('btnSaveSvg') as HTMLButtonElement;
+    const idleLabel = S.saveSvgFiles;
+    btnSave.disabled = true;
+    btnSave.classList.add('btn--busy');
+    btnSave.textContent = S.preparingSvgExport;
+    await yieldToMain();
+
+    const pd = paperDims();
+    const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
+    const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
+    try {
+        const {pages: svgs} = await renderCharucoPrintSvg({
+            squaresX: state.squaresX,
+            squaresY: state.squaresY,
+            squareLengthMm: state.squareMm,
+            paperWMm,
+            paperHMm,
+            markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
+            tiling,
+            pages,
+            cooperativeYield: false,
+        });
+        const prefix = exportSvgBasenamePrefix();
+        const staggerMs = 120;
+        for (let i = 0; i < svgs.length; i++) {
+            if (i > 0) {
+                await delay(staggerMs);
+            }
+            const n = i + 1;
+            downloadSvgString(svgs[i]!, `${prefix}-sheet-${n}-of-${svgs.length}.svg`);
+        }
+    } catch (e) {
+        showErr(e instanceof Error ? e.message : String(e));
+    }
+
+    btnSave.classList.remove('btn--busy');
+    btnSave.textContent = idleLabel;
+    const t = effectiveTiling();
+    btnSave.disabled = !t || t.pageCount < 1;
+}
+
 function printHtmlDocumentInHiddenIframe(html: string): void {
     const iframe = document.createElement('iframe');
     iframe.setAttribute('aria-hidden', 'true');
@@ -707,6 +792,60 @@ function clampInt(n: number, lo: number, hi: number): number {
     return Math.round(Math.max(lo, Math.min(hi, n)));
 }
 
+function applyQrQueryFromLocation(): void {
+    const sp = new URLSearchParams(window.location.search);
+    const parsed = parseCharucoQrSearchParams(sp);
+    const warnings: string[] = [];
+
+    if (parsed.labelSpecVersion !== null && parsed.labelSpecVersion !== CHARUCO_PRINT_LABEL_SPEC_VERSION) {
+        warnings.push(
+            interpolate(S.qrChartSpecMismatch, {
+                theirs: parsed.labelSpecVersion,
+                ours: CHARUCO_PRINT_LABEL_SPEC_VERSION,
+            }),
+        );
+    }
+
+    const expectedCv2 = expectedCharucoCv2QueryValue(CHARUCO_MARKER_LENGTH_RATIO);
+    if (parsed.cv2 !== null && parsed.cv2 !== expectedCv2) {
+        warnings.push(
+            interpolate(S.qrOpenCvMismatch, {
+                theirs: parsed.cv2,
+                ours: expectedCv2,
+            }),
+        );
+    }
+
+    if (parsed.squaresX !== null || parsed.squaresY !== null || parsed.squareLengthMm !== null) {
+        state.autoGrid = false;
+        if (parsed.squaresX !== null) {
+            state.squaresX = clampInt(parsed.squaresX, BOARD_GRID_MIN, BOARD_GRID_MAX);
+        }
+        if (parsed.squaresY !== null) {
+            state.squaresY = clampInt(parsed.squaresY, BOARD_GRID_MIN, BOARD_GRID_MAX);
+        }
+        const pd = paperDims();
+        if (parsed.squareLengthMm !== null) {
+            state.squareMm = Math.round(parsed.squareLengthMm);
+        }
+        state.squareMm = snapSquareMm(state.squareMm, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
+        syncDistanceFromSquareIfManual();
+    }
+
+    qrVersionBannerMessage = warnings.length ? warnings.join(' ') : null;
+}
+
+function syncQrVersionBanner(): void {
+    const el = byId('qrVersionBanner');
+    if (qrVersionBannerMessage) {
+        el.textContent = qrVersionBannerMessage;
+        el.classList.remove('hidden');
+    } else {
+        el.classList.add('hidden');
+        el.textContent = '';
+    }
+}
+
 function wireUi(): void {
     (byId('distance') as HTMLSelectElement).addEventListener('change', (e) => {
         state.distanceId = (e.target as HTMLSelectElement).value;
@@ -754,6 +893,7 @@ function wireUi(): void {
     });
 
     byId('btnPdf').addEventListener('click', () => void openPrintDialog());
+    byId('btnSaveSvg').addEventListener('click', () => void saveSvgFiles());
 
     const themeGroup = byId('themeToggle');
     for (const btn of themeGroup.querySelectorAll<HTMLButtonElement>('[data-theme-pick]')) {
@@ -769,6 +909,8 @@ function boot(): void {
     (byId('brandLogo') as HTMLImageElement).src = freemocapLogoUrl;
     initTheme(() => schedulePreview());
     wireUi();
+    applyQrQueryFromLocation();
+    syncQrVersionBanner();
     syncUi();
 }
 

@@ -1,5 +1,5 @@
 import freemocapLogoUrl from '../freemocapLogoUrl.js';
-import {CHARUCO_PRINT_SOURCE_URL, PIXELS_PER_MM, QR_SIZE_MM, SKELLY_TOP_HEIGHT_MM} from './constants.js';
+import {getCharucoPrintSourceUrl, PIXELS_PER_MM, QR_SIZE_MM, SKELLY_TOP_HEIGHT_MM} from './constants.js';
 import {buildCharucoDocumentationUrl} from './charucoDocUrl.js';
 import {SKELLY_LOGO_NATURAL_W_OVER_H} from './originBannerEstimate.js';
 import {generateQrSvgFragment} from './qrSvg.js';
@@ -92,7 +92,7 @@ async function resolveLogoForPrint(ppm: number): Promise<{
 export async function renderCharucoPrintSvg(params: PrintSvgParams): Promise<PrintSvgResult> {
     const ppm = PIXELS_PER_MM;
     const docUrl = buildCharucoDocumentationUrl(
-        params.documentationSourceUrl ?? CHARUCO_PRINT_SOURCE_URL,
+        params.documentationSourceUrl ?? getCharucoPrintSourceUrl(),
         params.squaresX,
         params.squaresY,
         params.squareLengthMm,

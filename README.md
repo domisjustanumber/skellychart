@@ -1,6 +1,6 @@
 # skellychart
 
-Static web app that renders **OpenCV-compatible ChaRuCo** boards (DICT_4X4_250, default non-legacy pattern) in the browser: live preview, 1:1 PNG export, and multi-sheet PDFs with tiling matching FreeMoCap’s `charuco_board_print` layout rules.
+Static web app that renders **OpenCV-compatible ChAruCo** boards (DICT_4X4_250, default non-legacy pattern) in the browser: live preview, 1:1 PNG export, and multi-sheet PDFs with tiling matching FreeMoCap’s `charuco_board_print` layout rules.
 
 ## Develop
 

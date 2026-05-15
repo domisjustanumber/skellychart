@@ -81,7 +81,7 @@ export function getCharucoPrintSourceUrl(): string {
 }
 
 export const OPENCV_LABEL_VERSION = '4.10+';
-/** Default marker edge length as a fraction of square length (OpenCV Charuco-style). */
+/** Default marker edge length as a fraction of square length (OpenCV ChAruCo-style). */
 export const CHARUCO_MARKER_LENGTH_RATIO = 0.8;
 
 export const PAPER_SIZES_MM: Record<string, [number, number]> = {

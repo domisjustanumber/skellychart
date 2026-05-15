@@ -19,10 +19,10 @@ Curvature will affect camera calibration — mount the chart flat on a rigid boa
 Multi-sheet charts: cut along the dotted seam lines (remove the dashed line entirely), then assemble the chart on a rigid board.
 For instructions on how to use the chart, buy a pre-made one, or print another, scan the QR code in the top corner.`,
     /**
-     * Single multi-line block for ChaRuCo metadata beside the QR code. First line is rendered bold;
+     * Single multi-line block for ChAruCo metadata beside the QR code. First line is rendered bold;
      * remaining lines are wrapped as body text (see {@link originChartInfoParts}).
      */
-    originChartInfo: `ChaRuCo calibration chart v{{version}}
+    originChartInfo: `ChAruCo calibration chart v{{version}}
 Square length: {{mm}} mm
 Width: {{squaresX}} squares
 Height: {{squaresY}} squares

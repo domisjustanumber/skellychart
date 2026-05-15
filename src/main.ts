@@ -914,7 +914,7 @@ async function openPrintDialog(): Promise<void> {
             .join('');
         const html =
             `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>` +
-            `<title>Charuco print</title><style>` +
+            `<title>ChAruCo print</title><style>` +
             `@page{size:${paperWMm}mm ${paperHMm}mm;margin:0}` +
             `*{box-sizing:border-box}` +
             `html,body{margin:0;padding:0}` +

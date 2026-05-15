@@ -574,7 +574,7 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
             const instructionAllowRight = infoLeft - gapInstBoard;
             if (instructionAllowRight - instrLeft < minInstColPx) {
                 throw new Error(
-                    'Origin banner layout: insufficient horizontal space for logo, instructions, ChaRuCo info, and QR on this paper size.',
+                    'Origin banner layout: insufficient horizontal space for logo, instructions, ChAruCo info, and QR on this paper size.',
                 );
             }
 

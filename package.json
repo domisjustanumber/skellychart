@@ -16,8 +16,7 @@
     "vite": "^8.0.13"
   },
   "dependencies": {
-    "jspdf": "^4.2.1",
-    "pdfjs-dist": "^5.7.284",
+    "fflate": "^0.8.2",
     "qrcode": "^1.5.4"
   }
 }

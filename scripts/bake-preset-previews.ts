@@ -13,7 +13,7 @@ import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 import type {PresetPreviewManifest, PresetPreviewManifestEntry} from '../src/ui/presetPreviewManifest.js';
-import {bakeOnePreset, listPresetJobs, mapPool, patchDomGlobals} from './bake-preset-shared.js';
+import {bakeLogoEnv, bakeOnePreset, listPresetJobs, mapPool, patchDomGlobals} from './bake-preset-shared.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -39,10 +39,13 @@ function runPresetChildProcess(
             distanceId: job.distanceId,
             paper: job.paper,
         });
+        const childEnv = {...process.env};
+        bakeLogoEnv(paths.root);
+        childEnv.CHARUCO_LOGO_FILE = process.env.CHARUCO_LOGO_FILE;
         const child = spawn(process.execPath, ['--import', 'tsx', childPath, payload], {
             stdio: ['ignore', 'pipe', 'pipe'],
             windowsHide: true,
-            env: {...process.env},
+            env: childEnv,
         });
         let stdout = '';
         let stderr = '';
@@ -75,7 +78,7 @@ function runPresetChildProcess(
 }
 
 async function main(): Promise<void> {
-    process.env.CHARUCO_LOGO_FILE = join(root, 'public', 'freemocap-logo.svg');
+    bakeLogoEnv(root);
 
     const jobs = listPresetJobs();
     const useChildProcs = process.env.BAKE_PRESETS_IN_MAIN_THREAD !== '1';
@@ -90,9 +93,10 @@ async function main(): Promise<void> {
         results = await mapPool(jobs, poolSize, (job) => runPresetChildProcess(job, {outDir, root}));
     } else {
         patchDomGlobals();
-        const {renderCharucoPrintPdf} = await import('../src/print/pdfDocument.js');
+        bakeLogoEnv(root);
+        const {renderCharucoPrintSvgZip, renderCharucoPrintSvg} = await import('../src/print/svgDocument.js');
         results = await mapPool(jobs, poolSize, async (job) =>
-            bakeOnePreset(job.distanceId, job.paper, outDir, renderCharucoPrintPdf),
+            bakeOnePreset(job.distanceId, job.paper, outDir, renderCharucoPrintSvgZip, renderCharucoPrintSvg),
         );
     }
 

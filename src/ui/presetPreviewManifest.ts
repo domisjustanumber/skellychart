@@ -4,8 +4,8 @@
 export type PresetPreviewManifestEntry = {
     board: string;
     thumbs: string[];
-    /** Pre-rendered print PDF (same bytes as renderCharucoPrintPdf for this preset). */
-    pdf: string;
+    /** ZIP of per-page SVG print files. */
+    chartZip: string;
     totalPages: number;
     truncated: boolean;
 };

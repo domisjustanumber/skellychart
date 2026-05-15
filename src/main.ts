@@ -1,5 +1,6 @@
-import {putGrayOnCanvas, renderCharucoBoardGray} from './charuco/board.js';
-import {renderCharucoPrintPdf} from './print/pdfDocument.js';
+import freemocapLogoUrl from './freemocapLogoUrl.js';
+import {renderCharucoBoardSvg} from './charuco/board.js';
+import {renderCharucoPrintSvg, renderCharucoPrintSvgZip} from './print/svgDocument.js';
 import {
     BOARD_GRID_MAX,
     BOARD_GRID_MIN,
@@ -25,7 +26,7 @@ import {
 } from './print/charucoLayout.js';
 import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from './print/tiling.js';
 import {CHARUCO_MARKER_LENGTH_RATIO} from './print/constants.js';
-import {decodePdfThumbnails, PREVIEW_DEBOUNCE_MS} from './ui/previewPdf.js';
+import {MAX_PREVIEW_PAGES, PREVIEW_DEBOUNCE_MS, svgToDataUrl} from './ui/previewSvg.js';
 import {
     loadPresetPreviewManifest,
     presetPreviewKey,
@@ -198,7 +199,6 @@ let previewTimer: ReturnType<typeof setTimeout> | null = null;
 let previewAbort: AbortController | null = null;
 /** Bumped when a new preview run starts so stale async completions do not clear the busy UI. */
 let previewGeneration = 0;
-const previewCanvas = document.createElement('canvas');
 
 function syncUi(): void {
     applyAutoPreset();
@@ -218,7 +218,7 @@ function syncUi(): void {
     byId('lbl-sy').textContent = interpolate(S.squaresInY, {n: state.squaresY});
     byId('preview-title').textContent = S.previewTitle;
     byId('lbl-fullchart').textContent = S.fullChart;
-    (byId('btnPdf') as HTMLButtonElement).textContent = S.generatePdf;
+    (byId('btnPdf') as HTMLButtonElement).textContent = S.downloadSvg;
 
     const frac = squareLengthTierBandEdgeFractions();
     const tierEl = byId('tierLabels');
@@ -404,15 +404,7 @@ async function runPreview(): Promise<void> {
                     }
                 }
 
-                const toDataUrl = (blob: Blob) =>
-                    new Promise<string>((resolve, reject) => {
-                        const fr = new FileReader();
-                        fr.onload = () => resolve(fr.result as string);
-                        fr.onerror = () => reject(fr.error);
-                        fr.readAsDataURL(blob);
-                    });
-
-                const boardDataUrl = await toDataUrl(await responses[0]!.blob());
+                const boardDataUrl = svgToDataUrl(await responses[0]!.text());
 
                 if (signal.aborted) {
                     return;
@@ -455,7 +447,7 @@ async function runPreview(): Promise<void> {
                 }
                 const layoutN = tiling.pageCount;
                 for (let i = 0; i < responses.length - 1; i++) {
-                    const src = await toDataUrl(await responses[i + 1]!.blob());
+                    const src = svgToDataUrl(await responses[i + 1]!.text());
                     const wrap = document.createElement('div');
                     wrap.className = 'thumb-wrap';
                     const cap = document.createElement('p');
@@ -484,16 +476,14 @@ async function runPreview(): Promise<void> {
             }
         }
 
-        previewCanvas.width = cW;
-        previewCanvas.height = cH;
-        const gray = renderCharucoBoardGray(cW, cH, {
-            squaresX: state.squaresX,
-            squaresY: state.squaresY,
-            squareLength: state.squareMm,
-            markerLength: markerMm,
-        });
-        putGrayOnCanvas(previewCanvas, gray);
-        const boardDataUrl = previewCanvas.toDataURL('image/png');
+        const boardDataUrl = svgToDataUrl(
+            renderCharucoBoardSvg(cW, cH, {
+                squaresX: state.squaresX,
+                squaresY: state.squaresY,
+                squareLength: state.squareMm,
+                markerLength: markerMm,
+            }),
+        );
 
         await yieldToMain();
         if (signal.aborted) {
@@ -505,9 +495,9 @@ async function runPreview(): Promise<void> {
 
         const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
 
-        let blob: Blob;
+        let printResult: Awaited<ReturnType<typeof renderCharucoPrintSvg>>;
         try {
-            blob = await renderCharucoPrintPdf({
+            printResult = await renderCharucoPrintSvg({
                 squaresX: state.squaresX,
                 squaresY: state.squaresY,
                 squareLengthMm: state.squareMm,
@@ -535,7 +525,9 @@ async function runPreview(): Promise<void> {
         await yieldToMain();
 
         try {
-            const decoded = await decodePdfThumbnails(await blob.arrayBuffer(), signal);
+            const pageImages = printResult.pages.slice(0, MAX_PREVIEW_PAGES).map((svg) => svgToDataUrl(svg));
+            const totalPages = printResult.totalPages;
+            const truncated = totalPages > MAX_PREVIEW_PAGES;
             if (signal.aborted) {
                 return;
             }
@@ -559,23 +551,23 @@ async function runPreview(): Promise<void> {
                 }
             }
 
-            trunc.classList.toggle('hidden', !decoded.truncated);
-            if (decoded.truncated) {
+            trunc.classList.toggle('hidden', !truncated);
+            if (truncated) {
                 trunc.textContent = interpolate(S.truncatedPreview, {
-                    shown: decoded.images.length,
-                    total: decoded.totalPages,
+                    shown: pageImages.length,
+                    total: totalPages,
                 });
             }
             thumbs.innerHTML = '';
-            if (decoded.totalPages > 1) {
+            if (totalPages > 1) {
                 const hdr = document.createElement('p');
                 hdr.className = 'caption';
-                hdr.textContent = interpolate(S.pageCountLabel, {count: decoded.totalPages});
+                hdr.textContent = interpolate(S.pageCountLabel, {count: totalPages});
                 hdr.style.gridColumn = '1 / -1';
                 thumbs.appendChild(hdr);
             }
             const layoutN = tiling.pageCount;
-            decoded.images.forEach((src, i) => {
+            pageImages.forEach((src, i) => {
                 const wrap = document.createElement('div');
                 wrap.className = 'thumb-wrap';
                 const cap = document.createElement('p');
@@ -585,7 +577,7 @@ async function runPreview(): Promise<void> {
                 img.className = 'thumb-img';
                 img.src = src;
                 img.alt = interpolate(S.pageLabel, {n: i + 1});
-                if (layoutN > 1 && decoded.totalPages > 1) {
+                if (layoutN > 1 && totalPages > 1) {
                     img.style.border = `2px solid ${charucoPagePreviewBorderColor(i + 1, layoutN, dark)}`;
                 } else {
                     img.style.border = '1px solid var(--border)';
@@ -606,7 +598,7 @@ async function runPreview(): Promise<void> {
     }
 }
 
-async function downloadPdf(): Promise<void> {
+async function downloadSvg(): Promise<void> {
     showErr(null);
     const tiling = effectiveTiling();
     if (!tiling) {
@@ -614,26 +606,26 @@ async function downloadPdf(): Promise<void> {
         return;
     }
     const btnPdf = byId('btnPdf') as HTMLButtonElement;
-    const pdfLabel = S.generatePdf;
+    const downloadLabel = S.downloadSvg;
     btnPdf.disabled = true;
     btnPdf.classList.add('btn--busy');
-    btnPdf.textContent = S.generatingPdf;
+    btnPdf.textContent = S.generatingSvg;
     await yieldToMain();
 
     const presetKey = state.autoGrid ? presetPreviewKey(state.distanceId, state.paperId) : '';
     const manifest = await loadPresetPreviewManifest();
-    const bakedPdfPath = presetKey && manifest?.[presetKey]?.pdf;
+    const bakedZipPath = presetKey && manifest?.[presetKey]?.chartZip;
 
     let downloaded = false;
-    if (bakedPdfPath) {
+    if (bakedZipPath) {
         try {
-            const res = await fetch(resolvePresetAssetUrl(bakedPdfPath));
+            const res = await fetch(resolvePresetAssetUrl(bakedZipPath));
             if (res.ok) {
                 const blob = await res.blob();
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `charuco_${state.squaresX}x${state.squaresY}_${state.paperId}.pdf`;
+                a.download = `charuco_${state.squaresX}x${state.squaresY}_${state.paperId}.zip`;
                 a.click();
                 URL.revokeObjectURL(url);
                 downloaded = true;
@@ -648,7 +640,7 @@ async function downloadPdf(): Promise<void> {
         const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
         const pages = buildPageSpecs(state.squaresX, state.squaresY, tiling).pages;
         try {
-            const blob = await renderCharucoPrintPdf({
+            const blob = await renderCharucoPrintSvgZip({
                 squaresX: state.squaresX,
                 squaresY: state.squaresY,
                 squareLengthMm: state.squareMm,
@@ -661,7 +653,7 @@ async function downloadPdf(): Promise<void> {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `charuco_${state.squaresX}x${state.squaresY}_${state.paperId}.pdf`;
+            a.download = `charuco_${state.squaresX}x${state.squaresY}_${state.paperId}.zip`;
             a.click();
             URL.revokeObjectURL(url);
         } catch (e) {
@@ -670,7 +662,7 @@ async function downloadPdf(): Promise<void> {
     }
 
     btnPdf.classList.remove('btn--busy');
-    btnPdf.textContent = pdfLabel;
+    btnPdf.textContent = downloadLabel;
     const t = effectiveTiling();
     btnPdf.disabled = !t || t.pageCount < 1;
 }
@@ -725,7 +717,7 @@ function wireUi(): void {
         syncUi();
     });
 
-    byId('btnPdf').addEventListener('click', () => void downloadPdf());
+    byId('btnPdf').addEventListener('click', () => void downloadSvg());
 
     const themeGroup = byId('themeToggle');
     for (const btn of themeGroup.querySelectorAll<HTMLButtonElement>('[data-theme-pick]')) {
@@ -738,6 +730,7 @@ function wireUi(): void {
 }
 
 async function boot(): Promise<void> {
+    (byId('brandLogo') as HTMLImageElement).src = freemocapLogoUrl;
     await loadPresetPreviewManifest();
     initTheme(() => schedulePreview());
     wireUi();

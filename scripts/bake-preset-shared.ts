@@ -3,13 +3,10 @@
  */
 import {createCanvas, Image} from '@napi-rs/canvas';
 import {mkdirSync, writeFileSync} from 'node:fs';
-import {createRequire} from 'node:module';
 import {join} from 'node:path';
-import {pathToFileURL} from 'node:url';
-import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import {fileURLToPath} from 'node:url';
 
-import type {PresetPreviewManifestEntry} from '../src/ui/presetPreviewManifest.js';
-import {putGrayOnCanvas, renderCharucoBoardGray} from '../src/charuco/board.js';
+import {renderCharucoBoardSvg} from '../src/charuco/board.js';
 import {CHARUCO_MARKER_LENGTH_RATIO} from '../src/print/constants.js';
 import {
     PAPER_OPTIONS,
@@ -19,6 +16,8 @@ import {
     resolveDistancePrintPlan,
 } from '../src/print/charucoLayout.js';
 import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from '../src/print/tiling.js';
+import type {PresetPreviewManifestEntry} from '../src/ui/presetPreviewManifest.js';
+import {MAX_PREVIEW_PAGES} from '../src/ui/previewSvg.js';
 
 export const PRESET_IDS = ['near', 'mid', 'far'] as const;
 
@@ -27,19 +26,6 @@ export type PaperOption = (typeof PAPER_OPTIONS)[number];
 
 export const PREVIEW_MAX_PX_WIDTH = 130;
 export const PREVIEW_MAX_SCALE = 0.44;
-export const MAX_PREVIEW_PAGES = 36;
-
-let pdfWorkerConfigured = false;
-
-function ensurePdfJsWorker(): void {
-    if (pdfWorkerConfigured) {
-        return;
-    }
-    const require = createRequire(import.meta.url);
-    (pdfjs as typeof pdfjs & {GlobalWorkerOptions: {workerSrc: string}}).GlobalWorkerOptions.workerSrc =
-        pathToFileURL(require.resolve('pdfjs-dist/build/pdf.worker.min.mjs')).href;
-    pdfWorkerConfigured = true;
-}
 
 export function patchDomGlobals(): void {
     const g = globalThis as typeof globalThis & {
@@ -55,47 +41,6 @@ export function patchDomGlobals(): void {
             return createCanvas(300, 150);
         },
     };
-}
-
-export async function pdfToThumbDataUrls(pdfBytes: ArrayBuffer): Promise<{
-    images: string[];
-    truncated: boolean;
-    totalPages: number;
-}> {
-    ensurePdfJsWorker();
-    const task = pdfjs.getDocument({data: new Uint8Array(pdfBytes), verbosity: 0});
-    const pdf = await task.promise;
-    try {
-        const totalPages = pdf.numPages;
-        const n = Math.min(totalPages, MAX_PREVIEW_PAGES);
-        const images: string[] = new Array(n);
-        await Promise.all(
-            Array.from({length: n}, async (_, j) => {
-                const i = j + 1;
-                const page = await pdf.getPage(i);
-                const vp0 = page.getViewport({scale: 1});
-                const scale = Math.min(PREVIEW_MAX_PX_WIDTH / vp0.width, PREVIEW_MAX_SCALE);
-                const viewport = page.getViewport({scale});
-                const w = Math.floor(viewport.width);
-                const h = Math.floor(viewport.height);
-                const canvas = createCanvas(w, h);
-                const ctx = canvas.getContext('2d');
-                if (!ctx) {
-                    throw new Error('bake: no 2d context');
-                }
-                await page.render({
-                    canvasContext: ctx as unknown as CanvasRenderingContext2D,
-                    viewport,
-                    canvas: canvas as unknown as HTMLCanvasElement,
-                }).promise;
-                const jpegBuf = await canvas.encode('jpeg', 88);
-                images[j] = `data:image/jpeg;base64,${jpegBuf.toString('base64')}`;
-            }),
-        );
-        return {images, truncated: totalPages > MAX_PREVIEW_PAGES, totalPages};
-    } finally {
-        await pdf.destroy().catch(() => undefined);
-    }
 }
 
 export function presetBoardCanvasSize(squaresX: number, squaresY: number, squareMm: number): {cW: number; cH: number} {
@@ -124,17 +69,18 @@ export function listPresetJobs(): {distanceId: DistanceId; paper: PaperOption}[]
     return jobs;
 }
 
-type RenderCharucoPrintPdf = typeof import('../src/print/pdfDocument.js').renderCharucoPrintPdf;
+type RenderCharucoPrintSvgZip = typeof import('../src/print/svgDocument.js').renderCharucoPrintSvgZip;
+type RenderCharucoPrintSvg = typeof import('../src/print/svgDocument.js').renderCharucoPrintSvg;
 
 export async function bakeOnePreset(
     distanceId: DistanceId,
     paper: PaperOption,
     outDir: string,
-    renderCharucoPrintPdf: RenderCharucoPrintPdf,
+    renderZip: RenderCharucoPrintSvgZip,
+    renderSvg: RenderCharucoPrintSvg,
 ): Promise<{key: string; entry: PresetPreviewManifestEntry}> {
     const key = `${distanceId}:${paper.id}`;
-    const dir = join(outDir, distanceId, paper.id);
-    mkdirSync(dir, {recursive: true});
+    mkdirSync(join(outDir, distanceId, paper.id), {recursive: true});
 
     const plan = resolveDistancePrintPlan(distanceId, paper.id);
     const paperRecord = paperById(paper.id) ?? paper;
@@ -158,22 +104,20 @@ export async function bakeOnePreset(
     }
 
     const {cW, cH} = presetBoardCanvasSize(squaresX, squaresY, squareMm);
-    const previewCanvas = createCanvas(cW, cH);
     const markerMm = squareMm * CHARUCO_MARKER_LENGTH_RATIO;
-    const gray = renderCharucoBoardGray(cW, cH, {
+    const boardSvg = renderCharucoBoardSvg(cW, cH, {
         squaresX,
         squaresY,
         squareLength: squareMm,
         markerLength: markerMm,
     });
-    putGrayOnCanvas(previewCanvas as unknown as HTMLCanvasElement, gray);
-    const boardFile = join(outDir, distanceId, paper.id, 'board.png');
-    writeFileSync(boardFile, await previewCanvas.encode('png'));
+    const boardRel = `${distanceId}/${paper.id}/board.svg`;
+    writeFileSync(join(outDir, boardRel), boardSvg, 'utf8');
 
     const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(paperRecord.wMm, paperRecord.hMm, tiling);
     const pages = buildPageSpecs(squaresX, squaresY, tiling).pages;
 
-    const blob = await renderCharucoPrintPdf({
+    const printParams = {
         squaresX,
         squaresY,
         squareLengthMm: squareMm,
@@ -182,32 +126,29 @@ export async function bakeOnePreset(
         markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
         tiling,
         pages,
-    });
-    const pdfBuf = await blob.arrayBuffer();
+    };
 
-    const pdfRel = `${distanceId}/${paper.id}/chart.pdf`;
-    writeFileSync(join(outDir, distanceId, paper.id, 'chart.pdf'), Buffer.from(pdfBuf));
+    const zipBlob = await renderZip(printParams);
+    const zipRel = `${distanceId}/${paper.id}/chart.zip`;
+    writeFileSync(join(outDir, zipRel), Buffer.from(await zipBlob.arrayBuffer()));
 
-    const decoded = await pdfToThumbDataUrls(pdfBuf);
+    const {pages: pageSvgs, totalPages} = await renderSvg(printParams);
     const thumbPaths: string[] = [];
-    decoded.images.forEach((dataUrl, i) => {
-        const m = /^data:image\/jpeg;base64,(.+)$/i.exec(dataUrl);
-        if (!m?.[1]) {
-            throw new Error(`bake: bad jpeg data url for ${key} page ${i + 1}`);
-        }
-        writeFileSync(join(outDir, distanceId, paper.id, `p${i}.jpg`), Buffer.from(m[1], 'base64'));
-        thumbPaths.push(`${distanceId}/${paper.id}/p${i}.jpg`);
-    });
+    const n = Math.min(pageSvgs.length, MAX_PREVIEW_PAGES);
+    for (let i = 0; i < n; i++) {
+        const rel = `${distanceId}/${paper.id}/p${i}.svg`;
+        writeFileSync(join(outDir, rel), pageSvgs[i]!, 'utf8');
+        thumbPaths.push(rel);
+    }
 
-    const boardPathRel = `${distanceId}/${paper.id}/board.png`;
     return {
         key,
         entry: {
-            board: boardPathRel,
+            board: boardRel,
             thumbs: thumbPaths,
-            pdf: pdfRel,
-            totalPages: decoded.totalPages,
-            truncated: decoded.truncated,
+            chartZip: zipRel,
+            totalPages,
+            truncated: totalPages > MAX_PREVIEW_PAGES,
         },
     };
 }
@@ -229,4 +170,9 @@ export async function mapPool<T, R>(items: T[], concurrency: number, fn: (item: 
     const n = Math.max(1, Math.min(concurrency, items.length));
     await Promise.all(Array.from({length: n}, () => worker()));
     return results;
+}
+
+export function bakeLogoEnv(root: string): void {
+    const logoPath = join(root, 'public', 'freemocap-logo.svg');
+    process.env.CHARUCO_LOGO_FILE = logoPath;
 }

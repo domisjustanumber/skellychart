@@ -19,14 +19,10 @@ export const S = {
     title: 'FreeMoCap Calibration Chart Generator',
     intro:
         'Create a printable SVG chart with QR metadata on the first sheet, tape-join labels on interior edges, and a corner marker at the square origin. Margins stay blank for printer grab areas. Pick paper size and working distance; we choose the grid and number of sheets automatically and use the largest square length that fits. Use Advanced to adjust square length or grid size by hand. The square-length slider is colour banded by suggested working distance; when you customise the layout, the distance control follows the current square length.',
-    workingDistance: 'Working distance',
+    workingDistance: 'Working distance from camera',
     paperSize: 'Paper size',
     paperOption: '{{paper}} ({{wMm}} × {{hMm}} mm)',
     advanced: 'Advanced',
-    customGridCaption:
-        'Custom layout: changing square length keeps the grid and updates pages; changing X or Y keeps the square length and updates pages; changing page count keeps the grid and picks the largest square length that fits. Pick paper size or working distance again for the automatic preset.',
-    autoGridCaption:
-        'Square length is the largest size that fits the automatic grid and page count for your distance and paper. Move a slider below to customize; choose paper size or distance again to restore the preset grid and pages.',
     squareLengthHeading: 'Square length ({{mm}} mm, integer — snaps to valid print tiling)',
     numberOfPages: 'Number of pages ({{n}})',
     squaresInX: 'Squares in X ({{n}})',
@@ -35,7 +31,7 @@ export const S = {
         'Cannot fit this combination — try another square length, number of sheets, or grid.',
     printCharts: 'Print',
     saveSvgFiles: 'Save SVG files',
-    printScaleHint: 'Ensure you print at 1:1 or 100 scaling!',
+    printScaleHint: 'Ensure you print at 1:1 or 100% scaling!',
     preparingPrint: 'Preparing print…',
     preparingSvgExport: 'Preparing SVG…',
     printInitFailed: 'Could not prepare printing in this browser. Try refreshing the page.',
@@ -45,15 +41,17 @@ export const S = {
         'This link’s OpenCV line (cv2) does not match this generator (expected {{ours}}; got {{theirs}}). Board detection or geometry may differ.',
     previewTitle: 'Preview',
     fullChart: 'Full ChaRuCo pattern',
-    buildingPreview: 'Building preview…',
-    buildingPreviews: 'Building previews…',
+    loadingPreview: 'Loading preview',
+    loadingPreviews: 'Loading previews',
     truncatedPreview:
         'Showing first {{shown}} of {{total}} pages in the preview. Use Print to output every sheet.',
     pageCountLabel: '{{count}} pages',
     pageLabel: 'Page {{n}}',
-    near: '1 - 4m',
+    close: '1 - 2m',
+    near: '2 - 4m',
     far: '4m +',
-    nearFt: '<13 ft',
+    closeFt: '<7 ft',
+    nearFt: '7 - 13 ft',
     farFt: '13 ft+',
     paper: {
         a4: 'A4',
@@ -61,11 +59,15 @@ export const S = {
         tabloid: 'Tabloid / Ledger',
         a3: 'A3',
     },
+    /** Appended to the 2–4 m working-distance preset in the dropdown only (not band labels). */
+    recommendedPreset: '(recommended)',
 } as const;
 
 export function distanceLabel(id: string, imperial: boolean): string {
     if (imperial) {
         switch (id) {
+            case 'close':
+                return S.closeFt;
             case 'near':
                 return S.nearFt;
             case 'far':
@@ -75,6 +77,8 @@ export function distanceLabel(id: string, imperial: boolean): string {
         }
     }
     switch (id) {
+        case 'close':
+            return S.close;
         case 'near':
             return S.near;
         case 'far':
@@ -82,6 +86,12 @@ export function distanceLabel(id: string, imperial: boolean): string {
         default:
             return id;
     }
+}
+
+/** Dropdown option text — includes markers such as `(recommended)` where applicable. */
+export function distanceSelectLabel(id: string, imperial: boolean): string {
+    const base = distanceLabel(id, imperial);
+    return id === 'near' ? `${base} ${S.recommendedPreset}` : base;
 }
 
 export function bandLabel(tier: WorkingDistanceTierId, imperial: boolean): string {

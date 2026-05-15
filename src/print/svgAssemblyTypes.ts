@@ -12,9 +12,9 @@ export interface PrintSvgParams {
     documentationSourceUrl?: string;
     signal?: AbortSignal;
     /**
-     * When true (default), `renderCharucoPrintSvgCore` awaits {@link yieldToMain} between tile
-     * pages so the UI can breathe. Preview passes `false` — each yield waits ~2 frames, so many
-     * sheets multiplied by ~25–35ms/frame dominates wall time while sync work looks “instant”.
+     * When unset or true, `renderCharucoPrintSvgCore` awaits {@link yieldToMain} between sheets
+     * so spinners/layout can update. Passing `false` skips yields (fastest bulk export but can
+     * freeze the UI for large page counts).
      */
     cooperativeYield?: boolean;
 }

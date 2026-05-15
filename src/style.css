@@ -22,7 +22,9 @@
   --info: #29b6f6;
   --success: #4caf50;
   --far-tier: #c66900;
+  --close-tier: #26a69a;
   --surface-2: #0f1419;
+  --close: var(--close-tier);
   --near: var(--info);
   --far: var(--far-tier);
   --border: var(--divider);
@@ -52,7 +54,9 @@
   --info: #2196f3;
   --success: #4caf50;
   --far-tier: #c66900;
+  --close-tier: #00897b;
   --surface-2: #f8f9fa;
+  --close: var(--close-tier);
   --near: var(--info);
   --far: var(--far-tier);
   --border: var(--divider);
@@ -458,6 +462,7 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 0.75rem;
   box-sizing: border-box;
   min-width: min(100%, 200px);
   min-height: min(360px, 50vh);
@@ -472,17 +477,48 @@ body {
   background: color-mix(in srgb, var(--muted) 8%, transparent);
 }
 
-.preview-image-placeholder.preview-image-placeholder--busy::before {
-  content: '';
+.preview-image-placeholder.preview-image-placeholder--busy .preview-busy-ring {
+  margin-inline: auto;
+}
+
+.preview-image-placeholder.preview-image-placeholder--busy .preview-busy-msg {
+  margin: 0;
+}
+
+.preview-busy-ring {
   flex-shrink: 0;
-  display: block;
   width: 1.25rem;
   height: 1.25rem;
-  margin: 0 auto 0.75rem;
   border: 2px solid color-mix(in srgb, var(--muted) 45%, transparent);
   border-top-color: var(--primary);
   border-radius: 50%;
   animation: ui-busy-spin 0.65s linear infinite;
+}
+
+@keyframes preview-busy-dots {
+  0%, 23% {
+    content: '';
+  }
+  25%, 48% {
+    content: '.';
+  }
+  50%, 73% {
+    content: '..';
+  }
+  75%, 100% {
+    content: '...';
+  }
+}
+
+.preview-busy-msg--dots::after {
+  content: '';
+  display: inline-block;
+  width: 2.75ch;
+  text-align: left;
+  overflow: visible;
+  white-space: nowrap;
+  vertical-align: bottom;
+  animation: preview-busy-dots 1.2s step-end infinite;
 }
 
 .board-img.board-img--hidden {
@@ -493,6 +529,11 @@ body {
   grid-column: 1 / -1;
   margin: 0;
   padding: 2rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--muted);
@@ -501,16 +542,12 @@ body {
   background: color-mix(in srgb, var(--muted) 8%, transparent);
 }
 
-.thumb-grid-loading.thumb-grid-loading--busy::before {
-  content: '';
-  display: block;
-  width: 1.25rem;
-  height: 1.25rem;
-  margin: 0 auto 0.75rem;
-  border: 2px solid color-mix(in srgb, var(--muted) 45%, transparent);
-  border-top-color: var(--primary);
-  border-radius: 50%;
-  animation: ui-busy-spin 0.65s linear infinite;
+.thumb-grid-loading.thumb-grid-loading--busy .preview-busy-ring {
+  margin-inline: auto;
+}
+
+.thumb-grid-loading.thumb-grid-loading--busy .preview-busy-msg {
+  margin: 0;
 }
 
 :root[data-theme='light'] .preview-frame {

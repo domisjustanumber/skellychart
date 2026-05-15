@@ -157,37 +157,60 @@ export function resolveDistancePrintPlan(
     paperId: string,
 ): {squaresX: number; squaresY: number; targetPages: number} {
     const large = paperFormatClass(paperId) === 'large';
-    /** Two tiers only (`mid` preset removed — treat legacy `mid` like `near`). */
-    const tier: 'near' | 'far' = distanceId === 'far' ? 'far' : 'near';
+    /** `mid` and other legacy ids behave like `near` (2–4m tier). */
+    const tier: WorkingDistanceTierId =
+        distanceId === 'far' ? 'far' : distanceId === 'close' ? 'close' : 'near';
     if (!large) {
-        return tier === 'far'
-            ? {squaresX: 3, squaresY: 5, targetPages: 9}
-            : {squaresX: 5, squaresY: 3, targetPages: 1};
+        if (tier === 'far') {
+            return {squaresX: 3, squaresY: 5, targetPages: 9};
+        }
+        if (tier === 'close') {
+            return {squaresX: 7, squaresY: 5, targetPages: 1};
+        }
+        return {squaresX: 5, squaresY: 3, targetPages: 1};
     }
-    return tier === 'far'
-        ? {squaresX: 3, squaresY: 5, targetPages: 3}
-        : {squaresX: 5, squaresY: 3, targetPages: 1};
+    if (tier === 'far') {
+        return {squaresX: 3, squaresY: 5, targetPages: 3};
+    }
+    if (tier === 'close') {
+        return {squaresX: 7, squaresY: 5, targetPages: 1};
+    }
+    return {squaresX: 5, squaresY: 3, targetPages: 1};
 }
 
 export const CHARUCO_SQUARE_MM_MIN = 10;
 export const CHARUCO_SQUARE_MM_MAX = 200;
 
-/** Square lengths up to this (mm) map to the `near` preset (UI: “1 - 4m”); larger squares map to `far` (“4m +”). */
+/**
+ * Square lengths up to this (mm) map to the `close` preset (UI: “1 - 2m”); between this and
+ * {@link SQUARE_LENGTH_LT_4M_MAX_MM} map to `near` (“2 - 4m”); larger map to `far` (“4m +”).
+ * Chosen so the largest valid square for a 7×5 tile on A4/Letter (28 mm) stays in the close band.
+ */
+export const SQUARE_LENGTH_LT_2M_MAX_MM = 32;
+
+/** Upper bound (mm) for the `near` / “2 - 4m” band; above this is `far`. */
 export const SQUARE_LENGTH_LT_4M_MAX_MM = 100;
 
-export type WorkingDistanceTierId = 'near' | 'far';
+export type WorkingDistanceTierId = 'close' | 'near' | 'far';
 
 export function workingDistanceTierFromSquareLengthMm(squareMm: number): WorkingDistanceTierId {
     const m = Math.round(Math.max(CHARUCO_SQUARE_MM_MIN, Math.min(CHARUCO_SQUARE_MM_MAX, squareMm)));
-    return m <= SQUARE_LENGTH_LT_4M_MAX_MM ? 'near' : 'far';
+    if (m <= SQUARE_LENGTH_LT_2M_MAX_MM) {
+        return 'close';
+    }
+    if (m <= SQUARE_LENGTH_LT_4M_MAX_MM) {
+        return 'near';
+    }
+    return 'far';
 }
 
-export function squareLengthTierBandEdgeFractions(): {nearFar: number} {
+export function squareLengthTierBandEdgeFractions(): {closeNear: number; nearFar: number} {
     const span = CHARUCO_SQUARE_MM_MAX - CHARUCO_SQUARE_MM_MIN;
     if (span <= 0) {
-        return {nearFar: 1};
+        return {closeNear: 1, nearFar: 1};
     }
     return {
+        closeNear: (SQUARE_LENGTH_LT_2M_MAX_MM - CHARUCO_SQUARE_MM_MIN) / span,
         nearFar: (SQUARE_LENGTH_LT_4M_MAX_MM - CHARUCO_SQUARE_MM_MIN) / span,
     };
 }
@@ -204,8 +227,10 @@ const SQ_MAX = CHARUCO_SQUARE_MM_MAX;
 let validSquareSizesCacheKey = '';
 let validSquareSizesCache: number[] = [];
 const validSquareSizesForSheetsCache = new Map<string, number[]>();
-/** `validTargetPageCountsForGrid` + `applyAutoPreset` each scan all square sizes per page target — memoize. */
+/** `maxSquareMmForGridAndPages` memo; scan order is optimised (descending) for typical hit rate. */
 const maxSquareMmForGridAndPagesCache = new Map<string, number | null>();
+/** Memo: `syncUi` called every frame while dragging squares — avoid re-walking targets 1..9 repeatedly. */
+const validTargetPageCountsForGridCache = new Map<string, number[]>();
 
 export function maxSquareMmForGridAndPages(
     squaresX: number,
@@ -218,15 +243,15 @@ export function maxSquareMmForGridAndPages(
     if (maxSquareMmForGridAndPagesCache.has(key)) {
         return maxSquareMmForGridAndPagesCache.get(key)!;
     }
-    let best: number | null = null;
-    for (let s = SQ_MIN; s <= SQ_MAX; s++) {
+    for (let s = SQ_MAX; s >= SQ_MIN; s--) {
         const t = computeTilingInfoMatchingPageCount(squaresX, squaresY, s, paperWMm, paperHMm, targetPages);
         if (t !== null) {
-            best = s;
+            maxSquareMmForGridAndPagesCache.set(key, s);
+            return s;
         }
     }
-    maxSquareMmForGridAndPagesCache.set(key, best);
-    return best;
+    maxSquareMmForGridAndPagesCache.set(key, null);
+    return null;
 }
 
 export function validTargetPageCountsForGrid(
@@ -235,12 +260,27 @@ export function validTargetPageCountsForGrid(
     paperWMm: number,
     paperHMm: number,
 ): number[] {
+    const key = `${squaresX}:${squaresY}:${paperWMm}:${paperHMm}`;
+    const cached = validTargetPageCountsForGridCache.get(key);
+    if (cached !== undefined) {
+        return cached;
+    }
     const out: number[] = [];
     for (let p = PAGE_COUNT_MIN; p <= PAGE_COUNT_MAX; p++) {
-        if (maxSquareMmForGridAndPages(squaresX, squaresY, paperWMm, paperHMm, p) !== null) {
+        let any = false;
+        for (let s = SQ_MIN; s <= SQ_MAX; s++) {
+            // Existence-only: stops as soon as *some* square length satisfies `p` sheets (much cheaper than
+            // walking all `s` to find the maximum, which `maxSquareMmForGridAndPages` does when needed).
+            if (computeTilingInfoMatchingPageCount(squaresX, squaresY, s, paperWMm, paperHMm, p) !== null) {
+                any = true;
+                break;
+            }
+        }
+        if (any) {
             out.push(p);
         }
     }
+    validTargetPageCountsForGridCache.set(key, out);
     return out;
 }
 

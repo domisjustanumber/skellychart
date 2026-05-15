@@ -37,18 +37,27 @@ import {
     setStoredPreference,
     type ThemePreference,
 } from './ui/theme.js';
-import {bandLabel, distanceLabel, interpolate, paperLabel, S, sheetCountPhrase} from './ui/strings.js';
+import {bandLabel, distanceSelectLabel, interpolate, paperLabel, S, sheetCountPhrase} from './ui/strings.js';
 
-const PRESET_IDS = ['near', 'far'] as const;
+const PRESET_IDS = ['close', 'near', 'far'] as const;
+
+/** Default working-distance preset (2–4 m); labelled “(recommended)” in the dropdown. */
+const DEFAULT_WORKING_DISTANCE_ID = 'near' as const satisfies (typeof PRESET_IDS)[number];
 
 function normalizeWorkingDistanceId(id: string): (typeof PRESET_IDS)[number] {
-    return id === 'far' ? 'far' : 'near';
+    if (id === 'far') {
+        return 'far';
+    }
+    if (id === 'close') {
+        return 'close';
+    }
+    return DEFAULT_WORKING_DISTANCE_ID;
 }
 
 function initialBoard(): {paperId: string; squareMm: number; squaresX: number; squaresY: number} {
     const paperId = defaultPaperId();
     const paper = paperById(paperId) ?? PAPER_OPTIONS[0]!;
-    const plan = resolveDistancePrintPlan('near', paperId);
+    const plan = resolveDistancePrintPlan(DEFAULT_WORKING_DISTANCE_ID, paperId);
     const squareMm =
         maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, paper.wMm, paper.hMm, plan.targetPages) ?? 54;
     return {paperId, squareMm, squaresX: plan.squaresX, squaresY: plan.squaresY};
@@ -66,7 +75,7 @@ interface AppState {
 }
 
 const state: AppState = {
-    distanceId: 'near',
+    distanceId: DEFAULT_WORKING_DISTANCE_ID,
     paperId: defaultBoard.paperId,
     squareMm: defaultBoard.squareMm,
     squaresX: defaultBoard.squaresX,
@@ -92,10 +101,21 @@ function hideFullPreviewPlaceholder(): void {
     ph.classList.remove('preview-image-placeholder--busy');
 }
 
+function setPreviewBusyMarkup(root: HTMLElement, message: string): void {
+    root.replaceChildren();
+    const spin = document.createElement('span');
+    spin.className = 'preview-busy-ring';
+    spin.setAttribute('aria-hidden', 'true');
+    const label = document.createElement('span');
+    label.className = 'preview-busy-msg preview-busy-msg--dots';
+    label.textContent = message;
+    root.append(spin, label);
+}
+
 function showFullPreviewPlaceholder(message: string): void {
     const ph = byId('fullPreviewPlaceholder');
     const img = byId('boardImg') as HTMLImageElement;
-    ph.textContent = message;
+    setPreviewBusyMarkup(ph, message);
     ph.classList.remove('hidden');
     ph.classList.add('preview-image-placeholder--busy');
     img.classList.add('board-img--hidden');
@@ -106,10 +126,10 @@ function showFullPreviewPlaceholder(message: string): void {
 function setThumbGridPlaceholder(message: string): void {
     const thumbs = byId('thumbGrid');
     thumbs.innerHTML = '';
-    const p = document.createElement('p');
-    p.className = 'thumb-grid-loading thumb-grid-loading--busy';
-    p.textContent = message;
-    thumbs.appendChild(p);
+    const box = document.createElement('div');
+    box.className = 'thumb-grid-loading thumb-grid-loading--busy';
+    setPreviewBusyMarkup(box, message);
+    thumbs.appendChild(box);
 }
 
 function resetPreviewVisualsEmpty(): void {
@@ -204,8 +224,35 @@ let previewAbort: AbortController | null = null;
 /** Bumped when a new preview run starts so stale async completions do not clear the busy UI. */
 let previewGeneration = 0;
 
+let syncUiRafId: number | null = null;
+/** Cached so we don't rebuild selects on every drag frame (expensive and blocks paint). */
+let syncedDistanceSelectKey = '';
+let syncedPaperSelectKey = '';
+/** True while `#distance` native selection was cleared so re-picking the same option fires `change`; must not overwrite value in `syncUi`. */
+let suppressDistanceSelectUiClamp = false;
+/** Square-length band labels + gradient only depend on locale (imperial vs m) and tier constants. */
+let syncedTierBandKey = '';
+
+/**
+ * Batches slider-driven DOM updates into the next animation frame so the UI thread can paint spinners,
+ * repaint the active range input, and run CSS animations instead of starving on hundreds of syncUi calls.
+ */
+function scheduleSyncUi(): void {
+    if (syncUiRafId !== null) {
+        return;
+    }
+    syncUiRafId = window.requestAnimationFrame(() => {
+        syncUiRafId = null;
+        syncUi();
+    });
+}
+
 function syncUi(): void {
     const t0 = perfDev() ? performance.now() : 0;
+    if (syncUiRafId !== null) {
+        window.cancelAnimationFrame(syncUiRafId);
+        syncUiRafId = null;
+    }
     state.distanceId = normalizeWorkingDistanceId(state.distanceId);
     applyAutoPreset();
     const imperial = shouldUseImperialWorkingDistanceUnits();
@@ -217,7 +264,6 @@ function syncUi(): void {
     byId('lbl-distance').textContent = S.workingDistance;
     byId('lbl-paper').textContent = S.paperSize;
     byId('lbl-advanced').textContent = S.advanced;
-    byId('gridCaption').textContent = state.autoGrid ? S.autoGridCaption : S.customGridCaption;
     byId('lbl-square').textContent = interpolate(S.squareLengthHeading, {mm: state.squareMm});
     byId('lbl-pages').textContent = interpolate(S.numberOfPages, {n: pagesSliderDisplay(tiling)});
     byId('lbl-sx').textContent = interpolate(S.squaresInX, {n: state.squaresX});
@@ -229,21 +275,30 @@ function syncUi(): void {
     byId('printScaleHint').textContent = S.printScaleHint;
 
     const frac = squareLengthTierBandEdgeFractions();
+    const pCloseEnd = frac.closeNear * 100;
     const pNearEnd = frac.nearFar * 100;
-    const tierEl = byId('tierLabels');
-    tierEl.innerHTML = '';
-    const s1 = document.createElement('span');
-    s1.style.width = `${pNearEnd}%`;
-    s1.style.color = 'var(--near)';
-    s1.textContent = bandLabel('near', imperial);
-    const s2 = document.createElement('span');
-    s2.style.flex = '1';
-    s2.style.color = 'var(--far)';
-    s2.textContent = bandLabel('far', imperial);
-    tierEl.append(s1, s2);
-
-    (byId('tierBar') as HTMLDivElement).style.background =
-        `linear-gradient(to right, var(--near) 0%, var(--near) ${pNearEnd}%, var(--far) ${pNearEnd}%, var(--far) 100%)`;
+    const tierBandKey = `${imperial}:${pCloseEnd}:${pNearEnd}`;
+    const tierBar = byId('tierBar') as HTMLDivElement;
+    if (tierBandKey !== syncedTierBandKey) {
+        syncedTierBandKey = tierBandKey;
+        const tierEl = byId('tierLabels');
+        tierEl.innerHTML = '';
+        const s1 = document.createElement('span');
+        s1.style.width = `${pCloseEnd}%`;
+        s1.style.color = 'var(--close)';
+        s1.textContent = bandLabel('close', imperial);
+        const s2 = document.createElement('span');
+        s2.style.width = `${Math.max(0, pNearEnd - pCloseEnd)}%`;
+        s2.style.color = 'var(--near)';
+        s2.textContent = bandLabel('near', imperial);
+        const s3 = document.createElement('span');
+        s3.style.flex = '1';
+        s3.style.color = 'var(--far)';
+        s3.textContent = bandLabel('far', imperial);
+        tierEl.append(s1, s2, s3);
+        tierBar.style.background =
+            `linear-gradient(to right, var(--close) 0%, var(--close) ${pCloseEnd}%, var(--near) ${pCloseEnd}%, var(--near) ${pNearEnd}%, var(--far) ${pNearEnd}%, var(--far) 100%)`;
+    }
 
     const sqmm = byId('sqmm') as HTMLInputElement;
     sqmm.min = String(CHARUCO_SQUARE_MM_MIN);
@@ -271,26 +326,36 @@ function syncUi(): void {
     sy.value = String(state.squaresY);
 
     const distSel = byId('distance') as HTMLSelectElement;
-    distSel.innerHTML = '';
-    for (const id of PRESET_IDS) {
-        const o = document.createElement('option');
-        o.value = id;
-        o.textContent = distanceLabel(id, imperial);
-        distSel.appendChild(o);
+    const distanceSelectKey = `${imperial}:${(PRESET_IDS as readonly string[]).join('|')}`;
+    if (distanceSelectKey !== syncedDistanceSelectKey) {
+        syncedDistanceSelectKey = distanceSelectKey;
+        distSel.innerHTML = '';
+        for (const id of PRESET_IDS) {
+            const o = document.createElement('option');
+            o.value = id;
+            o.textContent = distanceSelectLabel(id, imperial);
+            distSel.appendChild(o);
+        }
     }
-    distSel.value = state.distanceId;
+    if (!suppressDistanceSelectUiClamp) {
+        distSel.value = state.distanceId;
+    }
 
     const paperSel = byId('paper') as HTMLSelectElement;
-    paperSel.innerHTML = '';
-    for (const p of PAPER_OPTIONS) {
-        const o = document.createElement('option');
-        o.value = p.id;
-        o.textContent = interpolate(S.paperOption, {
-            paper: paperLabel(p.id),
-            wMm: p.wMm,
-            hMm: p.hMm,
-        });
-        paperSel.appendChild(o);
+    const paperSelectKey = PAPER_OPTIONS.map((p) => p.id).join('|');
+    if (paperSelectKey !== syncedPaperSelectKey) {
+        syncedPaperSelectKey = paperSelectKey;
+        paperSel.innerHTML = '';
+        for (const p of PAPER_OPTIONS) {
+            const o = document.createElement('option');
+            o.value = p.id;
+            o.textContent = interpolate(S.paperOption, {
+                paper: paperLabel(p.id),
+                wMm: p.wMm,
+                hMm: p.hMm,
+            });
+            paperSel.appendChild(o);
+        }
     }
     paperSel.value = state.paperId;
 
@@ -423,8 +488,8 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     panelPreview.setAttribute('aria-busy', 'true');
     statusEl.textContent = '';
     fullBlock.classList.remove('hidden');
-    showFullPreviewPlaceholder(S.buildingPreview);
-    setThumbGridPlaceholder(S.buildingPreviews);
+    showFullPreviewPlaceholder(S.loadingPreview);
+    setThumbGridPlaceholder(S.loadingPreviews);
     byId('sheetOverlays').innerHTML = '';
     await yieldToMain();
 
@@ -488,7 +553,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                 tiling,
                 pages,
                 signal,
-                cooperativeYield: false,
+                cooperativeYield: true,
             });
         } catch (e) {
             if ((e as Error).name === 'AbortError') {
@@ -503,7 +568,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
             return;
         }
 
-        setThumbGridPlaceholder(S.buildingPreviews);
+        setThumbGridPlaceholder(S.loadingPreviews);
         await yieldToMain();
 
         try {
@@ -845,10 +910,44 @@ function syncQrVersionBanner(): void {
 }
 
 function wireUi(): void {
-    (byId('distance') as HTMLSelectElement).addEventListener('change', (e) => {
+    const distanceSel = byId('distance') as HTMLSelectElement;
+    /** Native `<select>` does not fire `change` when re-picking the same option; briefly clear selection so it always fires. */
+    let pendingDistanceRestore: string | null = null;
+    /** After clearing, ignore further primary-button downs until closed (`change`) or cancelled (`blur`). */
+    let distanceArmClearForNextPrimaryDown = true;
+
+    distanceSel.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) {
+            return;
+        }
+        if (!distanceArmClearForNextPrimaryDown) {
+            return;
+        }
+        distanceArmClearForNextPrimaryDown = false;
+        pendingDistanceRestore = distanceSel.value;
+        suppressDistanceSelectUiClamp = true;
+        distanceSel.selectedIndex = -1;
+    });
+
+    distanceSel.addEventListener('change', (e) => {
+        pendingDistanceRestore = null;
+        suppressDistanceSelectUiClamp = false;
+        distanceArmClearForNextPrimaryDown = true;
         state.distanceId = normalizeWorkingDistanceId((e.target as HTMLSelectElement).value);
         state.autoGrid = true;
         syncUi();
+    });
+
+    distanceSel.addEventListener('blur', () => {
+        distanceArmClearForNextPrimaryDown = true;
+        suppressDistanceSelectUiClamp = false;
+        if (pendingDistanceRestore !== null && distanceSel.selectedIndex < 0) {
+            const restore = pendingDistanceRestore;
+            pendingDistanceRestore = null;
+            distanceSel.value = restore;
+        } else {
+            pendingDistanceRestore = null;
+        }
     });
 
     (byId('paper') as HTMLSelectElement).addEventListener('change', (e) => {
@@ -863,7 +962,7 @@ function wireUi(): void {
         const pd = paperDims();
         state.squareMm = snapSquareMm(raw, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
         syncDistanceFromSquareIfManual();
-        syncUi();
+        scheduleSyncUi();
     });
 
     (byId('pages') as HTMLInputElement).addEventListener('input', (e) => {
@@ -875,19 +974,19 @@ function wireUi(): void {
         if (sq !== null) {
             state.squareMm = sq;
         }
-        syncUi();
+        scheduleSyncUi();
     });
 
     (byId('sx') as HTMLInputElement).addEventListener('input', (e) => {
         state.autoGrid = false;
         state.squaresX = clampInt(Number((e.target as HTMLInputElement).value), BOARD_GRID_MIN, BOARD_GRID_MAX);
-        syncUi();
+        scheduleSyncUi();
     });
 
     (byId('sy') as HTMLInputElement).addEventListener('input', (e) => {
         state.autoGrid = false;
         state.squaresY = clampInt(Number((e.target as HTMLInputElement).value), BOARD_GRID_MIN, BOARD_GRID_MAX);
-        syncUi();
+        scheduleSyncUi();
     });
 
     byId('btnPdf').addEventListener('click', () => void openPrintDialog());

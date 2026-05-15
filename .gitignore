@@ -5,7 +5,6 @@ dist/
 public/generated-presets/
 # Emitted by `npm run generate` (predev/build).
 src/print/generated/
-src/generated/
 .venv/
 *.local
 .DS_Store

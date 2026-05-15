@@ -1,4 +1,4 @@
-import {DICT_4X4_250_ROT0_BYTES} from '../generated/dict4x4_250_rot0.js';
+import {DICT_4X4_250_ROT0_BYTES} from '../skelly-charuco/dict4x4_250_rot0.js';
 
 export const ARUCO_MARKER_SIZE_4X4 = 4;
 

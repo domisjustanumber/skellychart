@@ -19,10 +19,11 @@ Serve `dist/` with any static file host; Vite is configured with `base: './'` fo
 
 ## Regenerate codegen output
 
-`npm run dev` / `npm run build` run **`npm run generate`** first, which emits:
+`npm run dev` / `npm run build` run **`npm run generate`** first, which emits only:
 
 - `src/print/generated/` — tiling feasibility blobs (`generate:tiling-feasibility`)
-- `src/skelly-charuco/dict4x4_250_rot0.ts` — OpenCV `DICT_4X4_250` marker bytes (`generate:aruco-dict` → runs `scripts/export_dict4x4_250_ts.py` via `scripts/run-export-aruco-dict.ts`)
+
+The ArUco dictionary module **`src/skelly-charuco/dict4x4_250_rot0.ts`** is **checked in** and is **not** regenerated during `npm run build` (CI has no OpenCV). Refresh it on your machine with **`npm run generate:aruco-dict`** (runs `scripts/export_dict4x4_250_ts.py` via `scripts/run-export-aruco-dict.ts`) or the PowerShell/bash sync scripts below.
 
 ### Refresh dictionary data from OpenCV (optional)
 

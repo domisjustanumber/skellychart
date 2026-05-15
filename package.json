@@ -5,7 +5,7 @@
   "scripts": {
     "predev": "npm run generate",
     "dev": "vite",
-    "generate": "npm run generate:tiling-feasibility && npm run generate:aruco-dict",
+    "generate": "npm run generate:tiling-feasibility",
     "generate:tiling-feasibility": "tsx scripts/generate-tiling-feasibility.ts",
     "generate:aruco-dict": "tsx scripts/run-export-aruco-dict.ts",
     "verify:opencv-raster": "uv run --with opencv-contrib-python-headless python scripts/verify_charuco_raster.py",

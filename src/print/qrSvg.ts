@@ -20,5 +20,5 @@ export async function generateQrSvgFragment(url: string, sizePx: number): Promis
     });
     const inner = raw.replace(/^\s*<\?xml[^>]*>\s*/i, '').replace(/^\s*<svg[^>]*>/i, '').replace(/<\/svg>\s*$/i, '');
     const viewBox = extractSvgViewBox(raw) ?? `0 0 ${px} ${px}`;
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" width="100%" height="100%" shape-rendering="crispEdges">${inner.trim()}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" width="100%" height="100%" preserveAspectRatio="xMidYMin meet" shape-rendering="crispEdges">${inner.trim()}</svg>`;
 }

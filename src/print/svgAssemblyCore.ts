@@ -16,6 +16,7 @@ import {
     OPENCV_LABEL_VERSION,
     ORIGIN_BANNER_CONTENT_SIDE_MM,
     ORIGIN_BANNER_CONTENT_TOP_MM,
+    ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM,
     ORIGIN_BANNER_VISUAL_SCALE,
     ORIGIN_CORNER_MARKER_PAD_MM,
     ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM,
@@ -509,13 +510,15 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
         const pageObstacles: [number, number, number, number][] = [];
 
         if (spec.isOriginPage) {
-            const portraitQrAboveCharuco = !tiling.landscape;
             const sidePad = Math.round(ORIGIN_BANNER_CONTENT_SIDE_MM * ppm);
             const topPad = Math.round(ORIGIN_BANNER_CONTENT_TOP_MM * ppm);
             const bannerLeft = marginPx + sidePad;
             const bannerRightInner = pagePxW - marginPx - sidePad;
             const qrY = marginPx + topPad;
+            /** Top edge of every banner column (logo, QR) — flush with inner sheet margin. */
             const bannerTitleTop = qrY;
+            const bannerTextTop =
+                bannerTitleTop + Math.round(ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM * ppm);
             const gapBoardQr = Math.round(ORIGIN_GAP_QR_TO_BOARD_INFO_MM * ppm);
             const gapInstBoard = Math.round(ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM * ppm);
             const gapSkellyInst = Math.round(ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM * ppm);
@@ -523,13 +526,14 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
             const qrX = bannerRightInner - qrSizePx;
             const qrStackY = bannerTitleTop;
             const instrLeft = bannerLeft + skellyW + (skellyW > 0 ? gapSkellyInst : 0);
-            const boardMetaTitleY = portraitQrAboveCharuco ? bannerTitleTop + qrSizePx + gapBoardQr : bannerTitleTop;
+            const boardMetaTitleY = bannerTextTop;
             const minInstColPx = Math.max(1, Math.round(12 * ppm));
 
-            const boardInfoRight = portraitQrAboveCharuco ? bannerRightInner : qrX - gapBoardQr;
-            const boardColMaxW = portraitQrAboveCharuco
-                ? Math.max(1, qrSizePx)
-                : Math.max(1, boardInfoRight - instrLeft - gapInstBoard - minInstColPx);
+            const boardInfoRight = qrX - gapBoardQr;
+            const boardColMaxW = Math.max(
+                1,
+                boardInfoRight - instrLeft - gapInstBoard - minInstColPx,
+            );
 
             const titleFont = `bold ${titleFontPx}px ${FONT}`;
             const bodyFont = `${bodyFontPx}px ${FONT}`;
@@ -576,7 +580,7 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
 
             if (logoSvgInner && skellyW > 0) {
                 parts.push(
-                    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" x="${bannerLeft}" y="${bannerTitleTop}" width="${skellyW}" height="${skellyH}" viewBox="0 0 ${SKELLY_LOGO_VIEWBOX_W} ${SKELLY_LOGO_VIEWBOX_H}" preserveAspectRatio="xMidYMid meet" overflow="hidden">${logoSvgInner}</svg>`,
+                    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" x="${bannerLeft}" y="${bannerTitleTop}" width="${skellyW}" height="${skellyH}" viewBox="0 0 ${SKELLY_LOGO_VIEWBOX_W} ${SKELLY_LOGO_VIEWBOX_H}" preserveAspectRatio="xMidYMin meet" overflow="hidden">${logoSvgInner}</svg>`,
                 );
             }
 
@@ -584,14 +588,14 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
                 svgTextBlock(
                     [pdfLabels.originInstructionsTitle],
                     instrLeft,
-                    bannerTitleTop,
+                    bannerTextTop,
                     bodyLineLead,
                     'start',
                     titleFont,
                     true,
                 ),
             );
-            const bodyY = bannerTitleTop + titleFontPx + vGap;
+            const bodyY = bannerTextTop + titleFontPx + vGap;
             const colW = instructionAllowRight - instrLeft;
             const instLines = wrapText(bodyFont, pdfLabels.originInstructionsBody, colW);
             parts.push(svgTextBlock(instLines, instrLeft, bodyY, bodyLineLead, 'start', bodyFont));

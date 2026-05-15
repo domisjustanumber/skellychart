@@ -88,10 +88,11 @@
             <h3 id="lbl-advanced" class="advanced-title"></h3>
 
             <div class="field slider-block">
-              <div class="tier-labels" id="tierLabels" aria-hidden="true"></div>
-              <div id="tierBar" class="tier-bar" aria-hidden="true"></div>
               <label for="sqmm" id="lbl-square"></label>
-              <input type="range" id="sqmm" class="slider" />
+              <div class="square-mm-slider-stack" id="squareMmSliderStack">
+                <input type="range" id="sqmm" class="slider slider--square-mm" />
+                <div class="tier-labels" id="tierLabels" aria-hidden="true"></div>
+              </div>
             </div>
 
             <div class="field">

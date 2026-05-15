@@ -285,7 +285,6 @@ body {
   width: 100%;
   font-size: 0.6875rem;
   font-weight: 600;
-  margin-bottom: 0.35rem;
   text-align: center;
 }
 
@@ -293,11 +292,87 @@ body {
   padding: 0.2rem 0;
 }
 
-.tier-bar {
-  height: 6px;
-  border-radius: 3px;
-  margin: 0 0 0.35rem;
-  opacity: 0.95;
+/**
+ * Square-length range: band-coloured track aligned with working-distance tiers;
+ * legend spans sit directly beneath the thumb rail.
+ */
+.square-mm-slider-stack {
+  --tier-p-close-end: 33%;
+  --tier-p-near-end: 66%;
+  --square-mm-track-h: 10px;
+  --square-mm-thumb: 18px;
+}
+
+.square-mm-slider-stack .tier-labels {
+  margin-top: -0.2rem;
+}
+
+.square-mm-slider-stack .tier-labels span {
+  padding: 0.125rem 0;
+}
+
+.square-mm-slider-stack .slider--square-mm {
+  display: block;
+  width: 100%;
+  margin: 0.35rem 0 0;
+  height: calc(var(--square-mm-thumb) + 6px);
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  accent-color: var(--text);
+}
+
+.square-mm-slider-stack .slider--square-mm::-webkit-slider-runnable-track {
+  height: var(--square-mm-track-h);
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--close) 0%,
+    var(--close) var(--tier-p-close-end),
+    var(--near) var(--tier-p-close-end),
+    var(--near) var(--tier-p-near-end),
+    var(--far) var(--tier-p-near-end),
+    var(--far) 100%
+  );
+}
+
+.square-mm-slider-stack .slider--square-mm::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: var(--square-mm-thumb);
+  height: var(--square-mm-thumb);
+  margin-top: calc((var(--square-mm-track-h) - var(--square-mm-thumb)) / 2);
+  border-radius: 50%;
+  background: var(--panel);
+  border: 2px solid color-mix(in srgb, var(--text) 88%, transparent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.square-mm-slider-stack .slider--square-mm::-moz-range-track {
+  height: var(--square-mm-track-h);
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--close) 0%,
+    var(--close) var(--tier-p-close-end),
+    var(--near) var(--tier-p-close-end),
+    var(--near) var(--tier-p-near-end),
+    var(--far) var(--tier-p-near-end),
+    var(--far) 100%
+  );
+}
+
+.square-mm-slider-stack .slider--square-mm::-moz-range-progress {
+  background: transparent;
+}
+
+.square-mm-slider-stack .slider--square-mm::-moz-range-thumb {
+  width: var(--square-mm-thumb);
+  height: var(--square-mm-thumb);
+  border-radius: 50%;
+  background: var(--panel);
+  border: 2px solid color-mix(in srgb, var(--text) 88%, transparent);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 .slider {

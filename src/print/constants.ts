@@ -1,6 +1,7 @@
 /** Aligned with `charuco_board_print.py` / `charucoPrintLayout.ts` in freemocap. */
 
-export const MM_MARGIN_SHEET = 5;
+/** Blank margin reserved on every sheet edge before join strips and printable content (mm). */
+export const MM_MARGIN_SHEET = 13;
 export const MM_PAGE_NUMBER_CLEARANCE_MM = 4;
 export const MM_JOIN_STRIP = 12;
 export const MM_TAPE_LABEL_INSET_FROM_JOIN_MM = 2.5;
@@ -15,12 +16,29 @@ export const SKELLY_TOP_HEIGHT_MM = 16 + ORIGIN_BANNER_VERTICAL_BUMP_MM;
 
 /** Scale vs legacy ~17 mm QR row (typography and vertical padding). */
 export const ORIGIN_BANNER_VISUAL_SCALE = QR_SIZE_MM / ORIGIN_BANNER_QR_BASELINE_MM;
+/**
+ * Push banner `<text>` down slightly (mm). Nested SVGs anchor by viewport top; `hanging` baseline
+ * leaves Latin caps visually higher than logo/QR tops — this aligns type with graphics.
+ */
+export const ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM = 0.35;
 
-/** Reserve for origin tile + banner; must clear {@link svgAssemblyCore} measured banner bottom. */
+/**
+ * Conservative slab (mm) when banner height cannot be measured (no canvas) on portrait-shaped sheets.
+ * Rendered layout uses one top-aligned banner row on both orientations; this stays as a safe upper bound.
+ * @see {@link ORIGIN_BANNER_STRIP_FALLBACK_NO_CANVAS_LANDSCAPE_MM} for landscape-shaped fallback.
+ */
 export const ORIGIN_PAGE_EXTRA_MM = 77;
-export const ORIGIN_BANNER_CONTENT_TOP_MM =
-    Math.round((3 * ORIGIN_BANNER_VISUAL_SCALE + Number.EPSILON) * 10) / 10;
-export const ORIGIN_BANNER_CONTENT_SIDE_MM = 3;
+/**
+ * No-canvas fallback strip height (mm) for landscape-shaped sheets (tiling passes `portraitQrAboveCharucoInfo === false`).
+ * Must stay plausible vs real SVG; feasibility uses canvas measurement when available.
+ * Calibrated for US Letter landscape printable height (~205.9 mm): five rows at 34 mm need
+ * strip + {@link ORIGIN_CORNER_MARKER_PAD_MM} ≤ ~35.9 mm → strip ≈ 32.9 mm.
+ */
+export const ORIGIN_BANNER_STRIP_FALLBACK_NO_CANVAS_LANDSCAPE_MM = 32;
+/** Extra inset (mm) below {@link MM_MARGIN_SHEET} before banner content; 0 = flush to sheet margin. */
+export const ORIGIN_BANNER_CONTENT_TOP_MM = 0;
+/** Extra inset (mm) inside {@link MM_MARGIN_SHEET} on left/right before banner content; 0 = flush to sheet margin. */
+export const ORIGIN_BANNER_CONTENT_SIDE_MM = 0;
 export const MM_ORIGIN_BANNER_BELOW_GAP_MM =
     Math.round((5 * ORIGIN_BANNER_VISUAL_SCALE + Number.EPSILON) * 10) / 10;
 export const ORIGIN_CORNER_MARKER_PAD_MM = 3;

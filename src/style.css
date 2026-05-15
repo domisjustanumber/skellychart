@@ -473,6 +473,14 @@ body {
   background: color-mix(in srgb, var(--muted) 8%, transparent);
 }
 
+.preview-image-placeholder.preview-image-placeholder--busy .preview-busy-ring {
+  margin-inline: auto;
+}
+
+.preview-image-placeholder.preview-image-placeholder--busy .preview-busy-msg {
+  margin: 0;
+}
+
 .preview-busy-ring {
   flex-shrink: 0;
   width: 1.25rem;

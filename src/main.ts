@@ -539,7 +539,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                 tiling,
                 pages,
                 signal,
-                cooperativeYield: false,
+                cooperativeYield: true,
             });
         } catch (e) {
             if ((e as Error).name === 'AbortError') {

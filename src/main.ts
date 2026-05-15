@@ -28,7 +28,11 @@ import {ensureTilingFeasibilityForPaperId} from './print/tilingFeasibilityTables
 import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from './print/tiling.js';
 import {perfDev, perfLog} from './print/perfDebug.js';
 import {CHARUCO_MARKER_LENGTH_RATIO, CHARUCO_PRINT_LABEL_SPEC_VERSION} from './print/constants.js';
-import {expectedCharucoCv2QueryValue, parseCharucoQrSearchParams} from './print/charucoDocUrl.js';
+import {
+    expectedCharucoCv2QueryValue,
+    mergeCharucoQrParamsInto,
+    parseCharucoQrSearchParams,
+} from './print/charucoDocUrl.js';
 import {
     MAX_PREVIEW_PAGES,
     PREVIEW_DEBOUNCE_IDLE_MS,
@@ -320,6 +324,28 @@ function setIntroElement(el: HTMLElement): void {
     el.replaceChildren(prefix, a, suffix);
 }
 
+/** Keeps {@link window.location} query `v,w,h,s,cv2` aligned with QR / exported charts (printed grid may swap W×H when the pattern is rotated). */
+function syncAddressBarChartQuery(): void {
+    const layout = effectivePrintLayout();
+    const {squaresX, squaresY} = layout
+        ? printSquareDims(layout.patternRotated90)
+        : {squaresX: state.squaresX, squaresY: state.squaresY};
+    const u = new URL(window.location.href);
+    mergeCharucoQrParamsInto(
+        u.searchParams,
+        squaresX,
+        squaresY,
+        state.squareMm,
+        CHARUCO_MARKER_LENGTH_RATIO,
+    );
+    const next = `${u.pathname}${u.search}${u.hash}`;
+    const cur = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (next === cur) {
+        return;
+    }
+    window.history.replaceState(history.state, '', next);
+}
+
 function syncUi(options: SyncUiOptions = {}): void {
     const {lite = false, previewDelayMs} = options;
     const t0 = perfDev() ? performance.now() : 0;
@@ -474,6 +500,7 @@ function syncUi(options: SyncUiOptions = {}): void {
             );
         }
     }
+    syncAddressBarChartQuery();
     schedulePreview(previewDelayMs);
 }
 

@@ -47,9 +47,11 @@ export const S = {
         'Showing first {{shown}} of {{total}} pages in the preview. Use Print to output every sheet.',
     pageCountLabel: '{{count}} pages',
     pageLabel: 'Page {{n}}',
-    near: '1 - 4m',
+    close: '1 - 2m',
+    near: '2 - 4m',
     far: '4m +',
-    nearFt: '<13 ft',
+    closeFt: '<7 ft',
+    nearFt: '7 - 13 ft',
     farFt: '13 ft+',
     paper: {
         a4: 'A4',
@@ -57,11 +59,15 @@ export const S = {
         tabloid: 'Tabloid / Ledger',
         a3: 'A3',
     },
+    /** Appended to the 2–4 m working-distance preset in the dropdown only (not band labels). */
+    recommendedPreset: '(recommended)',
 } as const;
 
 export function distanceLabel(id: string, imperial: boolean): string {
     if (imperial) {
         switch (id) {
+            case 'close':
+                return S.closeFt;
             case 'near':
                 return S.nearFt;
             case 'far':
@@ -71,6 +77,8 @@ export function distanceLabel(id: string, imperial: boolean): string {
         }
     }
     switch (id) {
+        case 'close':
+            return S.close;
         case 'near':
             return S.near;
         case 'far':
@@ -78,6 +86,12 @@ export function distanceLabel(id: string, imperial: boolean): string {
         default:
             return id;
     }
+}
+
+/** Dropdown option text — includes markers such as `(recommended)` where applicable. */
+export function distanceSelectLabel(id: string, imperial: boolean): string {
+    const base = distanceLabel(id, imperial);
+    return id === 'near' ? `${base} ${S.recommendedPreset}` : base;
 }
 
 export function bandLabel(tier: WorkingDistanceTierId, imperial: boolean): string {

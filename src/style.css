@@ -22,7 +22,9 @@
   --info: #29b6f6;
   --success: #4caf50;
   --far-tier: #c66900;
+  --close-tier: #26a69a;
   --surface-2: #0f1419;
+  --close: var(--close-tier);
   --near: var(--info);
   --far: var(--far-tier);
   --border: var(--divider);
@@ -52,7 +54,9 @@
   --info: #2196f3;
   --success: #4caf50;
   --far-tier: #c66900;
+  --close-tier: #00897b;
   --surface-2: #f8f9fa;
+  --close: var(--close-tier);
   --near: var(--info);
   --far: var(--far-tier);
   --border: var(--divider);

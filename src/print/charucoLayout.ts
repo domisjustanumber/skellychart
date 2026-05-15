@@ -157,37 +157,60 @@ export function resolveDistancePrintPlan(
     paperId: string,
 ): {squaresX: number; squaresY: number; targetPages: number} {
     const large = paperFormatClass(paperId) === 'large';
-    /** Two tiers only (`mid` preset removed — treat legacy `mid` like `near`). */
-    const tier: 'near' | 'far' = distanceId === 'far' ? 'far' : 'near';
+    /** `mid` and other legacy ids behave like `near` (2–4m tier). */
+    const tier: WorkingDistanceTierId =
+        distanceId === 'far' ? 'far' : distanceId === 'close' ? 'close' : 'near';
     if (!large) {
-        return tier === 'far'
-            ? {squaresX: 3, squaresY: 5, targetPages: 9}
-            : {squaresX: 5, squaresY: 3, targetPages: 1};
+        if (tier === 'far') {
+            return {squaresX: 3, squaresY: 5, targetPages: 9};
+        }
+        if (tier === 'close') {
+            return {squaresX: 7, squaresY: 5, targetPages: 1};
+        }
+        return {squaresX: 5, squaresY: 3, targetPages: 1};
     }
-    return tier === 'far'
-        ? {squaresX: 3, squaresY: 5, targetPages: 3}
-        : {squaresX: 5, squaresY: 3, targetPages: 1};
+    if (tier === 'far') {
+        return {squaresX: 3, squaresY: 5, targetPages: 3};
+    }
+    if (tier === 'close') {
+        return {squaresX: 7, squaresY: 5, targetPages: 1};
+    }
+    return {squaresX: 5, squaresY: 3, targetPages: 1};
 }
 
 export const CHARUCO_SQUARE_MM_MIN = 10;
 export const CHARUCO_SQUARE_MM_MAX = 200;
 
-/** Square lengths up to this (mm) map to the `near` preset (UI: “1 - 4m”); larger squares map to `far` (“4m +”). */
+/**
+ * Square lengths up to this (mm) map to the `close` preset (UI: “1 - 2m”); between this and
+ * {@link SQUARE_LENGTH_LT_4M_MAX_MM} map to `near` (“2 - 4m”); larger map to `far` (“4m +”).
+ * Chosen so the largest valid square for a 7×5 tile on A4/Letter (28 mm) stays in the close band.
+ */
+export const SQUARE_LENGTH_LT_2M_MAX_MM = 32;
+
+/** Upper bound (mm) for the `near` / “2 - 4m” band; above this is `far`. */
 export const SQUARE_LENGTH_LT_4M_MAX_MM = 100;
 
-export type WorkingDistanceTierId = 'near' | 'far';
+export type WorkingDistanceTierId = 'close' | 'near' | 'far';
 
 export function workingDistanceTierFromSquareLengthMm(squareMm: number): WorkingDistanceTierId {
     const m = Math.round(Math.max(CHARUCO_SQUARE_MM_MIN, Math.min(CHARUCO_SQUARE_MM_MAX, squareMm)));
-    return m <= SQUARE_LENGTH_LT_4M_MAX_MM ? 'near' : 'far';
+    if (m <= SQUARE_LENGTH_LT_2M_MAX_MM) {
+        return 'close';
+    }
+    if (m <= SQUARE_LENGTH_LT_4M_MAX_MM) {
+        return 'near';
+    }
+    return 'far';
 }
 
-export function squareLengthTierBandEdgeFractions(): {nearFar: number} {
+export function squareLengthTierBandEdgeFractions(): {closeNear: number; nearFar: number} {
     const span = CHARUCO_SQUARE_MM_MAX - CHARUCO_SQUARE_MM_MIN;
     if (span <= 0) {
-        return {nearFar: 1};
+        return {closeNear: 1, nearFar: 1};
     }
     return {
+        closeNear: (SQUARE_LENGTH_LT_2M_MAX_MM - CHARUCO_SQUARE_MM_MIN) / span,
         nearFar: (SQUARE_LENGTH_LT_4M_MAX_MM - CHARUCO_SQUARE_MM_MIN) / span,
     };
 }

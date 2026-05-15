@@ -37,18 +37,27 @@ import {
     setStoredPreference,
     type ThemePreference,
 } from './ui/theme.js';
-import {bandLabel, distanceLabel, interpolate, paperLabel, S, sheetCountPhrase} from './ui/strings.js';
+import {bandLabel, distanceSelectLabel, interpolate, paperLabel, S, sheetCountPhrase} from './ui/strings.js';
 
-const PRESET_IDS = ['near', 'far'] as const;
+const PRESET_IDS = ['close', 'near', 'far'] as const;
+
+/** Default working-distance preset (2–4 m); labelled “(recommended)” in the dropdown. */
+const DEFAULT_WORKING_DISTANCE_ID = 'near' as const satisfies (typeof PRESET_IDS)[number];
 
 function normalizeWorkingDistanceId(id: string): (typeof PRESET_IDS)[number] {
-    return id === 'far' ? 'far' : 'near';
+    if (id === 'far') {
+        return 'far';
+    }
+    if (id === 'close') {
+        return 'close';
+    }
+    return DEFAULT_WORKING_DISTANCE_ID;
 }
 
 function initialBoard(): {paperId: string; squareMm: number; squaresX: number; squaresY: number} {
     const paperId = defaultPaperId();
     const paper = paperById(paperId) ?? PAPER_OPTIONS[0]!;
-    const plan = resolveDistancePrintPlan('near', paperId);
+    const plan = resolveDistancePrintPlan(DEFAULT_WORKING_DISTANCE_ID, paperId);
     const squareMm =
         maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, paper.wMm, paper.hMm, plan.targetPages) ?? 54;
     return {paperId, squareMm, squaresX: plan.squaresX, squaresY: plan.squaresY};
@@ -66,7 +75,7 @@ interface AppState {
 }
 
 const state: AppState = {
-    distanceId: 'near',
+    distanceId: DEFAULT_WORKING_DISTANCE_ID,
     paperId: defaultBoard.paperId,
     squareMm: defaultBoard.squareMm,
     squaresX: defaultBoard.squaresX,
@@ -266,24 +275,29 @@ function syncUi(): void {
     byId('printScaleHint').textContent = S.printScaleHint;
 
     const frac = squareLengthTierBandEdgeFractions();
+    const pCloseEnd = frac.closeNear * 100;
     const pNearEnd = frac.nearFar * 100;
-    const tierBandKey = `${imperial}:${pNearEnd}`;
+    const tierBandKey = `${imperial}:${pCloseEnd}:${pNearEnd}`;
     const tierBar = byId('tierBar') as HTMLDivElement;
     if (tierBandKey !== syncedTierBandKey) {
         syncedTierBandKey = tierBandKey;
         const tierEl = byId('tierLabels');
         tierEl.innerHTML = '';
         const s1 = document.createElement('span');
-        s1.style.width = `${pNearEnd}%`;
-        s1.style.color = 'var(--near)';
-        s1.textContent = bandLabel('near', imperial);
+        s1.style.width = `${pCloseEnd}%`;
+        s1.style.color = 'var(--close)';
+        s1.textContent = bandLabel('close', imperial);
         const s2 = document.createElement('span');
-        s2.style.flex = '1';
-        s2.style.color = 'var(--far)';
-        s2.textContent = bandLabel('far', imperial);
-        tierEl.append(s1, s2);
+        s2.style.width = `${Math.max(0, pNearEnd - pCloseEnd)}%`;
+        s2.style.color = 'var(--near)';
+        s2.textContent = bandLabel('near', imperial);
+        const s3 = document.createElement('span');
+        s3.style.flex = '1';
+        s3.style.color = 'var(--far)';
+        s3.textContent = bandLabel('far', imperial);
+        tierEl.append(s1, s2, s3);
         tierBar.style.background =
-            `linear-gradient(to right, var(--near) 0%, var(--near) ${pNearEnd}%, var(--far) ${pNearEnd}%, var(--far) 100%)`;
+            `linear-gradient(to right, var(--close) 0%, var(--close) ${pCloseEnd}%, var(--near) ${pCloseEnd}%, var(--near) ${pNearEnd}%, var(--far) ${pNearEnd}%, var(--far) 100%)`;
     }
 
     const sqmm = byId('sqmm') as HTMLInputElement;
@@ -319,7 +333,7 @@ function syncUi(): void {
         for (const id of PRESET_IDS) {
             const o = document.createElement('option');
             o.value = id;
-            o.textContent = distanceLabel(id, imperial);
+            o.textContent = distanceSelectLabel(id, imperial);
             distSel.appendChild(o);
         }
     }

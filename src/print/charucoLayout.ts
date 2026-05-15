@@ -7,6 +7,12 @@ import {
     computeTilingInfoMatchingPageCount,
     type TilingInfo,
 } from './tiling.js';
+import {
+    resolveStaticFeasibilitySlot,
+    staticEnumerateValidSquareMm,
+    staticMaxSquareMmForPages,
+    staticValidTargetPageCounts,
+} from './tilingFeasibilityTables.js';
 import {charucoBoardPixelLayout, charucoCropXRange, charucoCropYRange} from '../charuco/board.js';
 
 export const PAPER_OPTIONS: {id: string; wMm: number; hMm: number}[] = [
@@ -223,15 +229,6 @@ export const PAGE_COUNT_MAX = 9;
 const SQ_MIN = CHARUCO_SQUARE_MM_MIN;
 const SQ_MAX = CHARUCO_SQUARE_MM_MAX;
 
-/** Full scan is ~191 tiling checks; runs on every slider `input` — cache per grid + paper. */
-let validSquareSizesCacheKey = '';
-let validSquareSizesCache: number[] = [];
-const validSquareSizesForSheetsCache = new Map<string, number[]>();
-/** `maxSquareMmForGridAndPages` memo; scan order is optimised (descending) for typical hit rate. */
-const maxSquareMmForGridAndPagesCache = new Map<string, number | null>();
-/** Memo: `syncUi` called every frame while dragging squares — avoid re-walking targets 1..9 repeatedly. */
-const validTargetPageCountsForGridCache = new Map<string, number[]>();
-
 function squareSizeFitsTargetPageCountEitherOrientation(
     squaresX: number,
     squaresY: number,
@@ -251,6 +248,21 @@ function squareSizeFitsTargetPageCountEitherOrientation(
     return false;
 }
 
+function maxSquareMmForGridAndPagesUncached(
+    squaresX: number,
+    squaresY: number,
+    paperWMm: number,
+    paperHMm: number,
+    targetPages: number,
+): number | null {
+    for (let s = SQ_MAX; s >= SQ_MIN; s--) {
+        if (squareSizeFitsTargetPageCountEitherOrientation(squaresX, squaresY, s, paperWMm, paperHMm, targetPages)) {
+            return s;
+        }
+    }
+    return null;
+}
+
 export function maxSquareMmForGridAndPages(
     squaresX: number,
     squaresY: number,
@@ -258,31 +270,19 @@ export function maxSquareMmForGridAndPages(
     paperHMm: number,
     targetPages: number,
 ): number | null {
-    const key = `${squaresX}:${squaresY}:${paperWMm}:${paperHMm}:${targetPages}`;
-    if (maxSquareMmForGridAndPagesCache.has(key)) {
-        return maxSquareMmForGridAndPagesCache.get(key)!;
+    const slot = resolveStaticFeasibilitySlot(paperWMm, paperHMm, squaresX, squaresY);
+    if (slot !== undefined) {
+        return staticMaxSquareMmForPages(slot, targetPages);
     }
-    for (let s = SQ_MAX; s >= SQ_MIN; s--) {
-        if (squareSizeFitsTargetPageCountEitherOrientation(squaresX, squaresY, s, paperWMm, paperHMm, targetPages)) {
-            maxSquareMmForGridAndPagesCache.set(key, s);
-            return s;
-        }
-    }
-    maxSquareMmForGridAndPagesCache.set(key, null);
-    return null;
+    return maxSquareMmForGridAndPagesUncached(squaresX, squaresY, paperWMm, paperHMm, targetPages);
 }
 
-export function validTargetPageCountsForGrid(
+function validTargetPageCountsForGridUncached(
     squaresX: number,
     squaresY: number,
     paperWMm: number,
     paperHMm: number,
 ): number[] {
-    const key = `${squaresX}:${squaresY}:${paperWMm}:${paperHMm}`;
-    const cached = validTargetPageCountsForGridCache.get(key);
-    if (cached !== undefined) {
-        return cached;
-    }
     const out: number[] = [];
     for (let p = PAGE_COUNT_MIN; p <= PAGE_COUNT_MAX; p++) {
         let any = false;
@@ -298,20 +298,28 @@ export function validTargetPageCountsForGrid(
             out.push(p);
         }
     }
-    validTargetPageCountsForGridCache.set(key, out);
     return out;
 }
 
-export function enumerateValidSquareSizes(
+export function validTargetPageCountsForGrid(
     squaresX: number,
     squaresY: number,
     paperWMm: number,
     paperHMm: number,
 ): number[] {
-    const key = `${squaresX}:${squaresY}:${paperWMm}:${paperHMm}`;
-    if (key === validSquareSizesCacheKey) {
-        return validSquareSizesCache;
+    const slot = resolveStaticFeasibilitySlot(paperWMm, paperHMm, squaresX, squaresY);
+    if (slot !== undefined) {
+        return staticValidTargetPageCounts(slot);
     }
+    return validTargetPageCountsForGridUncached(squaresX, squaresY, paperWMm, paperHMm);
+}
+
+function enumerateValidSquareSizesUncached(
+    squaresX: number,
+    squaresY: number,
+    paperWMm: number,
+    paperHMm: number,
+): number[] {
     const out = new Set<number>();
     for (let s = SQ_MIN; s <= SQ_MAX; s++) {
         if (computeTilingInfo(squaresX, squaresY, s, paperWMm, paperHMm) !== null) {
@@ -320,9 +328,20 @@ export function enumerateValidSquareSizes(
             out.add(s);
         }
     }
-    validSquareSizesCache = [...out].sort((a, b) => a - b);
-    validSquareSizesCacheKey = key;
-    return validSquareSizesCache;
+    return [...out].sort((a, b) => a - b);
+}
+
+export function enumerateValidSquareSizes(
+    squaresX: number,
+    squaresY: number,
+    paperWMm: number,
+    paperHMm: number,
+): number[] {
+    const slot = resolveStaticFeasibilitySlot(paperWMm, paperHMm, squaresX, squaresY);
+    if (slot !== undefined) {
+        return staticEnumerateValidSquareMm(slot);
+    }
+    return enumerateValidSquareSizesUncached(squaresX, squaresY, paperWMm, paperHMm);
 }
 
 export function enumerateValidSquareSizesForGridMatchingSheetsTarget(
@@ -332,20 +351,13 @@ export function enumerateValidSquareSizesForGridMatchingSheetsTarget(
     paperHMm: number,
     targetSheets: number,
 ): number[] {
-    const key = `${squaresX}:${squaresY}:${paperWMm}:${paperHMm}:${targetSheets}`;
-    const hit = validSquareSizesForSheetsCache.get(key);
-    if (hit) {
-        return hit;
-    }
     const out = new Set<number>();
     for (let s = SQ_MIN; s <= SQ_MAX; s++) {
         if (squareSizeFitsTargetPageCountEitherOrientation(squaresX, squaresY, s, paperWMm, paperHMm, targetSheets)) {
             out.add(s);
         }
     }
-    const sorted = [...out].sort((a, b) => a - b);
-    validSquareSizesForSheetsCache.set(key, sorted);
-    return sorted;
+    return [...out].sort((a, b) => a - b);
 }
 
 export function nearestValidTargetPages(

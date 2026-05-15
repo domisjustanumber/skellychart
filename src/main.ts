@@ -24,6 +24,7 @@ import {
     validTargetPageCountsForGrid,
     workingDistanceTierFromSquareLengthMm,
 } from './print/charucoLayout.js';
+import {ensureTilingFeasibilityForPaperId} from './print/tilingFeasibilityTables.js';
 import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from './print/tiling.js';
 import {perfDev, perfLog} from './print/perfDebug.js';
 import {CHARUCO_MARKER_LENGTH_RATIO, CHARUCO_PRINT_LABEL_SPEC_VERSION} from './print/constants.js';
@@ -1040,6 +1041,7 @@ function wireUi(): void {
         state.paperId = (e.target as HTMLSelectElement).value;
         state.autoGrid = true;
         syncUi();
+        void ensureTilingFeasibilityForPaperId(state.paperId).then(() => syncUi({lite: true}));
     });
 
     const sqmmEl = byId('sqmm') as HTMLInputElement;
@@ -1103,6 +1105,7 @@ function boot(): void {
     applyQrQueryFromLocation();
     syncQrVersionBanner();
     syncUi();
+    void ensureTilingFeasibilityForPaperId(state.paperId).then(() => syncUi({lite: true}));
 }
 
 boot();

@@ -19,14 +19,10 @@ export const S = {
     title: 'FreeMoCap Calibration Chart Generator',
     intro:
         'Create a printable SVG chart with QR metadata on the first sheet, tape-join labels on interior edges, and a corner marker at the square origin. Margins stay blank for printer grab areas. Pick paper size and working distance; we choose the grid and number of sheets automatically and use the largest square length that fits. Use Advanced to adjust square length or grid size by hand. The square-length slider is colour banded by suggested working distance; when you customise the layout, the distance control follows the current square length.',
-    workingDistance: 'Working distance',
+    workingDistance: 'Working distance from camera',
     paperSize: 'Paper size',
     paperOption: '{{paper}} ({{wMm}} × {{hMm}} mm)',
     advanced: 'Advanced',
-    customGridCaption:
-        'Custom layout: changing square length keeps the grid and updates pages; changing X or Y keeps the square length and updates pages; changing page count keeps the grid and picks the largest square length that fits. Pick paper size or working distance again for the automatic preset.',
-    autoGridCaption:
-        'Square length is the largest size that fits the automatic grid and page count for your distance and paper. Move a slider below to customize; choose paper size or distance again to restore the preset grid and pages.',
     squareLengthHeading: 'Square length ({{mm}} mm, integer — snaps to valid print tiling)',
     numberOfPages: 'Number of pages ({{n}})',
     squaresInX: 'Squares in X ({{n}})',
@@ -35,7 +31,7 @@ export const S = {
         'Cannot fit this combination — try another square length, number of sheets, or grid.',
     printCharts: 'Print',
     saveSvgFiles: 'Save SVG files',
-    printScaleHint: 'Ensure you print at 1:1 or 100 scaling!',
+    printScaleHint: 'Ensure you print at 1:1 or 100% scaling!',
     preparingPrint: 'Preparing print…',
     preparingSvgExport: 'Preparing SVG…',
     printInitFailed: 'Could not prepare printing in this browser. Try refreshing the page.',

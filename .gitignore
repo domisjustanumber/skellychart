@@ -1,6 +1,8 @@
 node_modules/
 .playwright-mcp/
 dist/
+# Avoid committing preset SVG dumps under public/; use dist/ from npm run build.
+public/generated-presets/
 .venv/
 *.local
 .DS_Store

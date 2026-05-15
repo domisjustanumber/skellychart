@@ -219,6 +219,8 @@ let syncUiRafId: number | null = null;
 /** Cached so we don't rebuild selects on every drag frame (expensive and blocks paint). */
 let syncedDistanceSelectKey = '';
 let syncedPaperSelectKey = '';
+/** True while `#distance` native selection was cleared so re-picking the same option fires `change`; must not overwrite value in `syncUi`. */
+let suppressDistanceSelectUiClamp = false;
 /** Square-length band labels + gradient only depend on locale (imperial vs m) and tier constants. */
 let syncedTierBandKey = '';
 
@@ -253,7 +255,6 @@ function syncUi(): void {
     byId('lbl-distance').textContent = S.workingDistance;
     byId('lbl-paper').textContent = S.paperSize;
     byId('lbl-advanced').textContent = S.advanced;
-    byId('gridCaption').textContent = state.autoGrid ? S.autoGridCaption : S.customGridCaption;
     byId('lbl-square').textContent = interpolate(S.squareLengthHeading, {mm: state.squareMm});
     byId('lbl-pages').textContent = interpolate(S.numberOfPages, {n: pagesSliderDisplay(tiling)});
     byId('lbl-sx').textContent = interpolate(S.squaresInX, {n: state.squaresX});
@@ -322,7 +323,9 @@ function syncUi(): void {
             distSel.appendChild(o);
         }
     }
-    distSel.value = state.distanceId;
+    if (!suppressDistanceSelectUiClamp) {
+        distSel.value = state.distanceId;
+    }
 
     const paperSel = byId('paper') as HTMLSelectElement;
     const paperSelectKey = PAPER_OPTIONS.map((p) => p.id).join('|');
@@ -893,10 +896,44 @@ function syncQrVersionBanner(): void {
 }
 
 function wireUi(): void {
-    (byId('distance') as HTMLSelectElement).addEventListener('change', (e) => {
+    const distanceSel = byId('distance') as HTMLSelectElement;
+    /** Native `<select>` does not fire `change` when re-picking the same option; briefly clear selection so it always fires. */
+    let pendingDistanceRestore: string | null = null;
+    /** After clearing, ignore further primary-button downs until closed (`change`) or cancelled (`blur`). */
+    let distanceArmClearForNextPrimaryDown = true;
+
+    distanceSel.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) {
+            return;
+        }
+        if (!distanceArmClearForNextPrimaryDown) {
+            return;
+        }
+        distanceArmClearForNextPrimaryDown = false;
+        pendingDistanceRestore = distanceSel.value;
+        suppressDistanceSelectUiClamp = true;
+        distanceSel.selectedIndex = -1;
+    });
+
+    distanceSel.addEventListener('change', (e) => {
+        pendingDistanceRestore = null;
+        suppressDistanceSelectUiClamp = false;
+        distanceArmClearForNextPrimaryDown = true;
         state.distanceId = normalizeWorkingDistanceId((e.target as HTMLSelectElement).value);
         state.autoGrid = true;
         syncUi();
+    });
+
+    distanceSel.addEventListener('blur', () => {
+        distanceArmClearForNextPrimaryDown = true;
+        suppressDistanceSelectUiClamp = false;
+        if (pendingDistanceRestore !== null && distanceSel.selectedIndex < 0) {
+            const restore = pendingDistanceRestore;
+            pendingDistanceRestore = null;
+            distanceSel.value = restore;
+        } else {
+            pendingDistanceRestore = null;
+        }
     });
 
     (byId('paper') as HTMLSelectElement).addEventListener('change', (e) => {

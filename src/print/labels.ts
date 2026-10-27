@@ -15,8 +15,8 @@ export const pdfLabels = {
     assemblyGuideBody: `This chart prints on {{sheets}} pages, {{cols}} across and {{rows}} down. Each numbered block above shows where that page goes in the finished chart.
 1. Lay the pages out as shown, with page 1 at the top left. Its red and green corner marker shows the chart's x and y directions.
 2. On each page, cut the dashed line away along every edge that joins another page.
-3. Butt each cut edge up against the page named beside it, keeping the squares lined up across every seam, and tape the pages together from the back.
-4. Mount the assembled chart flat on a rigid board so it cannot bend.`,
+3. Butt each cut edge up against the page named beside it, keeping the squares lined up across every seam.
+4. Glue the pages flat onto a rigid board with spray adhesive or a glue stick, so the chart cannot bend. Do not use tape - the reflections may cause errors when detecting the chart.`,
     /** Header line in the top margin of each sheet without the banner: brand and chart link on the left. */
     sheetHeaderBrand: 'FreeMoCap · {{url}}',
     /** Header middle; dropped when the line would not fit. */
@@ -44,9 +44,9 @@ For instructions on how to use the chart, buy a pre-made one, or print another, 
      * empty box the user writes their measured square length in; its line is never wrapped.
      */
     originChartInfo: `ChArUco calibration chart v{{version}}
+Size: {{squaresX}} x {{squaresY}} (X x Y)
 Square length: {{mm}} mm
-Measured square length: {{box}} mm
-Size: {{squaresX}} x {{squaresY}} (X x Y)`,
+Measured square length: {{box}} mm`,
 } as const;
 
 /** Stands in for the write-in box in {@link originChartInfoParts}' body lines. */

@@ -1,6 +1,5 @@
 import {APP_VERSION} from './appVersion.js';
 import freemocapLogoUrl from './freemocapLogoUrl.js';
-import {renderCharucoBoardSvg} from './charuco/board.js';
 import {renderCharucoPrintSvg} from './print/svgDocument.js';
 import {
     BOARD_GRID_MAX,
@@ -10,7 +9,6 @@ import {
     PAPER_OPTIONS,
     paperById,
     charucoPagePreviewBorderColor,
-    computeCharucoPagePreviewRects,
     computeEffectivePrintLayout,
     defaultPaperId,
     layoutSummaryText,
@@ -22,10 +20,11 @@ import {
     pageStepNeighbours,
     steppablePageCounts,
     type PageStep,
+    validTargetPageCountsForGrid,
     workingDistanceMinSquareMm,
     workingDistanceTierFromSquareLengthMm,
 } from './print/charucoLayout.js';
-import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from './print/tiling.js';
+import {buildPageSpecs, nominalPaperToPdfDimensionsMm, printedSheetCount} from './print/tiling.js';
 import {perfDev, perfLog} from './print/perfDebug.js';
 import {CHARUCO_MARKER_LENGTH_RATIO, getCharucoPrintSourceUrlFor} from './print/constants.js';
 import {compareChartVersions, parseChartVersion} from './print/chartVersion.js';
@@ -129,13 +128,6 @@ function byId(id: string): HTMLElement {
     return el;
 }
 
-function hideFullPreviewPlaceholder(): void {
-    const ph = byId('fullPreviewPlaceholder');
-    ph.textContent = '';
-    ph.classList.add('hidden');
-    ph.classList.remove('preview-image-placeholder--busy');
-}
-
 function setPreviewBusyMarkup(root: HTMLElement, message: string): void {
     root.replaceChildren();
     const spin = document.createElement('span');
@@ -145,17 +137,6 @@ function setPreviewBusyMarkup(root: HTMLElement, message: string): void {
     label.className = 'preview-busy-msg preview-busy-msg--dots';
     label.textContent = message;
     root.append(spin, label);
-}
-
-function showFullPreviewPlaceholder(message: string): void {
-    const ph = byId('fullPreviewPlaceholder');
-    const img = byId('boardImg') as HTMLImageElement;
-    setPreviewBusyMarkup(ph, message);
-    ph.classList.remove('hidden');
-    ph.classList.add('preview-image-placeholder--busy');
-    img.classList.add('board-img--hidden');
-    img.removeAttribute('src');
-    img.alt = '';
 }
 
 function setThumbGridPlaceholder(message: string): void {
@@ -168,15 +149,8 @@ function setThumbGridPlaceholder(message: string): void {
 }
 
 function resetPreviewVisualsEmpty(): void {
-    clearSheetNumberFit();
-    hideFullPreviewPlaceholder();
-    // The hint describes the sheet blocks, so it must not outlive them (e.g. after a render error).
+    // The hint describes the printed sheets, so it must not outlive them (e.g. after a render error).
     byId('fullChartHint').classList.add('hidden');
-    const img = byId('boardImg') as HTMLImageElement;
-    img.classList.add('board-img--hidden');
-    img.removeAttribute('src');
-    img.alt = '';
-    byId('sheetOverlays').innerHTML = '';
     byId('thumbGrid').innerHTML = '';
 }
 
@@ -228,8 +202,9 @@ type PageStepTarget = 'fewer' | 'more' | 'fewest' | 'most';
  * Like the other board sliders it never changes the distance. Returns false when there is nowhere to go.
  */
 function stepPages(which: PageStepTarget): boolean {
-    const target = pageStepNeighbours(pageSteps(), pagesSliderDisplay(effectiveTiling()))[which];
-    if (!target || target.squareMm === state.squareMm) {
+    const current = pagesSliderDisplay(effectiveTiling());
+    const target = pageStepNeighbours(pageSteps(), current)[which];
+    if (!target || target.pages === current) {
         return false;
     }
     state.autoGrid = false;
@@ -249,9 +224,11 @@ function chartSizeParts(imperial: boolean): {w: string; h: string; unit: string}
         : {w: fmt(wMm / 10), h: fmt(hMm / 10), unit: 'cm'};
 }
 
+/** A sheets stepper button: how many sheets the step adds or removes, and the square length it gives. */
 function renderPageStepButton(
     btn: HTMLElement,
     step: PageStep | null,
+    currentPages: number,
     sign: string,
     noneLabel: string,
     ariaTemplate: string,
@@ -261,9 +238,14 @@ function renderPageStepButton(
     // aria-disabled (not disabled) keeps keyboard focus on the button when it reaches an end stop.
     btn.setAttribute('aria-disabled', String(step === null));
     if (step) {
-        main.textContent = `${sign} ${sheetsShort(step.pages)}`;
+        const total = printedSheetCount(step.pages);
+        const change = sheetsShort(Math.abs(total - printedSheetCount(currentPages)));
+        main.textContent = `${sign} ${change}`;
         sub.textContent = interpolate(S.pagesStepSquares, {mm: step.squareMm});
-        btn.setAttribute('aria-label', interpolate(ariaTemplate, {sheets: sheetsShort(step.pages), mm: step.squareMm}));
+        btn.setAttribute(
+            'aria-label',
+            interpolate(ariaTemplate, {change, total: sheetsShort(total), mm: step.squareMm}),
+        );
     } else {
         main.textContent = `${sign} ${noneLabel}`;
         sub.textContent = '';
@@ -276,24 +258,27 @@ function syncPageStepper(tiling: ReturnType<typeof effectiveTiling>, imperial: b
     const count = pagesSliderDisplay(tiling);
     const {fewer, more} = tiling ? pageStepNeighbours(pageSteps(), count) : {fewer: null, more: null};
     byId('lbl-pages').textContent = S.sheetsOfPaper;
-    byId('pagesValue').textContent = tiling ? sheetsShort(count) : '—';
+    byId('pagesValue').textContent = tiling ? sheetsShort(printedSheetCount(count)) : '—';
     const size = chartSizeParts(imperial);
     byId('pagesDetail').textContent = !tiling
         ? ''
         : tiling.pageCount > 1
           ? interpolate(S.pagesDetail, {cols: tiling.npx, rows: tiling.npy, ...size})
           : interpolate(S.pagesDetailOne, size);
-    renderPageStepButton(byId('pagesFewer'), fewer, '−', S.pagesFewerNone, S.pagesFewerAria);
-    renderPageStepButton(byId('pagesMore'), more, '+', S.pagesMoreNone, S.pagesMoreAria);
+    renderPageStepButton(byId('pagesFewer'), fewer, count, '−', S.pagesFewerNone, S.pagesFewerAria);
+    renderPageStepButton(byId('pagesMore'), more, count, '+', S.pagesMoreNone, S.pagesMoreAria);
 
     let hint = '';
     if (tiling && !fewer && count > 1) {
-        hint = interpolate(S.pagesFewestHint, {distance: bandLabel(state.distanceId, imperial), mm: distanceMinSquareMm()});
-    } else if (tiling && !more) {
+        const pd = paperDims();
+        const fewestAnyDistance = validTargetPageCountsForGrid(state.squaresX, state.squaresY, pd.wMm, pd.hMm)[0];
         hint =
-            tiling.pageCount === state.squaresX * state.squaresY
-                ? S.pagesMostOnePerSheetHint
-                : interpolate(S.pagesMostLargestHint, {mm: state.squareMm});
+            fewestAnyDistance !== undefined && fewestAnyDistance < count
+                ? interpolate(S.pagesFewestHint, {distance: bandLabel(state.distanceId, imperial), mm: distanceMinSquareMm()})
+                : interpolate(S.pagesFewestGridHint, {sheets: sheetsShort(printedSheetCount(count))});
+    } else if (tiling && !more) {
+        // The last stop is always one square per sheet (checked by scripts/check-presets.ts).
+        hint = S.pagesMostOnePerSheetHint;
     }
     const hintEl = byId('pagesHint');
     hintEl.textContent = hint;
@@ -302,6 +287,7 @@ function syncPageStepper(tiling: ReturnType<typeof effectiveTiling>, imperial: b
 
 /** Click steps once; holding repeats (after 400 ms, every 120 ms) until an end stop. */
 function wirePageStepButton(btn: HTMLElement, which: 'fewer' | 'more'): void {
+    const readout = byId('pagesValue');
     let delayTimer: number | undefined;
     let repeatTimer: number | undefined;
     let repeated = false;
@@ -310,6 +296,15 @@ function wirePageStepButton(btn: HTMLElement, which: 'fewer' | 'more'): void {
         window.clearInterval(repeatTimer);
         delayTimer = undefined;
         repeatTimer = undefined;
+        if (readout.getAttribute('aria-live') === 'off') {
+            // Announce only where the hold ended, not every step on the way.
+            readout.setAttribute('aria-live', 'polite');
+            const text = readout.textContent;
+            readout.textContent = '';
+            requestAnimationFrame(() => {
+                readout.textContent = text;
+            });
+        }
     };
     btn.addEventListener('pointerdown', (e) => {
         if (e.button !== 0) {
@@ -317,7 +312,11 @@ function wirePageStepButton(btn: HTMLElement, which: 'fewer' | 'more'): void {
         }
         stop();
         repeated = false;
+        btn.setPointerCapture(e.pointerId);
+        // Keeps the preview on the short interactive debounce while held (cleared on window pointerup).
+        rangePointerHeld = true;
         delayTimer = window.setTimeout(() => {
+            readout.setAttribute('aria-live', 'off');
             repeatTimer = window.setInterval(() => {
                 repeated = true;
                 if (!stepPages(which)) {
@@ -326,15 +325,23 @@ function wirePageStepButton(btn: HTMLElement, which: 'fewer' | 'more'): void {
             }, 120);
         }, 400);
     });
-    for (const type of ['pointerup', 'pointerleave', 'pointercancel', 'blur']) {
-        btn.addEventListener(type, stop);
+    btn.addEventListener('pointerup', stop);
+    for (const type of ['pointercancel', 'lostpointercapture', 'blur']) {
+        btn.addEventListener(type, () => {
+            stop();
+            // No click follows a cancelled hold, so nothing is left to swallow.
+            repeated = false;
+        });
     }
-    btn.addEventListener('click', () => {
-        // A hold already stepped; the click that ends it must not step again.
-        if (repeated) {
+    // A long press must repeat, not open the context menu or start a text selection.
+    btn.addEventListener('contextmenu', (e) => e.preventDefault());
+    btn.addEventListener('click', (e) => {
+        // The click that ends a hold must not step again; keyboard clicks (detail 0) always step.
+        if (repeated && e.detail !== 0) {
             repeated = false;
             return;
         }
+        repeated = false;
         stepPages(which);
     });
 }
@@ -393,9 +400,6 @@ let previewTimer: ReturnType<typeof setTimeout> | null = null;
 let previewAbort: AbortController | null = null;
 /** Bumped when a new preview run starts so stale async completions do not clear the busy UI. */
 let previewGeneration = 0;
-/** ResizeObserver / pending frame that keeps the shared page-number size fitted to the rendered blocks. */
-let sheetNumberResizeObserver: ResizeObserver | null = null;
-let sheetNumberFitRafId: number | null = null;
 /** Prevents a second PDF export while one is running (e.g. after a slider drag re-runs syncUi). */
 let pdfExportInProgress = false;
 
@@ -722,8 +726,8 @@ function syncUi(options: SyncUiOptions = {}): void {
         state.squaresX,
         state.squaresY,
         state.squareMm,
-        sheetCountPhrase,
-        (cols, rows) => interpolate('; {{cols}}×{{rows}} sheet grid', {cols, rows}),
+        (n) => sheetCountPhrase(printedSheetCount(n)),
+        (cols, rows) => interpolate('; {{cols}}×{{rows}} sheet grid + assembly guide', {cols, rows}),
         (squaresX, squaresY, squareMm) =>
             interpolate('; {{squaresX}}×{{squaresY}} squares; {{squareMm}} mm square length', {
                 squaresX,
@@ -794,8 +798,7 @@ function waitAnimationFrames(count: number): Promise<void> {
     });
 }
 
-function flushPreviewImgLayoutReads(boardImg: HTMLImageElement, thumbsRoot: HTMLElement): void {
-    void boardImg.offsetWidth;
+function flushPreviewImgLayoutReads(thumbsRoot: HTMLElement): void {
     for (const img of thumbsRoot.querySelectorAll<HTMLImageElement>('img.thumb-img')) {
         void img.offsetWidth;
     }
@@ -806,20 +809,17 @@ function flushPreviewImgLayoutReads(boardImg: HTMLImageElement, thumbsRoot: HTML
  * happens *after* `decode()` resolves. We still `decode()` (readiness), force layout reads, then
  * wait **2× requestAnimationFrame** as a rough proxy for “about to paint”.
  */
-async function awaitPreviewImagesDecodedAndPaint(boardImg: HTMLImageElement, thumbsRoot: HTMLElement): Promise<void> {
+async function awaitPreviewImagesDecodedAndPaint(thumbsRoot: HTMLElement): Promise<void> {
     const tDecode = perfDev() ? performance.now() : 0;
-    const pending: Promise<void>[] = [
-        boardImg.decode().catch(() => {}),
-        ...Array.from(thumbsRoot.querySelectorAll<HTMLImageElement>('img.thumb-img'), (im) =>
-            im.decode().catch(() => {}),
-        ),
-    ];
+    const pending: Promise<void>[] = Array.from(thumbsRoot.querySelectorAll<HTMLImageElement>('img.thumb-img'), (im) =>
+        im.decode().catch(() => {}),
+    );
     await Promise.all(pending);
     if (perfDev()) {
         perfLog('browser <img> decode()', performance.now() - tDecode, `${pending.length} images`);
     }
 
-    flushPreviewImgLayoutReads(boardImg, thumbsRoot);
+    flushPreviewImgLayoutReads(thumbsRoot);
 
     const tRaf = perfDev() ? performance.now() : 0;
     await waitAnimationFrames(2);
@@ -828,131 +828,7 @@ async function awaitPreviewImagesDecodedAndPaint(boardImg: HTMLImageElement, thu
     }
 }
 
-/** Intrinsic long edge of the full-chart preview image; large enough for a 2× display at the preview size. */
-const PREVIEW_BOARD_LONG_EDGE_PX = 1200;
-
-const SHEET_NUMBER_PROBE_PX = 100;
-/** Minimum breathing room between a number's painted ink and the inside edge of its block. */
-const SHEET_NUMBER_CLEARANCE_PX = 5;
-/**
- * Largest share of a block's width / height a number's ink (including its outline) may cover, so a
- * block that is a single square still leaves most of its ArUco marker visible around the number.
- */
-const SHEET_NUMBER_MAX_BLOCK_FRACTION = 0.4;
-/** Smallest shared number size; blocks too small for it are sized on their own instead of shrinking every number. */
-const SHEET_NUMBER_MIN_LEGIBLE_PX = 11;
-/** Below this a block's number is hidden visually (the block keeps its aria-label). */
-const SHEET_NUMBER_MIN_VISIBLE_PX = 8;
-/** Must match `-webkit-text-stroke` on `.sheet-rect-num`: half lies outside the glyph on each side. */
-const SHEET_NUMBER_STROKE_EM = 0.18;
-
-let sheetNumberMeasureCtx: CanvasRenderingContext2D | null = null;
-
-function clearSheetNumberFit(): void {
-    sheetNumberResizeObserver?.disconnect();
-    sheetNumberResizeObserver = null;
-    if (sheetNumberFitRafId !== null) {
-        cancelAnimationFrame(sheetNumberFitRafId);
-        sheetNumberFitRafId = null;
-    }
-    const overlays = document.getElementById('sheetOverlays');
-    overlays?.style.removeProperty('--sheet-number-font-px');
-    overlays?.removeAttribute('data-fitted');
-}
-
-function measureSheetNumberText(ctx: CanvasRenderingContext2D, badge: HTMLElement, text: string): TextMetrics {
-    const cs = getComputedStyle(badge);
-    ctx.font = `${cs.fontWeight} ${SHEET_NUMBER_PROBE_PX}px ${cs.fontFamily}`;
-    return ctx.measureText(text);
-}
-
-/** Painted size of `text`, in em: glyph ink box plus the outer half of the outline on each side. */
-function sheetNumberInkEm(badge: HTMLElement, text: string): {w: number; h: number} {
-    sheetNumberMeasureCtx ??= document.createElement('canvas').getContext('2d');
-    const m = sheetNumberMeasureCtx ? measureSheetNumberText(sheetNumberMeasureCtx, badge, text) : null;
-    const inkW = m ? m.actualBoundingBoxLeft + m.actualBoundingBoxRight : 0;
-    const inkH = m ? m.actualBoundingBoxAscent + m.actualBoundingBoxDescent : 0;
-    if (!(inkW > 0) || !(inkH > 0)) {
-        // Conservative bold-digit metrics if the canvas cannot measure ink.
-        return {w: 0.6 * text.length + SHEET_NUMBER_STROKE_EM, h: 0.75 + SHEET_NUMBER_STROKE_EM};
-    }
-    return {
-        w: inkW / SHEET_NUMBER_PROBE_PX + SHEET_NUMBER_STROKE_EM,
-        h: inkH / SHEET_NUMBER_PROBE_PX + SHEET_NUMBER_STROKE_EM,
-    };
-}
-
-/**
- * Sizes the page numbers from their painted ink so each covers at most
- * {@link SHEET_NUMBER_MAX_BLOCK_FRACTION} of its block. Numbers share one size taken from the blocks
- * that can hold a legible number; thinner blocks (e.g. a one-square remainder strip) get their own
- * smaller size, or no visible number, rather than shrinking every other sheet's number.
- */
-function fitSheetNumbersToBlocks(overlays: HTMLElement): void {
-    const blocks = Array.from(overlays.querySelectorAll<HTMLElement>('.sheet-rect'));
-    const badges = blocks.map((block) => block.querySelector<HTMLElement>('.sheet-rect-num'));
-    if (blocks.length === 0 || badges.some((badge) => badge === null)) {
-        return;
-    }
-
-    const fits: number[] = [];
-    for (let i = 0; i < blocks.length; i++) {
-        const block = blocks[i]!;
-        const ink = sheetNumberInkEm(badges[i]!, badges[i]!.textContent ?? '');
-        const w = block.clientWidth;
-        const h = block.clientHeight;
-        const availableW = Math.max(0, Math.min(w * SHEET_NUMBER_MAX_BLOCK_FRACTION, w - SHEET_NUMBER_CLEARANCE_PX));
-        const availableH = Math.max(0, Math.min(h * SHEET_NUMBER_MAX_BLOCK_FRACTION, h - SHEET_NUMBER_CLEARANCE_PX));
-        // Round down so subpixel rounding can only make the number smaller, never cross the block edge.
-        fits.push(Math.floor(Math.min(availableW / ink.w, availableH / ink.h) * 100) / 100);
-    }
-
-    // Prefer sharing a legible size; if no block can hold one (e.g. many sheets on a phone), still share
-    // one size across the blocks that can show a number, so the numbers stay uniform.
-    const legible = fits.filter((f) => f >= SHEET_NUMBER_MIN_LEGIBLE_PX);
-    const visible = fits.filter((f) => f >= SHEET_NUMBER_MIN_VISIBLE_PX);
-    const pool = legible.length > 0 ? legible : visible;
-    const shared = pool.length > 0 ? Math.min(...pool) : null;
-    if (shared !== null) {
-        overlays.style.setProperty('--sheet-number-font-px', `${shared}px`);
-    }
-    blocks.forEach((block, i) => {
-        const fit = fits[i]!;
-        const own = shared !== null && fit >= shared ? null : fit;
-        if (own === null) {
-            block.style.removeProperty('--sheet-number-font-px');
-        } else {
-            block.style.setProperty('--sheet-number-font-px', `${own}px`);
-        }
-        badges[i]!.classList.toggle('sheet-rect-num--hidden', own !== null && own < SHEET_NUMBER_MIN_VISIBLE_PX);
-    });
-    overlays.setAttribute('data-fitted', '');
-}
-
-function watchSheetNumberFit(boardImg: HTMLImageElement, overlays: HTMLElement): void {
-    sheetNumberResizeObserver?.disconnect();
-    const observer = new ResizeObserver(() => {
-        if (sheetNumberFitRafId !== null) {
-            cancelAnimationFrame(sheetNumberFitRafId);
-        }
-        sheetNumberFitRafId = requestAnimationFrame(() => {
-            sheetNumberFitRafId = null;
-            if (!overlays.isConnected || overlays.childElementCount === 0) {
-                return;
-            }
-            fitSheetNumbersToBlocks(overlays);
-        });
-    });
-    observer.observe(boardImg);
-    // The panel width can change the frame/image size independently of the board image's aspect ratio.
-    if (overlays.parentElement) {
-        observer.observe(overlays.parentElement);
-    }
-    sheetNumberResizeObserver = observer;
-}
-
 async function runPreview(scheduleBaselineMs?: number): Promise<void> {
-    clearSheetNumberFit();
     previewAbort?.abort();
     previewAbort = new AbortController();
     const signal = previewAbort.signal;
@@ -969,8 +845,6 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     const statusEl = byId('previewStatus') as HTMLParagraphElement;
     const panelPreview = byId('panelPreview');
     const fullBlock = byId('fullPreviewBlock');
-    const boardImg = byId('boardImg') as HTMLImageElement;
-    const overlays = byId('sheetOverlays');
     const thumbs = byId('thumbGrid');
     const trunc = byId('previewTruncated');
 
@@ -986,62 +860,19 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     panelPreview.setAttribute('aria-busy', 'true');
     statusEl.textContent = '';
     // Assembly instructions only make sense when the chart spans several sheets.
-    // The full-chart overview (and its hint) is only shown for multi-page results.
     fullBlock.classList.toggle('hidden', tiling.pageCount <= 1);
-    showFullPreviewPlaceholder(S.loadingPreview);
     setThumbGridPlaceholder(S.loadingPreviews);
-    byId('sheetOverlays').innerHTML = '';
     await yieldToMain();
 
     try {
         const previewWallStart = perfDev() ? performance.now() : 0;
 
         const {squaresX: px, squaresY: py} = state;
-        const markerMm = state.squareMm * CHARUCO_MARKER_LENGTH_RATIO;
-        // Fixed long edge (not 1px/mm) so CSS only ever scales the board down to the shared preview height.
-        const longEdge = PREVIEW_BOARD_LONG_EDGE_PX;
-        const wMm = px * state.squareMm;
-        const hMm = py * state.squareMm;
-        let cW: number;
-        let cH: number;
-        if (wMm >= hMm) {
-            cW = longEdge;
-            cH = Math.max(1, Math.round(cW * (hMm / wMm)));
-        } else {
-            cH = longEdge;
-            cW = Math.max(1, Math.round(cH * (wMm / hMm)));
-        }
-
-        const rects = computeCharucoPagePreviewRects(px, py, tiling, cW, cH);
-
-        await yieldToMain();
-        if (signal.aborted) {
-            return;
-        }
-
-        const tBoardSvg = perfDev() ? performance.now() : 0;
-        const boardDataUrl = svgToDataUrl(
-            renderCharucoBoardSvg(cW, cH, {
-                squaresX: px,
-                squaresY: py,
-                squareLength: state.squareMm,
-                markerLength: markerMm,
-            }),
-        );
-        if (perfDev()) {
-            perfLog('live board (renderCharucoBoardSvg + data URL)', performance.now() - tBoardSvg, `${cW}×${cH}px`);
-        }
-
-        await yieldToMain();
-        if (signal.aborted) {
-            return;
-        }
-
         const pd = paperDims();
         const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
 
         const allPages = buildPageSpecs(px, py, tiling).pages;
-        // Only the thumbnails that are shown are rendered; footers still count every sheet.
+        // Only the thumbnails that are shown are rendered; sheet headers still count every chart sheet.
         const pages = allPages.slice(0, MAX_PREVIEW_PAGES);
 
         let printResult: Awaited<ReturnType<typeof renderCharucoPrintSvg>>;
@@ -1086,64 +917,21 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                     `${pageImages.length} thumbs — each encodes full sheet SVG`,
                 );
             }
+            const guideImage = printResult.guide ? svgToDataUrl(printResult.guide.svg) : null;
             const totalPages = printResult.totalPages;
             const truncated = totalPages > MAX_PREVIEW_PAGES;
             if (signal.aborted) {
                 return;
             }
 
-            hideFullPreviewPlaceholder();
             byId('fullChartHint').classList.remove('hidden');
-            boardImg.src = boardDataUrl;
-            boardImg.alt = S.fullChart;
-            boardImg.classList.remove('board-img--hidden');
-
-            overlays.innerHTML = '';
-            if (rects) {
-                // One translucent, colour-coded block per printed sheet; the badge shows its page number.
-                for (const r of rects) {
-                    const d = document.createElement('div');
-                    d.className = 'sheet-rect';
-                    d.style.left = `${r.left * 100}%`;
-                    d.style.top = `${r.top * 100}%`;
-                    d.style.width = `${r.width * 100}%`;
-                    d.style.height = `${r.height * 100}%`;
-                    // The board is black/white in every theme, so blocks always use the darker palette.
-                    d.style.setProperty(
-                        '--sheet-color',
-                        charucoPagePreviewBorderColor(r.sheetIndex, tiling.pageCount, false),
-                    );
-                    d.setAttribute('role', 'img');
-                    d.setAttribute(
-                        'aria-label',
-                        interpolate(S.pageBlockLabel, {n: r.sheetIndex, total: tiling.pageCount}),
-                    );
-                    const num = document.createElement('span');
-                    num.className = 'sheet-rect-num';
-                    num.textContent = String(r.sheetIndex);
-                    num.setAttribute('aria-hidden', 'true');
-                    d.appendChild(num);
-                    overlays.appendChild(d);
-                }
-                // Fit as soon as the board has its size, not after every thumbnail decodes (numbers stay
-                // hidden until `data-fitted` is set, so they never flash at the fallback size).
-                void boardImg
-                    .decode()
-                    .catch(() => {})
-                    .then(() => {
-                        if (signal.aborted || runId !== previewGeneration) {
-                            return;
-                        }
-                        fitSheetNumbersToBlocks(overlays);
-                        watchSheetNumberFit(boardImg, overlays);
-                    });
-            }
 
             trunc.classList.toggle('hidden', !truncated);
             if (truncated) {
+                // Counts printed sheets, like the sheets stepper: the guide thumbnail is one of them.
                 trunc.textContent = interpolate(S.truncatedPreview, {
-                    shown: pageImages.length,
-                    total: totalPages,
+                    shown: pageImages.length + (guideImage ? 1 : 0),
+                    total: printedSheetCount(totalPages),
                 });
             }
             thumbs.innerHTML = '';
@@ -1151,6 +939,21 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
             // A single sheet is the whole chart, so it is shown at full-chart size without a page caption.
             const singlePage = totalPages <= 1;
             thumbs.classList.toggle('thumb-grid--single', singlePage);
+            if (guideImage) {
+                // The assembly guide prints first and is unnumbered.
+                const wrap = document.createElement('div');
+                wrap.className = 'thumb-wrap';
+                const cap = document.createElement('p');
+                cap.className = 'cap';
+                cap.textContent = S.assemblyGuideLabel;
+                const img = document.createElement('img');
+                img.className = 'thumb-img';
+                img.src = guideImage;
+                img.alt = S.assemblyGuideLabel;
+                img.style.border = '1px solid var(--border)';
+                wrap.append(cap, img);
+                thumbs.appendChild(wrap);
+            }
             pageImages.forEach((src, i) => {
                 const wrap = document.createElement('div');
                 wrap.className = 'thumb-wrap';
@@ -1173,7 +976,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                 wrap.appendChild(img);
                 thumbs.appendChild(wrap);
             });
-            await awaitPreviewImagesDecodedAndPaint(boardImg, thumbs);
+            await awaitPreviewImagesDecodedAndPaint(thumbs);
             if (signal.aborted || runId !== previewGeneration) {
                 return;
             }
@@ -1260,7 +1063,7 @@ async function savePdfFile(): Promise<void> {
 
     try {
         const pages = buildPageSpecs(px, py, tiling).pages;
-        const {pages: svgs} = await renderCharucoPrintSvg({
+        const {pages: svgs, guide} = await renderCharucoPrintSvg({
             paperId,
             squaresX: px,
             squaresY: py,
@@ -1274,7 +1077,10 @@ async function savePdfFile(): Promise<void> {
             cooperativeYield: true,
         });
         const blob = await buildPdfBlobFromSvgPages(
-            svgs.map((svg) => ({svg, widthMm: paperWMm, heightMm: paperHMm})),
+            [
+                ...(guide ? [{svg: guide.svg, widthMm: guide.paperWMm, heightMm: guide.paperHMm}] : []),
+                ...svgs.map((svg) => ({svg, widthMm: paperWMm, heightMm: paperHMm})),
+            ],
             ({current, total}) => {
                 btnSave.textContent = interpolate(S.preparingPdfPage, {current, total});
             },
@@ -1362,7 +1168,7 @@ async function openPrintDialog(): Promise<void> {
     const {squaresX: px, squaresY: py} = state;
     const pages = buildPageSpecs(px, py, tiling).pages;
     try {
-        const {pages: svgs} = await renderCharucoPrintSvg({
+        const {pages: svgs, guide} = await renderCharucoPrintSvg({
             paperId: state.paperId,
             squaresX: px,
             squaresY: py,
@@ -1378,6 +1184,17 @@ async function openPrintDialog(): Promise<void> {
         const sheetsHtml = svgs
             .map((svg) => `<div class="sheet">${stripXmlDeclaration(svg)}</div>`)
             .join('');
+        // The guide may be turned the other way from the chart sheets, so it prints on its own named page.
+        let guideCss = '';
+        let guideHtml = '';
+        if (guide) {
+            const [guideWCss, guideHCss] = svgRootOuterSizeAttrs(guide.paperWMm, guide.paperHMm, state.paperId);
+            guideCss =
+                `@page guide{size:${guideWCss} ${guideHCss};margin:0}` +
+                `.sheet.sheet--guide{page:guide;width:${guideWCss};height:${guideHCss}}` +
+                `.sheet--guide>svg{width:${guideWCss};height:${guideHCss}}`;
+            guideHtml = `<div class="sheet sheet--guide">${stripXmlDeclaration(guide.svg)}</div>`;
+        }
         const html =
             `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>` +
             `<title>ChArUco print</title><style>` +
@@ -1388,7 +1205,8 @@ async function openPrintDialog(): Promise<void> {
             `page-break-after:always;break-after:page;overflow:hidden}` +
             `.sheet:last-child{page-break-after:auto;break-after:auto}` +
             `.sheet>svg{display:block;width:${pageWCss};height:${pageHCss}}` +
-            `</style></head><body>${sheetsHtml}</body></html>`;
+            guideCss +
+            `</style></head><body>${guideHtml}${sheetsHtml}</body></html>`;
 
         printHtmlDocumentInHiddenIframe(html);
     } catch (e) {
@@ -1580,6 +1398,9 @@ function wireUi(): void {
         End: 'most',
     };
     byId('pagesGroup').addEventListener('keydown', (e) => {
+        if (e.altKey || e.ctrlKey || e.metaKey) {
+            return;
+        }
         const which = pageStepKeys[e.key];
         if (which) {
             e.preventDefault();

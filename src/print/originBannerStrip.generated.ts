@@ -5,14 +5,17 @@
 export const ORIGIN_BANNER_STRIP_PPM = 12;
 
 /**
- * Exact origin-banner strip height (px at {@link ORIGIN_BANNER_STRIP_PPM}), from the top of the printable
- * area through the gap below the banner, keyed by printed sheet width in mm (`sheetWidthKey`).
+ * Exact origin-banner strip height (px at {@link ORIGIN_BANNER_STRIP_PPM}), from the safe top margin
+ * through the gap below the banner, keyed by banner width in mm (`bannerWidthKey`): the sheet width
+ * less its left and right safe margins (`sheetGeometry.ts`).
  */
 export const ORIGIN_BANNER_STRIP_PX: Readonly<Record<string, number>> = {
-    '210': 549, // 45.75 mm: a4 portrait; 10 instruction lines, height set by instructions
-    '215.9': 549, // 45.75 mm: letter portrait; 10 instruction lines, height set by instructions
-    '279.4': 342, // 28.50 mm: letter landscape, tabloid portrait; 5 instruction lines, height set by QR code
-    '297': 342, // 28.50 mm: a4 landscape, a3 portrait; 5 instruction lines, height set by QR code
-    '420': 342, // 28.50 mm: a3 landscape; 5 instruction lines, height set by QR code
-    '431.8': 342, // 28.50 mm: tabloid landscape; 5 instruction lines, height set by QR code
+    '194': 465, // 38.75 mm: a4 portrait; 8 instruction lines, height set by instructions
+    '199.9': 465, // 38.75 mm: letter portrait; 8 instruction lines, height set by instructions
+    '251': 342, // 28.50 mm: letter landscape; 4 instruction lines, height set by QR code
+    '263.4': 342, // 28.50 mm: tabloid portrait; 4 instruction lines, height set by QR code
+    '268.6': 342, // 28.50 mm: a4 landscape; 4 instruction lines, height set by QR code
+    '281': 342, // 28.50 mm: a3 portrait; 4 instruction lines, height set by QR code
+    '404': 342, // 28.50 mm: a3 landscape; 4 instruction lines, height set by QR code
+    '415.8': 342, // 28.50 mm: tabloid landscape; 4 instruction lines, height set by QR code
 };

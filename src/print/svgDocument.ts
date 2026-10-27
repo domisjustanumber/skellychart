@@ -106,6 +106,7 @@ export async function renderCharucoPrintSvg(params: PrintSvgParams): Promise<Pri
         renderCharucoPrintSvgCore({
             ...params,
             qrSvgFragment,
+            chartUrl: docUrl,
             logoSvgInner: logo.logoSvgInner,
             logoWidthPx: logo.widthPx,
             logoHeightPx: logo.heightPx,

@@ -12,7 +12,7 @@ export interface PrintSvgParams {
     tiling: TilingInfo;
     /** Sheets to render; may be a leading subset of the layout (e.g. preview thumbnails). */
     pages: PageSpec[];
-    /** Sheets in the whole layout, for "Page N of M" footers; defaults to `pages.length`. */
+    /** Chart sheets in the whole layout, for the header's "Page N of M"; defaults to `pages.length`. */
     totalPages?: number;
     documentationSourceUrl?: string;
     signal?: AbortSignal;
@@ -26,13 +26,24 @@ export interface PrintSvgParams {
 
 export interface PrintSvgAssemblyParams extends PrintSvgParams {
     qrSvgFragment: string;
+    /** Chart link the QR encodes; also printed in every sheet's header. */
+    chartUrl: string;
     /** Inner markup only (no outer `<svg>`); nested on the sheet for Inkscape/browser compatibility. */
     logoSvgInner: string | null;
     logoWidthPx: number;
     logoHeightPx: number;
 }
 
+/** One printed sheet whose size differs from the chart sheets'. */
+export interface PrintSheetSvg {
+    svg: string;
+    paperWMm: number;
+    paperHMm: number;
+}
+
 export interface PrintSvgResult {
     pages: string[];
     totalPages: number;
+    /** Assembly guide printed before the chart sheets; `null` for a single-sheet chart. */
+    guide: PrintSheetSvg | null;
 }

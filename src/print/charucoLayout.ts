@@ -369,6 +369,12 @@ export function computeCharucoPagePreviewRects(
     });
 }
 
+const PAGE_COLOR_SAT = 78;
+
+function pageColorHue(sheetIndex1Based: number, totalPages: number): number {
+    return (360 * (sheetIndex1Based - 1)) / totalPages;
+}
+
 export function charucoPagePreviewBorderColor(
     sheetIndex1Based: number,
     totalPages: number,
@@ -377,11 +383,24 @@ export function charucoPagePreviewBorderColor(
     if (totalPages <= 1) {
         return darkMode ? 'hsl(0, 0%, 50%)' : 'hsl(0, 0%, 75%)';
     }
-    const i = sheetIndex1Based - 1;
-    const hue = (360 * i) / totalPages;
-    const sat = 78;
     const light = darkMode ? 62 : 40;
-    return `hsl(${hue} ${sat}% ${light}%)`;
+    return `hsl(${pageColorHue(sheetIndex1Based, totalPages)} ${PAGE_COLOR_SAT}% ${light}%)`;
+}
+
+/**
+ * {@link charucoPagePreviewBorderColor} (light palette, several sheets) as RGB, for the printed assembly
+ * guide: svg2pdf does not read `hsl()`.
+ */
+export function charucoPagePrintRgb(sheetIndex1Based: number, totalPages: number): [number, number, number] {
+    const h = pageColorHue(sheetIndex1Based, totalPages);
+    const s = PAGE_COLOR_SAT / 100;
+    const l = 0.4;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n: number): number => {
+        const k = (n + h / 30) % 12;
+        return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))));
+    };
+    return [f(0), f(8), f(4)];
 }
 
 /** The layout printed for this board: exactly squaresX×squaresY, fewest sheets, best paper orientation. */

@@ -1,11 +1,27 @@
-/** Aligned with `charuco_board_print.py` / `charucoPrintLayout.ts` in freemocap. */
+/** Print layout constants. Originally aligned with freemocap's `charuco_board_print.py`; margins now differ (`sheetGeometry.ts`). */
 
 import {resolveQrLinkSourceUrl, resolveQrLinkSourceUrlFor, type QrLinkTarget} from './qrLinkTarget.js';
 
-/** Blank margin reserved on every sheet edge before join strips and printable content (mm). */
-export const MM_MARGIN_SHEET = 13;
-export const MM_PAGE_NUMBER_CLEARANCE_MM = 4;
-export const MM_JOIN_STRIP = 12;
+/*
+ * Safe printing margins per paper edge, and the board region on each sheet, are in `sheetGeometry.ts`.
+ */
+
+/**
+ * Baseline of the header line on chart sheets without the banner (mm from the top edge). Its font box
+ * (ascent to descent) runs about 8.0–11.2 mm down, inside the safe top margin (`sheetGeometry.ts`) and
+ * above {@link MM_HEADER_CONTENT_TOP_MM}. The bottom edge is no place for it: HP DeskJets lose the last
+ * 12.7 mm.
+ */
+export const MM_SHEET_HEADER_BASELINE_MM = 10.6;
+/** Top of the board region below the header line (mm from the top edge). */
+export const MM_HEADER_CONTENT_TOP_MM = 12.5;
+/** Least space between the header's left, middle and right parts (mm). */
+export const MM_SHEET_HEADER_GAP_MM = 5;
+/**
+ * Band (mm) between the board and the safe margin at a seam, cut away during assembly: it holds only the
+ * tape label ({@link MM_TAPE_LABEL_INSET_FROM_JOIN_MM} plus the label's own height).
+ */
+export const MM_SEAM_LABEL_BAND_MM = 6;
 export const MM_TAPE_LABEL_INSET_FROM_JOIN_MM = 2.5;
 
 /** Baseline QR height (mm) before banner enlargement — drives proportional scaling of banner type and gaps. */
@@ -31,21 +47,37 @@ export const CHARUCO_SQUARE_MM_MAX = 225;
 /** Smallest banner type scale (fraction of normal) the renderer may step down to so the banner fits its reserve. */
 export const ORIGIN_BANNER_MIN_TYPE_FRACTION = 0.7;
 
-/** Key of the generated origin-banner heights (`originBannerStrip.ts`): sheet width (mm) as printed, to 0.1 mm. */
-export function sheetWidthKey(paperWMm: number): string {
-    return String(Math.round(paperWMm * 10) / 10);
+/**
+ * Key of the generated origin-banner heights (`originBannerStrip.ts`): the banner's width (mm), i.e. the
+ * sheet width less its left and right safe margins, to 0.1 mm.
+ */
+export function bannerWidthKey(bannerWMm: number): string {
+    return String(Math.round(bannerWMm * 10) / 10);
 }
 
-/** Extra inset (mm) below {@link MM_MARGIN_SHEET} before banner content; 0 = flush to sheet margin. */
+/** Extra inset (mm) below the safe top margin before banner content; 0 = flush to the margin. */
 export const ORIGIN_BANNER_CONTENT_TOP_MM = 0;
-/** Extra inset (mm) inside {@link MM_MARGIN_SHEET} on left/right before banner content; 0 = flush to sheet margin. */
+/** Extra inset (mm) inside the left/right safe margins before banner content; 0 = flush to the margins. */
 export const ORIGIN_BANNER_CONTENT_SIDE_MM = 0;
 export const MM_ORIGIN_BANNER_BELOW_GAP_MM =
     Math.round((5 * ORIGIN_BANNER_VISUAL_SCALE + Number.EPSILON) * 10) / 10;
+/** Gap between the board's origin corner and the corner marker's axes (mm). */
 export const ORIGIN_CORNER_MARKER_PAD_MM = 3;
+/** Room left of the board for the origin corner marker (its `y` arrow reaches 3.8 mm out). */
+export const ORIGIN_CORNER_MARKER_SIDE_ROOM_MM = 4;
+/**
+ * Room above the board for the origin corner marker (its arrow and `x` label reach about 3.8 mm up)
+ * when no banner sits above it, so the marker stays out of the top margin and clear of the header.
+ */
+export const ORIGIN_CORNER_MARKER_TOP_ROOM_MM = 5;
 export const ORIGIN_GAP_QR_TO_BOARD_INFO_MM = 2.5;
 export const ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM = 3;
 export const ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM = 4;
+/** Box in the chart info for writing the measured square length by hand. */
+export const ORIGIN_WRITE_IN_BOX_W_MM = 12;
+export const ORIGIN_WRITE_IN_BOX_H_MM = 6;
+/** Gap between the write-in box and the text either side of it, and above and below it. */
+export const ORIGIN_WRITE_IN_BOX_GAP_MM = 1;
 export const ORIGIN_MARKER_AXIS_X_RGB: [number, number, number] = [0xa5, 0x28, 0x25];
 export const ORIGIN_MARKER_AXIS_Y_RGB: [number, number, number] = [0x33, 0x6c, 0x34];
 export const JOIN_MEET_DASH_RGB: [number, number, number] = [90, 90, 90];

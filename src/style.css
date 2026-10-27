@@ -250,15 +250,7 @@ body {
 }
 
 .field label,
-.field > label {
-  display: block;
-  font-size: 0.8125rem;
-  color: var(--muted);
-  margin-bottom: 0.35rem;
-  font-weight: 500;
-}
-
-/* Label for a field whose control is a group, not a single input. */
+.field > label,
 .field .field-label {
   display: block;
   font-size: 0.8125rem;
@@ -268,11 +260,22 @@ body {
 }
 
 /* Sheets stepper: fewer / readout / more. Each button names the stop it goes to. */
+#pagesGroup {
+  /* The stepper lays out by the controls panel's width, which the two-column layout decouples from the viewport. */
+  container-type: inline-size;
+}
+
 .page-stepper {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  /* The readout gives way first (its detail line wraps) so each button keeps 7.5rem, room for "− Fewer sheets". */
+  grid-template-columns: minmax(0, 1fr) fit-content(calc(100% - 16rem)) minmax(0, 1fr);
   align-items: stretch;
   gap: 0.5rem;
+}
+
+/* Outranks .btn's padding: the labels need the width more than the inset. */
+.page-stepper > .page-step {
+  padding-inline: 0.5rem;
 }
 
 .page-step {
@@ -283,27 +286,28 @@ body {
   gap: 0.1rem;
   min-height: 44px;
   line-height: 1.2;
+  text-align: center;
+  /* Body-text colour keeps the labels above 4.5:1 in both themes; the border carries the accent. */
+  color: var(--text);
+  /* Hold-to-repeat: no double-tap zoom, text selection or callout on a long press. */
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .page-step-main {
   font-size: 0.8125rem;
-  white-space: nowrap;
 }
 
 .page-step-sub {
   font-size: 0.6875rem;
   font-weight: 500;
-  opacity: 0.85;
-  white-space: nowrap;
 }
 
 .page-step[aria-disabled='true'] {
   opacity: 0.45;
   cursor: not-allowed;
-}
-
-.page-step[aria-disabled='true']:hover {
-  background: transparent;
 }
 
 .page-step-readout {
@@ -326,13 +330,15 @@ body {
   font-size: 0.6875rem;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  text-wrap: balance;
 }
 
-.page-step-hint {
+.caption.page-step-hint {
   margin: 0.45rem 0 0;
 }
 
-@media (max-width: 420px) {
+/* Too narrow for both labels beside the readout: readout on top, buttons side by side. */
+@container (max-width: 26rem) {
   .page-stepper {
     grid-template-columns: 1fr 1fr;
   }
@@ -650,7 +656,7 @@ body {
   border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--divider));
 }
 
-.btn-secondary:hover:not(:disabled) {
+.btn-secondary:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--action-hover);
 }
 
@@ -733,51 +739,10 @@ body {
   margin-bottom: 1.25rem;
 }
 
-/* Assembly hint above the full-chart overview; spans the whole section. */
+/* Assembly hint above the sheet thumbnails; spans the whole section. */
 .full-chart-hint {
   max-width: none;
   width: 100%;
-}
-
-.preview-frame {
-  --preview-mat-px: 5px;
-  position: relative;
-  display: inline-block;
-  max-width: 100%;
-  padding: var(--preview-mat-px);
-  border: 1px solid var(--divider);
-  border-radius: 0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
-  line-height: 0;
-  background: #fff;
-}
-
-.preview-image-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  box-sizing: border-box;
-  min-width: min(100%, 200px);
-  min-height: min(360px, 50vh);
-  padding: 2rem 1.25rem;
-  margin: 0;
-  font-size: 0.875rem;
-  line-height: 1.4;
-  font-weight: 500;
-  color: var(--muted);
-  text-align: center;
-  border-radius: 0;
-  background: color-mix(in srgb, var(--muted) 8%, transparent);
-}
-
-.preview-image-placeholder.preview-image-placeholder--busy .preview-busy-ring {
-  margin-inline: auto;
-}
-
-.preview-image-placeholder.preview-image-placeholder--busy .preview-busy-msg {
-  margin: 0;
 }
 
 .preview-busy-ring {
@@ -816,10 +781,6 @@ body {
   animation: preview-busy-dots 1.2s step-end infinite;
 }
 
-.board-img.board-img--hidden {
-  display: none !important;
-}
-
 .thumb-grid-loading {
   grid-column: 1 / -1;
   margin: 0;
@@ -843,64 +804,6 @@ body {
 
 .thumb-grid-loading.thumb-grid-loading--busy .preview-busy-msg {
   margin: 0;
-}
-
-:root[data-theme='light'] .preview-frame {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-}
-
-.board-img {
-  display: block;
-  max-width: 100%;
-  height: auto;
-  max-height: var(--preview-max-h, min(300px, 45vh));
-  width: auto;
-  image-rendering: pixelated;
-  border-radius: 0;
-}
-
-.sheet-overlays {
-  position: absolute;
-  inset: var(--preview-mat-px, 0);
-  pointer-events: none;
-}
-
-.sheet-rect {
-  position: absolute;
-  box-sizing: border-box;
-  /* Border and fill share --sheet-color (set per sheet in main.ts) so they cannot drift. */
-  border: 2px solid var(--sheet-color, currentColor);
-  /* Slightly darker and more opaque than the border colour so white numerals read over the board. */
-  background: color-mix(
-    in srgb,
-    color-mix(in srgb, var(--sheet-color, currentColor) 82%, #000) 30%,
-    transparent
-  );
-  /* Thin white inner line so block edges also read over the board's black squares. */
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.75);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.sheet-rect-num {
-  /* JS sizes these from their painted ink after the board image is laid out. */
-  color: #fff;
-  font-size: var(--sheet-number-font-px, 1rem);
-  font-weight: 700;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  /* No badge: a black outline keeps white digits legible over black and white board squares.
-     Kept in em so it scales with small numbers; must match SHEET_NUMBER_STROKE_EM in main.ts. */
-  -webkit-text-stroke: 0.18em #000;
-  paint-order: stroke fill;
-}
-
-/* Hidden until fitted, so numbers never flash at the fallback size. */
-.sheet-overlays:not([data-fitted]) .sheet-rect-num,
-.sheet-rect-num.sheet-rect-num--hidden {
-  visibility: hidden;
 }
 
 .thumb-grid {

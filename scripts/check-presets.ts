@@ -11,7 +11,9 @@ import {
     computeEffectivePrintLayout,
     maxSquareMmForGridAndPages,
     resolveDistancePrintPlan,
+    pageStepNeighbours,
     steppablePageCounts,
+    validTargetPageCountsForGrid,
     workingDistanceMinSquareMm,
     type WorkingDistanceTierId,
 } from '../src/print/charucoLayout.js';
@@ -52,19 +54,38 @@ for (const paper of PAPER_OPTIONS) {
                     failures.push(`${label}: no stops`);
                     continue;
                 }
+                const offered = validTargetPageCountsForGrid(sx, sy, paper.wMm, paper.hMm, minMm);
+                if (steps[0]!.pages !== offered[0]) {
+                    failures.push(`${label}: fewest stop is ${steps[0]!.pages}, not the fewest printable ${offered[0]}`);
+                }
                 steps.forEach((step, i) => {
                     const printed = computeEffectivePrintLayout(sx, sy, step.squareMm, paper.wMm, paper.hMm);
-                    if (printed?.pageCount !== step.pages) {
-                        failures.push(`${label}: ${step.pages} page(s) at ${step.squareMm} mm prints ${printed?.pageCount}`);
+                    if (printed?.pageCount !== step.pages || step.squareMm < minMm) {
+                        failures.push(`${label}: stop ${step.pages} page(s) at ${step.squareMm} mm is not printable here`);
                     }
-                    if (step.squareMm < minMm) {
-                        failures.push(`${label}: ${step.squareMm} mm is below the ${minMm} mm minimum`);
+                    if (i > 0) {
+                        const prev = steps[i - 1]!;
+                        const gain = step.squareMm - prev.squareMm;
+                        const isLast = i === steps.length - 1;
+                        if (step.pages <= prev.pages || gain <= 0) {
+                            failures.push(`${label}: stops not ascending at ${step.pages} page(s)`);
+                        } else if (!isLast && gain < Math.max(1, Math.ceil(0.03 * prev.squareMm))) {
+                            failures.push(`${label}: near-duplicate stop ${step.pages} page(s) (+${gain} mm) not skipped`);
+                        }
                     }
-                    if (i > 0 && (step.pages <= steps[i - 1]!.pages || step.squareMm <= steps[i - 1]!.squareMm)) {
-                        failures.push(`${label}: stops not ascending at ${step.pages} page(s)`);
+                    // Stepping from any printable count between stops lands on the neighbouring stops.
+                    const {fewer, more} = pageStepNeighbours(steps, step.pages);
+                    if (fewer !== (steps[i - 1] ?? null) || more !== (steps[i + 1] ?? null)) {
+                        failures.push(`${label}: wrong neighbours at ${step.pages} page(s)`);
                     }
                     stepperChecks++;
                 });
+                for (const p of offered) {
+                    const {fewer, more} = pageStepNeighbours(steps, p);
+                    if ((fewer && fewer.pages >= p) || (more && more.pages <= p) || (!more && p < steps[steps.length - 1]!.pages)) {
+                        failures.push(`${label}: wrong neighbours from skipped count ${p}`);
+                    }
+                }
                 const last = steps[steps.length - 1]!;
                 if (last.pages !== sx * sy) {
                     failures.push(`${label}: most is ${last.pages} page(s), not one square per sheet (${sx * sy})`);

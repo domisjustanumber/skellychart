@@ -7,7 +7,6 @@
  * exactly the rendered banner height.
  */
 import {
-    MM_MARGIN_SHEET,
     MM_ORIGIN_BANNER_BELOW_GAP_MM,
     ORIGIN_BANNER_CONTENT_SIDE_MM,
     ORIGIN_BANNER_CONTENT_TOP_MM,
@@ -15,15 +14,20 @@ import {
     ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM,
     ORIGIN_GAP_QR_TO_BOARD_INFO_MM,
     ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM,
+    ORIGIN_WRITE_IN_BOX_GAP_MM,
+    ORIGIN_WRITE_IN_BOX_H_MM,
+    ORIGIN_WRITE_IN_BOX_W_MM,
     PIXELS_PER_MM,
     QR_SIZE_MM,
 } from './constants.js';
 import {helveticaTextWidthPx} from './helveticaMetrics.js';
-import {originChartInfoParts, pdfLabels} from './labels.js';
+import {sheetSafeMarginsMm} from './sheetGeometry.js';
+import {ORIGIN_WRITE_IN_BOX_MARK, originChartInfoParts, pdfLabels} from './labels.js';
 
 export interface OriginBannerLayoutParams {
-    /** Sheet width (mm) as printed, after any landscape swap. */
+    /** Sheet size (mm) as printed, after any landscape swap; the banner fills its safe margins. */
     paperWMm: number;
+    paperHMm: number;
     /** Banner type scale (`ORIGIN_BANNER_VISUAL_SCALE` at full size). */
     typeScale: number;
     /** Version as printed in the chart-info title (`APP_VERSION_DISPLAY`). */
@@ -35,6 +39,8 @@ export interface OriginBannerLayoutParams {
     logoWidthPx: number;
     logoHeightPx: number;
     ppm?: number;
+    /** Instructions column text; defaults to the single-sheet `pdfLabels.originInstructionsBody`. */
+    instructionsBody?: string;
 }
 
 export interface OriginBannerLayout {
@@ -43,6 +49,8 @@ export interface OriginBannerLayout {
     bodyLineLead: number;
     /** Gap between a column title and its first body line. */
     vGap: number;
+    /** Safe top margin (px) the banner starts at; {@link originBannerStripPx} measures from here. */
+    marginTopPx: number;
     bannerLeft: number;
     /** Top edge of the logo and QR columns (the inner sheet margin). */
     bannerTitleTop: number;
@@ -53,17 +61,18 @@ export interface OriginBannerLayout {
     /** Right edge the chart-info block is anchored to. */
     boardInfoRight: number;
     boardTitle: string;
-    boardInfoLines: string[];
+    /** Chart-info body text, each piece right-aligned at `right` with its `hanging` baseline at `y`. */
+    boardInfoLines: {text: string; right: number; y: number}[];
+    /** Empty box for writing the measured square length in; `null` if the label has no box. */
+    writeInBox: {x: number; y: number; w: number; h: number} | null;
+    /** Bottom of the chart-info column. */
+    infoBottom: number;
     instrLeft: number;
     /** `hanging` baseline of the first instruction body line. */
     instBodyY: number;
     instLines: string[];
     /** Bottom of the banner including the gap below it (px from the sheet top). */
     bottom: number;
-}
-
-function layoutIntPx(x: number): number {
-    return Math.max(0, Math.floor(x));
 }
 
 /** Greedy word wrap with Helvetica metrics; a word wider than `maxW` gets a line of its own. */
@@ -106,18 +115,20 @@ export function bannerLogoSizePx(heightMm: number, naturalWOverH: number, ppm = 
  * columns do not fit side by side at that scale.
  */
 export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBannerLayout | null {
-    const {paperWMm, typeScale, version, squareLengthMm, squaresX, squaresY, logoWidthPx, logoHeightPx} = params;
+    const {paperWMm, paperHMm, typeScale, version, squareLengthMm, squaresX, squaresY, logoWidthPx, logoHeightPx} =
+        params;
     const ppm = params.ppm ?? PIXELS_PER_MM;
-    const pagePxW = Math.max(1, Math.round(paperWMm * ppm));
-    const marginPx = layoutIntPx(MM_MARGIN_SHEET * ppm);
+    const margins = sheetSafeMarginsMm(paperWMm, paperHMm);
+    const marginTopPx = Math.ceil(margins.top * ppm);
     const bodyFontPx = Math.round(26 * (ppm / 12) * typeScale);
     const titleFontPx = Math.round(24 * (ppm / 12) * typeScale);
     const bodyLineLead = bodyFontPx + Math.max(4, Math.round(0.52 * ppm * typeScale));
     const vGap = Math.max(4, Math.round(ppm * typeScale));
     const sidePad = Math.round(ORIGIN_BANNER_CONTENT_SIDE_MM * ppm);
-    const bannerLeft = marginPx + sidePad;
-    const bannerRightInner = pagePxW - marginPx - sidePad;
-    const bannerTitleTop = marginPx + Math.round(ORIGIN_BANNER_CONTENT_TOP_MM * ppm);
+    const bannerLeft = Math.ceil(margins.left * ppm) + sidePad;
+    // Rounded inwards from the exact sheet size (Letter and Tabloid are not whole px).
+    const bannerRightInner = Math.floor((paperWMm - margins.right) * ppm) - sidePad;
+    const bannerTitleTop = marginTopPx + Math.round(ORIGIN_BANNER_CONTENT_TOP_MM * ppm);
     const bannerTextTop = bannerTitleTop + Math.round(ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM * ppm);
     const qrSizePx = Math.max(32, Math.round(QR_SIZE_MM * ppm));
     const qrX = bannerRightInner - qrSizePx;
@@ -136,12 +147,44 @@ export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBann
         squaresX,
         squaresY,
     });
-    const boardInfoLines = wrapHelvetica(boardInfoBody, bodyFontPx, false, boardColMaxW);
+    const boardInfoLines: OriginBannerLayout['boardInfoLines'] = [];
+    let writeInBox: OriginBannerLayout['writeInBox'] = null;
     let infoLeft = boardInfoRight - helveticaTextWidthPx(boardTitle, titleFontPx, true);
-    for (const line of boardInfoLines) {
-        infoLeft = Math.min(infoLeft, boardInfoRight - helveticaTextWidthPx(line, bodyFontPx));
+    let y = bannerTextTop + titleFontPx + vGap;
+    for (const para of boardInfoBody.split('\n')) {
+        const markAt = para.indexOf(ORIGIN_WRITE_IN_BOX_MARK);
+        if (markAt === -1) {
+            for (const line of wrapHelvetica(para, bodyFontPx, false, boardColMaxW)) {
+                boardInfoLines.push({text: line, right: boardInfoRight, y});
+                infoLeft = Math.min(infoLeft, boardInfoRight - helveticaTextWidthPx(line, bodyFontPx));
+                y += bodyLineLead;
+            }
+            continue;
+        }
+        // "label [box] unit" on one line, the text centred on the box: right to left from the anchor.
+        const before = para.slice(0, markAt).trim();
+        const after = para.slice(markAt + ORIGIN_WRITE_IN_BOX_MARK.length).trim();
+        const gap = Math.round(ORIGIN_WRITE_IN_BOX_GAP_MM * ppm);
+        const w = Math.round(ORIGIN_WRITE_IN_BOX_W_MM * ppm);
+        const h = Math.round(ORIGIN_WRITE_IN_BOX_H_MM * ppm);
+        const boxTop = y + gap;
+        // Helvetica cap height is 0.718 em; the `hanging` baseline sits at the cap top.
+        const textY = boxTop + Math.round((h - 0.718 * bodyFontPx) / 2);
+        let right = boardInfoRight;
+        if (after) {
+            boardInfoLines.push({text: after, right, y: textY});
+            right -= helveticaTextWidthPx(after, bodyFontPx) + gap;
+        }
+        writeInBox = {x: right - w, y: boxTop, w, h};
+        right -= w + gap;
+        if (before) {
+            boardInfoLines.push({text: before, right, y: textY});
+            right -= helveticaTextWidthPx(before, bodyFontPx);
+        }
+        infoLeft = Math.min(infoLeft, right);
+        y = boxTop + h + gap + (bodyLineLead - bodyFontPx);
     }
-    const infoBottom = bannerTextTop + titleFontPx + vGap + boardInfoLines.length * bodyLineLead;
+    const infoBottom = y;
 
     const instructionAllowRight = infoLeft - gapInstBoard;
     if (instructionAllowRight - instrLeft < minInstColPx) {
@@ -149,7 +192,7 @@ export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBann
     }
     const instBodyY = bannerTextTop + titleFontPx + vGap;
     const instLines = wrapHelvetica(
-        pdfLabels.originInstructionsBody,
+        params.instructionsBody ?? pdfLabels.originInstructionsBody,
         bodyFontPx,
         false,
         instructionAllowRight - instrLeft,
@@ -166,6 +209,7 @@ export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBann
         bodyFontPx,
         bodyLineLead,
         vGap,
+        marginTopPx,
         bannerLeft,
         bannerTitleTop,
         bannerTextTop,
@@ -174,6 +218,8 @@ export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBann
         boardInfoRight,
         boardTitle,
         boardInfoLines,
+        writeInBox,
+        infoBottom,
         instrLeft,
         instBodyY,
         instLines,
@@ -181,7 +227,7 @@ export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBann
     };
 }
 
-/** Banner strip (px) from the top of the printable area through the gap below the banner. */
-export function originBannerStripPx(layout: OriginBannerLayout, ppm = PIXELS_PER_MM): number {
-    return layout.bottom - layoutIntPx(MM_MARGIN_SHEET * ppm);
+/** Banner strip (px) from the safe top margin through the gap below the banner. */
+export function originBannerStripPx(layout: OriginBannerLayout): number {
+    return layout.bottom - layout.marginTopPx;
 }

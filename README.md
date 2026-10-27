@@ -1,6 +1,6 @@
 # skellychart
 
-Static web app that renders **OpenCV-compatible ChArUco** boards (DICT_4X4_250, default non-legacy pattern) in the browser: live preview, 1:1 multi-page PDF download, and browser printing with multi-sheet tiling matching FreeMoCap’s `charuco_board_print` layout rules.
+Static web app that renders **OpenCV-compatible ChArUco** boards (DICT_4X4_250, default non-legacy pattern) in the browser: live preview, 1:1 multi-page PDF download, and browser printing with multi-sheet tiling (adapted from FreeMoCap’s `charuco_board_print`, with per-edge safe printing margins in `src/print/sheetGeometry.ts`).
 
 ## Develop
 
@@ -22,7 +22,7 @@ Serve `dist/` with any static file host; Vite is configured with `base: './'` fo
 `npm run build` runs two checks first:
 
 - **`npm run check:presets`** (`scripts/check-presets.ts`): every working-distance preset must print exactly its target page count, at the largest square length that does so, and at or above the distance's minimum square length. Layout feasibility itself is computed live in the browser (`src/print/feasibilityRules.ts`).
-- **`npm run check:banner`**: the committed origin-banner heights in `src/print/originBannerStrip.generated.ts` must match the banner layout. After changing banner text, type, gaps, QR or logo size, paper sizes, the square-length or grid ranges, or the version, run **`npm run generate:banner`** and commit the result (CI does this for its own version bump).
+- **`npm run check:banner`**: the committed origin-banner heights in `src/print/originBannerStrip.generated.ts` must match the banner layout. After changing banner text, type, gaps, QR or logo size, the safe printing margins, paper sizes, the square-length or grid ranges, or the version, run **`npm run generate:banner`** and commit the result (CI does this for its own version bump).
 
 ## ArUco dictionary data
 

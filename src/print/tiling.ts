@@ -1,9 +1,11 @@
 /**
- * Sheet tiling for ChArUco print PDFs — same convergence as `charucoPrintLayout.ts` /
- * `_compute_tiling` in `charuco_board_print.py`.
+ * Sheet tiling for ChArUco print PDFs. Adapted from `_compute_tiling` in freemocap's
+ * `charuco_board_print.py` (iterate the sheet grid until it settles), but each sheet's board region
+ * comes from per-edge safe margins and seam bands (`sheetGeometry.ts`), not freemocap's uniform 13 mm
+ * margin and 12 mm join strip, so the two no longer tile the same.
  */
-import {MM_JOIN_STRIP, MM_MARGIN_SHEET, ORIGIN_CORNER_MARKER_PAD_MM} from './constants.js';
 import {originBannerReserveMm} from './originBannerStrip.js';
+import {boardRegionMm, originMarkerRoomMm} from './sheetGeometry.js';
 
 export interface TilingInfo {
     pageCount: number;
@@ -13,6 +15,12 @@ export interface TilingInfo {
     npx: number;
     npy: number;
     landscape: boolean;
+    /**
+     * Strip (mm) reserved above the board on the first sheet for the origin banner. Only a single-sheet
+     * chart carries the banner; a multi-sheet chart prints it on the assembly guide, so this is 0 unless
+     * the board fits on one sheet only without the banner (see {@link computeTilingInfoSingle}).
+     */
+    bannerReserveMm: number;
 }
 
 export interface PageSpec {
@@ -28,6 +36,64 @@ export interface PageSpec {
     row: number;
 }
 
+/** Column indices whose board region differs: the first, a middle one and the last. */
+function distinctSheetIndices(count: number): number[] {
+    return count <= 1 ? [0] : count === 2 ? [0, 1] : [0, 1, count - 1];
+}
+
+/**
+ * Tiles the board with `bannerStripMm` reserved above it on the first sheet. Every sheet column holds
+ * the same number of squares, and every row after the first too: the fewest the tightest sheet of that
+ * kind fits, given its board region (`sheetGeometry.ts`) and, on the first sheet, the corner marker.
+ */
+function tileWithFirstSheetReserve(
+    squaresX: number,
+    squaresY: number,
+    squareMm: number,
+    paperWMm: number,
+    paperHMm: number,
+    bannerStripMm: number,
+): Omit<TilingInfo, 'landscape'> | null {
+    const marker = originMarkerRoomMm(bannerStripMm);
+    let npx = 1;
+    let npy = 1;
+    for (let i = 0; i < 24; i++) {
+        const layout = {npx, npy, bannerReserveMm: bannerStripMm};
+        const widthMm = (col: number): number => {
+            const r = boardRegionMm(paperWMm, paperHMm, layout, col, 0);
+            return paperWMm - r.left - r.right - (col === 0 ? marker.left : 0);
+        };
+        const heightMm = (row: number): number => {
+            const r = boardRegionMm(paperWMm, paperHMm, layout, 0, row);
+            return paperHMm - r.top - r.bottom - (row === 0 ? marker.top : 0);
+        };
+        const maxCx = Math.floor(Math.min(...distinctSheetIndices(npx).map(widthMm)) / squareMm);
+        const maxCyFirst = Math.floor(heightMm(0) / squareMm);
+        // With one row there are no later rows; size them as a last row, for the orientation tie-break.
+        const restRows = npy <= 2 ? [1] : [1, npy - 1];
+        const maxCyRest = Math.floor(Math.min(...restRows.map(heightMm)) / squareMm);
+        if (maxCx < 1 || maxCyFirst < 1 || maxCyRest < 1) {
+            return null;
+        }
+
+        const nextNpx = Math.ceil(squaresX / maxCx);
+        const nextNpy = squaresY <= maxCyFirst ? 1 : 1 + Math.ceil((squaresY - maxCyFirst) / maxCyRest);
+        // More sheets only ever shrink the regions, so the counts only grow until they settle.
+        if (nextNpx === npx && nextNpy === npy) {
+            return {pageCount: npx * npy, maxCx, maxCyFirst, maxCyRest, npx, npy, bannerReserveMm: bannerStripMm};
+        }
+        npx = nextNpx;
+        npy = nextNpy;
+    }
+    return null;
+}
+
+/**
+ * A chart that fits on one sheet carries the origin banner above the board. A chart that needs several
+ * prints the banner on the assembly guide instead, so its first sheet reserves nothing. If the board fits
+ * on one sheet only without the banner, it keeps the layout tiled with the banner's strip reserved (left
+ * empty), since a single sheet must carry the banner.
+ */
 function computeTilingInfoSingle(
     squaresX: number,
     squaresY: number,
@@ -35,78 +101,19 @@ function computeTilingInfoSingle(
     paperWMm: number,
     paperHMm: number,
 ): Omit<TilingInfo, 'landscape'> | null {
-    const ph = paperHMm - 2 * MM_MARGIN_SHEET;
-    if (ph <= 0) {
-        return null;
+    const withBanner = tileWithFirstSheetReserve(
+        squaresX,
+        squaresY,
+        squareMm,
+        paperWMm,
+        paperHMm,
+        originBannerReserveMm(paperWMm, paperHMm),
+    );
+    if (withBanner?.pageCount === 1) {
+        return withBanner;
     }
-
-    let joinW = 0;
-    let npyForJoin = 1;
-    let npx = 1;
-    let npy = 1;
-    let maxCx = 1;
-    let maxCyFirst = 0;
-    let maxCyRest = 0;
-    let converged = false;
-
-    for (let i = 0; i < 24; i++) {
-        const pw = paperWMm - 2 * MM_MARGIN_SHEET - joinW;
-        if (pw <= 0) {
-            return null;
-        }
-        const pwForCols = pw - ORIGIN_CORNER_MARKER_PAD_MM;
-        if (pwForCols < squareMm) {
-            return null;
-        }
-
-        const joinH0 = npyForJoin > 1 ? MM_JOIN_STRIP : 0;
-        const joinHr = npyForJoin > 1 ? 2 * MM_JOIN_STRIP : 0;
-
-        const bannerStripMm = originBannerReserveMm(paperWMm);
-        const phOriginPattern = ph - bannerStripMm - joinH0 - ORIGIN_CORNER_MARKER_PAD_MM;
-        if (phOriginPattern <= squareMm) {
-            return null;
-        }
-
-        maxCx = Math.floor(pwForCols / squareMm);
-        maxCyFirst = Math.floor(phOriginPattern / squareMm);
-        maxCyRest = Math.floor((ph - joinHr) / squareMm);
-        if (maxCx < 1 || maxCyFirst < 1 || maxCyRest < 1) {
-            return null;
-        }
-
-        npx = Math.ceil(squaresX / maxCx);
-
-        let gy = 0;
-        npy = 0;
-        while (gy < squaresY) {
-            const cap = gy === 0 ? maxCyFirst : maxCyRest;
-            const gyEnd = Math.min(gy + cap, squaresY);
-            gy = gyEnd;
-            npy += 1;
-        }
-
-        const joinWNew = npx > 1 ? 2 * MM_JOIN_STRIP : 0;
-        if (joinWNew === joinW && npyForJoin === npy) {
-            converged = true;
-            break;
-        }
-        joinW = joinWNew;
-        npyForJoin = npy;
-    }
-
-    if (!converged) {
-        return null;
-    }
-
-    return {
-        pageCount: npx * npy,
-        maxCx,
-        maxCyFirst,
-        maxCyRest,
-        npx,
-        npy,
-    };
+    const withoutBanner = tileWithFirstSheetReserve(squaresX, squaresY, squareMm, paperWMm, paperHMm, 0);
+    return withoutBanner && withoutBanner.pageCount > 1 ? withoutBanner : withBanner;
 }
 
 /**
@@ -191,6 +198,14 @@ export function nominalPaperToPdfDimensionsMm(
         return {paperWMm: nominalHMm, paperHMm: nominalWMm};
     }
     return {paperWMm: nominalWMm, paperHMm: nominalHMm};
+}
+
+/**
+ * Sheets of paper printed for a chart tiled onto `chartSheets` sheets: a chart that spans several also
+ * gets an assembly guide sheet in front of them. UI sheet counts show this; layout math uses `chartSheets`.
+ */
+export function printedSheetCount(chartSheets: number): number {
+    return chartSheets > 1 ? chartSheets + 1 : chartSheets;
 }
 
 export function buildPageSpecs(

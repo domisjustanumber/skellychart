@@ -105,14 +105,14 @@
               <div class="field" role="group" id="pagesGroup" aria-labelledby="lbl-pages">
                 <span class="field-label" id="lbl-pages"></span>
                 <div class="page-stepper">
-                  <button type="button" id="pagesFewer" class="btn btn-secondary page-step">
+                  <button type="button" id="pagesFewer" class="btn btn-secondary page-step" aria-describedby="pagesHint">
                     <span class="page-step-main"></span><span class="page-step-sub"></span>
                   </button>
                   <div class="page-step-readout">
                     <output id="pagesValue" class="page-step-value" aria-live="polite"></output>
                     <span id="pagesDetail" class="page-step-detail"></span>
                   </div>
-                  <button type="button" id="pagesMore" class="btn btn-secondary page-step">
+                  <button type="button" id="pagesMore" class="btn btn-secondary page-step" aria-describedby="pagesHint">
                     <span class="page-step-main"></span><span class="page-step-sub"></span>
                   </button>
                 </div>
@@ -151,11 +151,6 @@
 
             <div id="fullPreviewBlock" class="full-preview-block hidden">
               <p class="caption full-chart-hint" id="fullChartHint"></p>
-              <div class="preview-frame">
-                <div id="fullPreviewPlaceholder" class="preview-image-placeholder hidden"></div>
-                <img id="boardImg" class="board-img board-img--hidden" alt="" />
-                <div id="sheetOverlays" class="sheet-overlays"></div>
-              </div>
             </div>
 
             <div id="thumbGrid" class="thumb-grid"></div>

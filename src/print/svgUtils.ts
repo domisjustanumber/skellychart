@@ -27,13 +27,17 @@ export function svgRootOuterSizeAttrs(paperWMm: number, paperHMm: number, paperI
     return [`${paperWMm}mm`, `${paperHMm}mm`];
 }
 
+/**
+ * Root `<svg>` of a printed sheet. The viewBox must be the exact sheet size in px (`mm * PIXELS_PER_MM`,
+ * not rounded): Letter and Tabloid are not whole px, and a rounded viewBox would scale the whole chart.
+ */
 export function svgRootOpen(viewBoxW: number, viewBoxH: number, widthAttr: string, heightAttr: string): string {
     // xMidYMin: avoid default vertical centering when viewBox vs mm aspect ratios differ slightly (rounding).
     const par = 'preserveAspectRatio="xMidYMin meet"';
     return (
         `<?xml version="1.0" encoding="UTF-8"?>` +
         `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" ` +
-        `viewBox="0 0 ${viewBoxW} ${viewBoxH}" width="${widthAttr}" height="${heightAttr}" ${par}>`
+        `viewBox="0 0 ${+viewBoxW.toFixed(3)} ${+viewBoxH.toFixed(3)}" width="${widthAttr}" height="${heightAttr}" ${par}>`
     );
 }
 

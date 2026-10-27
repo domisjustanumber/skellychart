@@ -128,6 +128,8 @@ export async function buildPdfBlobFromSvgPages(
         orientation: pageOrientation(first.widthMm, first.heightMm),
         compress: true,
     });
+    // Ask PDF viewers to print at actual size rather than fit to the page (Acrobat and Chrome honour it).
+    doc.viewerPreferences({PrintScaling: 'None'});
 
     for (let i = 0; i < pages.length; i++) {
         const page = pages[i]!;

@@ -1,0 +1,213 @@
+name: CI
+
+# Pull-request validation plus an optional manual run. There is deliberately no
+# push-to-main trigger: deploy-pages.yml already builds every push to main (and
+# pushes its release bump with [skip ci]), so a second build here would only
+# duplicate that work.
+#
+# The job name "CI" is load-bearing:
+#   - branch rulesets / branch protection should require this check on main;
+#   - .github/workflows/dependabot-auto-merge.yml listens for this workflow's
+#     completion by the workflow name "CI".
+# Renaming either means updating those settings.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v6
+        with:
+          # Full history and all remote branches: the OpenCV gate below diffs
+          # against origin/<base> and reads the base
+          # tests/opencv-qr-test/requirements.txt with `git show`.
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # --- OpenCV gate ------------------------------------------------------
+      # tests/opencv-qr-test/requirements.txt pins the OpenCV used only by the
+      # ArUco dictionary export and verification tooling; the site build itself
+      # needs no OpenCV.
+      # When a PR changes that file, prove that the committed marker bytes and
+      # ChArUco raster still match the new OpenCV. The gate fails closed:
+      # any exit code other than 0 fails the CI job.
+      - name: Detect OpenCV pin change
+        id: opencv
+        # workflow_dispatch has no PR base ref, so the gate only runs for PRs.
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+
+          FILE="tests/opencv-qr-test/requirements.txt"
+          BASE_REF="${BASE_REF:?pull_request base ref is required}"
+
+          CHANGED_FILES="$(git diff --name-only "origin/${BASE_REF}...HEAD" -- "$FILE")"
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "$FILE is unchanged against origin/${BASE_REF}; OpenCV gate skipped."
+            exit 0
+          fi
+
+          # Extract the pinned wheel from the requirements file on stdin. Ignores
+          # comments; tolerates `extras`, whitespace around `==`, trailing
+          # comments and environment markers. Exits 1 when no pin is found.
+          pin_version() {
+            awk -F'==' '
+              function trim(s) { sub(/^[[:space:]]+/, "", s); sub(/[[:space:]]+$/, "", s); return s }
+              $0 !~ /^[[:space:]]*#/ {
+                name = trim($1)
+                sub(/\[.*\]$/, "", name)
+                if (name != "opencv-contrib-python-headless") next
+                version = trim($2)
+                sub(/[[:space:]].*$/, "", version)
+                found = 1
+              }
+              END {
+                if (!found) exit 1
+                print version
+              }
+            '
+          }
+
+          # OpenCV Python wheels are 4-part (5.0.0.93); OpenCV source release
+          # tags are the 3-part prefix (5.0.0). Any other shape is passed
+          # through unchanged and rejected by the release-diff script.
+          wheel_to_tag() {
+            printf '%s\n' "$1" | awk -F. 'NF == 4 { print $1 "." $2 "." $3; next } { print }'
+          }
+
+          INITIAL_PIN=false
+          if git cat-file -e "origin/${BASE_REF}:${FILE}" 2>/dev/null; then
+            BASE_FILE="$(git show "origin/${BASE_REF}:${FILE}")"
+            if ! OLD_WHEEL="$(printf '%s\n' "$BASE_FILE" | pin_version)"; then
+              echo "::error::No opencv-contrib-python-headless==<version> pin in ${FILE} on origin/${BASE_REF}."
+              exit 1
+            fi
+          else
+            # The PR adds tests/opencv-qr-test/requirements.txt for the first
+            # time: there is no previous pin or source tag to compare. The byte
+            # and raster checks below still run against the new pin.
+            INITIAL_PIN=true
+            OLD_WHEEL=""
+          fi
+
+          if ! NEW_WHEEL="$(pin_version < "$FILE")"; then
+            echo "::error::No opencv-contrib-python-headless==<version> pin in ${FILE}."
+            exit 1
+          fi
+          if [ "$INITIAL_PIN" = "true" ]; then
+            OLD_WHEEL="$NEW_WHEEL"
+            echo "::notice::${FILE} is new on this branch; there is no previous release tag to diff."
+          fi
+
+          # PR-controlled input: require a plain dotted numeric version before
+          # it reaches the downstream scripts.
+          for WHEEL in "$OLD_WHEEL" "$NEW_WHEEL"; do
+            if [[ ! "$WHEEL" =~ ^[0-9]+(\.[0-9]+)+$ ]]; then
+              echo "::error::Unexpected opencv-contrib-python-headless version '${WHEEL}'; expected a dotted numeric wheel version such as 5.0.0.93."
+              exit 1
+            fi
+          done
+
+          OLD_TAG="$(wheel_to_tag "$OLD_WHEEL")"
+          NEW_TAG="$(wheel_to_tag "$NEW_WHEEL")"
+
+          {
+            echo "changed=true"
+            echo "old_wheel=${OLD_WHEEL}"
+            echo "new_wheel=${NEW_WHEEL}"
+            echo "old_tag=${OLD_TAG}"
+            echo "new_tag=${NEW_TAG}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### OpenCV pin"
+            echo ""
+            if [ "$INITIAL_PIN" = "true" ]; then
+              echo "- Bootstrap: \`${NEW_WHEEL}\` (tag \`${NEW_TAG}\`); no previous pin to diff"
+            else
+              echo "- Wheel: \`${OLD_WHEEL}\` -> \`${NEW_WHEEL}\`"
+              echo "- Source tag: \`${OLD_TAG}\` -> \`${NEW_TAG}\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$INITIAL_PIN" = "true" ]; then
+            echo "OpenCV pin added: ${NEW_WHEEL} (${NEW_TAG}); release diff is a no-op."
+          else
+            echo "OpenCV pin changed: ${OLD_WHEEL} (${OLD_TAG}) -> ${NEW_WHEEL} (${NEW_TAG})."
+          fi
+
+      # 1. Upstream source audit. Exit 0 = no watched QR/ArUco source changed
+      #    (identical 3-part tags are a no-op pass). Exit 1 = watched code
+      #    changed and needs human review. Exit 2 = indeterminate (network,
+      #    API, misuse) and never passes.
+      - name: Check OpenCV release diff (QR/ArUco source)
+        if: steps.opencv.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OLD_TAG: ${{ steps.opencv.outputs.old_tag }}
+          NEW_TAG: ${{ steps.opencv.outputs.new_tag }}
+        run: |
+          set -euo pipefail
+          node tests/opencv-release-diff.mjs --from "$OLD_TAG" --to "$NEW_TAG"
+
+      # The source audit above intentionally fails when watched OpenCV code
+      # changed. Run the remaining checks anyway so the PR shows the complete
+      # picture (bytes and raster may still match), while the job stays red.
+      - name: Ensure uv is available
+        id: uv
+        if: ${{ !cancelled() && steps.opencv.outputs.changed == 'true' }}
+        run: |
+          set -euo pipefail
+          if command -v uv >/dev/null 2>&1; then
+            uv --version
+            exit 0
+          fi
+          # Required by tests/verify-opencv-aruco-bytes.mjs and
+          # `npm run verify:opencv-raster`.
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
+
+      # 2. Byte-level check of the committed DICT_4X4_250 table against the new
+      #    wheel. Exit 0 = match, 1 = mismatch (chart-spec change: regenerate
+      #    deliberately and bump the major version), 2 = infrastructure error.
+      - name: Verify committed ArUco bytes against the new OpenCV
+        if: ${{ !cancelled() && steps.opencv.outputs.changed == 'true' && steps.uv.outcome == 'success' }}
+        env:
+          NEW_WHEEL: ${{ steps.opencv.outputs.new_wheel }}
+        run: |
+          set -euo pipefail
+          node tests/verify-opencv-aruco-bytes.mjs --opencv-version "$NEW_WHEEL"
+
+      # 3. End-to-end rendering parity: OpenCV's CharucoBoard.generateImage
+      #    against the TypeScript renderer, byte for byte.
+      - name: Verify ChArUco raster against the new OpenCV
+        if: ${{ !cancelled() && steps.opencv.outputs.changed == 'true' && steps.uv.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          npm run verify:opencv-raster

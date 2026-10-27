@@ -24,14 +24,19 @@ jobs:
     runs-on: ubuntu-latest
     # workflow_dispatch always deploys; push events skip release commits.
     if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip ci]')
-    # contents: write is needed only for the version-bump push. Requires the repository's
-    # workflow permissions to allow write, and branch protection must let the Actions bot push.
+    # contents: write is needed only for the version-bump push. If main has a
+    # ruleset requiring pull requests/checks, set DEPLOY_TOKEN to a bypass-capable
+    # PAT or GitHub App token: GitHub Actions cannot be a ruleset bypass actor.
+    # Otherwise the default GITHUB_TOKEN is used.
     permissions:
       contents: write
       pages: write
       id-token: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Optional bypass-capable identity for the version-bump push below.
+          token: ${{ secrets.DEPLOY_TOKEN || secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v6
         with:

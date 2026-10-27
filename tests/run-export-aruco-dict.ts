@@ -1,15 +1,18 @@
 /**
- * Runs scripts/export_dict4x4_250_ts.py (OpenCV → src/skelly-charuco/dict4x4_250_rot0.ts).
+ * Runs tests/opencv-qr-test/export_dict4x4_250_ts.py (OpenCV → src/skelly-charuco/dict4x4_250_rot0.ts).
  * Used by `npm run generate:aruco-dict` only — not part of `npm run build` / `npm run generate`.
- * Tries, in order: project .venv Python, `python`, Windows `py -3`, then `uv run --with opencv-contrib-python-headless`.
+ * Tries, in order: project .venv Python, `python`, Windows `py -3`, then
+ * `uv run --no-project --with-requirements tests/opencv-qr-test/requirements.txt` (the pinned OpenCV version).
  */
 import {spawnSync} from 'node:child_process';
 import {existsSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
+// tests/.. is the repo root.
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const pyScript = join(root, 'scripts', 'export_dict4x4_250_ts.py');
+const pyScript = join(root, 'tests', 'opencv-qr-test', 'export_dict4x4_250_ts.py');
+const requirements = join(root, 'tests', 'opencv-qr-test', 'requirements.txt');
 const venvWin = join(root, '.venv', 'Scripts', 'python.exe');
 const venvUnix = join(root, '.venv', 'bin', 'python');
 
@@ -25,7 +28,7 @@ attempts.push(['python', [pyScript]]);
 attempts.push(['py', ['-3', pyScript]]);
 attempts.push([
     'uv',
-    ['run', '--with', 'opencv-contrib-python-headless', 'python', pyScript],
+    ['run', '--no-project', '--with-requirements', requirements, 'python', pyScript],
 ]);
 
 for (const [cmd, args] of attempts) {

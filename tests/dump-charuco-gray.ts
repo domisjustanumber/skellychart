@@ -1,13 +1,13 @@
 /**
  * Write raw uint8 grayscale raster (row-major, len = width × height) for OpenCV comparison.
- * Usage: npx tsx scripts/dump-charuco-gray.ts --out /tmp/ts.gray --width 640 --height 480 --sx 5 --sy 3 --square-mm 54 --marker-ratio 0.8
+ * Usage: npx tsx tests/dump-charuco-gray.ts --out /tmp/ts.gray --width 640 --height 480 --sx 5 --sy 3 --square-mm 54 --marker-ratio 0.8
  */
 import {writeFileSync} from 'node:fs';
 import {renderCharucoBoardGray} from '../src/charuco/board.js';
 
 function usage(): never {
     console.error(
-        'Usage: dump-charuco-gray.ts --out <path> --width W --height H --sx X --sy Y --square-mm S --marker-ratio R',
+        'Usage: tests/dump-charuco-gray.ts --out <path> --width W --height H --sx X --sy Y --square-mm S --marker-ratio R',
     );
     process.exit(1);
 }

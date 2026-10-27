@@ -1,0 +1,87 @@
+# Dependabot configuration for skellychart.
+#
+# Three deliberately pinned dependency surfaces:
+#   - npm: package.json pins exact versions (no ^/~); .npmrc sets save-exact=true
+#     and package-lock.json is committed. CI installs with `npm ci`.
+#   - GitHub Actions: workflow action versions are pinned in the YAML files.
+#   - pip: tests/opencv-qr-test/requirements.txt pins the OpenCV wheel and its
+#     numpy runtime used only by the ArUco export and raster/byte verification
+#     tooling (the site build itself needs no OpenCV).
+#
+# Any tests/opencv-qr-test/requirements.txt change runs the OpenCV gate in CI;
+# see docs/dependency-updates.md for the full workflow and auto-merge options.
+version: 2
+
+updates:
+  # --- npm ------------------------------------------------------------------
+  # `versioning-strategy: increase` raises the pinned version itself instead of
+  # widening the range, so exact pins stay exact.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    versioning-strategy: "increase"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "npm"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Routine minor + patch bumps ride together in one PR. Majors do not match
+      # this group (update-types excludes them) and arrive as individual PRs.
+      npm-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # --- GitHub Actions -------------------------------------------------------
+  # Dependabot bumps the `uses: owner/action@vN` tags. Keep minor + patch
+  # together; major action upgrades stay separate for review.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # --- Python tooling (tests/opencv-qr-test/requirements.txt) ---------------
+  # opencv-contrib-python-headless and its numpy runtime are pinned. An OpenCV
+  # wheel patch bump (5.0.0.93 -> 5.0.0.94) re-runs the byte/raster checks; a
+  # new source release additionally runs the upstream release diff gate.
+  - package-ecosystem: "pip"
+    directory: "/tests/opencv-qr-test"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      pip-minor-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

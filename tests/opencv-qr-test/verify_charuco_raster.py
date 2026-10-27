@@ -15,9 +15,10 @@ import sys
 import cv2
 import numpy as np
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+# tests/opencv-qr-test -> tests -> repo root.
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 DICT_TS = REPO_ROOT / "src" / "skelly-charuco" / "dict4x4_250_rot0.ts"
-DUMP_TS = REPO_ROOT / "scripts" / "dump-charuco-gray.ts"
+DUMP_TS = REPO_ROOT / "tests" / "dump-charuco-gray.ts"
 
 
 def load_ts_provenance() -> tuple[str, str]:
@@ -58,7 +59,7 @@ def main() -> None:
     if jp_cv != "unknown" and jp_cv != cur_cv:
         print(
             "\nWarning: OpenCV version differs from recorded .ts — if the test fails, regenerate "
-            "with scripts/export_dict4x4_250_ts.py (or npm run generate:aruco-dict).\n",
+            "with tests/opencv-qr-test/export_dict4x4_250_ts.py (or npm run generate:aruco-dict).\n",
             file=sys.stderr,
         )
 

@@ -1,0 +1,176 @@
+name: Dependabot auto-merge
+
+# Merges Dependabot PRs after the "CI" workflow succeeds: directly when
+# DEPENDABOT_DIRECT_MERGE=true (recommended), otherwise by enabling GitHub's
+# native auto-merge.
+#
+# WHY workflow_run INSTEAD OF pull_request
+#   Dependabot-triggered pull_request runs get a read-only GITHUB_TOKEN by
+#   default (and no regular Actions secrets), but the workflow's `permissions:`
+#   block can raise its scopes, subject to repository/organization policy.
+#   This repository uses workflow_run because it runs the trusted default-branch
+#   copy of this workflow with a write token and never executes PR-modified
+#   workflow code with that token. The GitHub-documented `pull_request` +
+#   permissions pattern is a valid alternative when that isolation is not
+#   required.
+#
+# WHY NOT pull_request_target
+#   It does run with a write token, but any workflow that checks out and
+#   executes the PR's code from there hands that token to untrusted code (the
+#   classic pull_request_target privilege-escalation pattern). This workflow
+#   never checks out PR code: it only resolves a PR number and calls `gh`.
+#
+# SETUP (see docs/dependency-updates.md):
+#   - This file must exist on the default branch; workflow_run does not fire
+#     for workflow files that only exist on other branches.
+#   - Recommended: create the Actions repository variable
+#     DEPENDABOT_DIRECT_MERGE=true to merge directly after CI
+#     (`gh pr merge --squash --match-head-commit <tested SHA>`).
+#   - Or enable Settings -> General -> Allow auto-merge to use native
+#     auto-merge. Add a ruleset requiring "CI" only if deploy-pages.yml can push
+#     its bump with a bypass-capable token: GitHub Actions cannot be a ruleset
+#     bypass actor.
+#   - Optional DEPENDABOT_MERGE_TOKEN secret (Contents, Pull requests, and
+#     Workflows write) lets github-actions PRs merge too; GITHUB_TOKEN cannot
+#     merge workflow-file changes.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+# Deny by default; the job below requests exactly what it needs.
+permissions: {}
+
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  auto-merge:
+    name: Auto-merge Dependabot PR
+    # Only pull-request CI runs that succeeded are candidates. A failed gate
+    # (OpenCV or build) never reaches this job, so it can never auto-merge.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Resolve the Dependabot PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MERGE_TOKEN: ${{ secrets.DEPENDABOT_MERGE_TOKEN }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          # Guard 1: only Dependabot branch names are eligible.
+          case "$HEAD_BRANCH" in
+            dependabot/*) ;;
+            *)
+              echo "Branch '${HEAD_BRANCH}' is not a Dependabot branch; nothing to do."
+              exit 0
+              ;;
+          esac
+
+          PR="${PR_NUMBER:-}"
+          if [ -z "$PR" ]; then
+            # workflow_run.pull_requests can be empty for fork-originated runs;
+            # fall back to looking the PR up by head branch.
+            PR="$(gh pr list \
+              --repo "$GITHUB_REPOSITORY" \
+              --head "$HEAD_BRANCH" \
+              --state open \
+              --json number,author \
+              --jq 'map(select(.author.login == "dependabot[bot]")) | .[0].number // empty')"
+          fi
+          if [ -z "$PR" ]; then
+            echo "No open pull request found for '${HEAD_BRANCH}'; nothing to do."
+            exit 0
+          fi
+
+          # Guard 2: the PR must actually be authored by Dependabot.
+          AUTHOR="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json author --jq '.author.login')"
+          if [ "$AUTHOR" != "dependabot[bot]" ]; then
+            echo "PR #${PR} was opened by '${AUTHOR}', not dependabot[bot]; skipping."
+            exit 0
+          fi
+
+          # Guard 3: the PR must still be open.
+          STATE="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state --jq '.state')"
+          if [ "$STATE" != "OPEN" ]; then
+            echo "PR #${PR} is ${STATE}, not OPEN; nothing to do."
+            exit 0
+          fi
+
+          # Guard 4: only act on the commit CI just validated.
+          PR_HEAD_SHA="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq '.headRefOid')"
+          if [ "$PR_HEAD_SHA" != "$RUN_SHA" ]; then
+            echo "PR #${PR} head is ${PR_HEAD_SHA}, but CI ran on ${RUN_SHA}; skipping this stale run."
+            exit 0
+          fi
+
+          # Guard 5: the Actions GITHUB_TOKEN cannot merge a PR that changes
+          # .github/workflows/** because it cannot hold the `workflows`
+          # permission. Skip those unless a token that can is configured;
+          # otherwise the merge step fails on every actions-version PR.
+          ALL_FILES="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR}/files" --paginate --jq '.[].filename')"
+          CHANGED_WORKFLOWS="$(printf '%s\n' "$ALL_FILES" | grep -E '^\.github/workflows/' || true)"
+          if [ -n "$CHANGED_WORKFLOWS" ] && [ -z "${MERGE_TOKEN:-}" ]; then
+            echo "::notice::PR #${PR} changes .github/workflows; the Actions GITHUB_TOKEN cannot merge it. Merge manually or set the DEPENDABOT_MERGE_TOKEN secret with Workflows: write. Skipping auto-merge."
+            exit 0
+          fi
+
+          echo "pr=${PR}" >> "$GITHUB_OUTPUT"
+          echo "Resolved Dependabot PR #${PR} at ${RUN_SHA}."
+
+      - name: Enable auto-merge
+        if: steps.pr.outputs.pr != '' && vars.DEPENDABOT_DIRECT_MERGE != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DEPENDABOT_MERGE_TOKEN || secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.pr.outputs.pr }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          # Native auto-merge needs Settings -> General -> Allow auto-merge.
+          # If it is off, fail loudly with a pointer to the direct-merge path
+          # rather than silently doing nothing.
+          if [ "$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.allow_auto_merge')" != "true" ]; then
+            echo "::error::Auto-merge is disabled for this repository. Enable Settings -> General -> Allow auto-merge, or set the Actions repository variable DEPENDABOT_DIRECT_MERGE=true to merge directly (see docs/dependency-updates.md)."
+            exit 1
+          fi
+
+          if [ "$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json autoMergeRequest --jq '.autoMergeRequest != null')" = "true" ]; then
+            echo "Auto-merge is already enabled for PR #${PR}; nothing to do."
+            exit 0
+          fi
+
+          # `--match-head-commit` pins the mutation to the commit CI validated,
+          # closing the check-to-merge race if Dependabot rebases meanwhile.
+          # Auto-merge then executes once every required check on that head
+          # passes (at minimum the "CI" check, if the ruleset requires it).
+          gh pr merge --auto --squash --match-head-commit "$RUN_SHA" --repo "$GITHUB_REPOSITORY" "$PR"
+
+      # Direct merge path, enabled by the DEPENDABOT_DIRECT_MERGE repository
+      # variable (Settings -> Secrets and variables -> Actions -> Variables ->
+      # New repository variable). Recommended for this repo: it keeps the normal
+      # PR record, merges only the exact commit CI validated, and needs neither
+      # the "Allow auto-merge" setting nor a ruleset. Branch protection, if any,
+      # still applies: `gh pr merge` fails when required checks/reviews are unmet.
+      - name: Merge directly
+        if: steps.pr.outputs.pr != '' && vars.DEPENDABOT_DIRECT_MERGE == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DEPENDABOT_MERGE_TOKEN || secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.pr.outputs.pr }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          echo "DEPENDABOT_DIRECT_MERGE=true: merging PR #${PR} directly after successful CI."
+          gh pr merge --squash --delete-branch --match-head-commit "$RUN_SHA" --repo "$GITHUB_REPOSITORY" "$PR"

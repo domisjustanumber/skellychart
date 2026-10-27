@@ -2,7 +2,7 @@
 # Create/update .venv with uv, export OpenCV DICT_4X4_250 to src/skelly-charuco/dict4x4_250_rot0.ts, verify raster, remove temp files.
 # Requires: uv, Node.js (npm), repo dependencies (npm install).
 #
-# Run from repo root: ./scripts/opencv-dict-sync.sh
+# Run from repo root: ./tests/opencv-dict-sync.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -45,9 +45,9 @@ else
   fi
 fi
 
-uv pip install --python "${VENV_PY}" opencv-contrib-python-headless
+uv pip install --python "${VENV_PY}" -r "${ROOT}/tests/opencv-qr-test/requirements.txt"
 
-"${VENV_PY}" "${ROOT}/scripts/export_dict4x4_250_ts.py"
-"${VENV_PY}" "${ROOT}/scripts/verify_charuco_raster.py"
+"${VENV_PY}" "${ROOT}/tests/opencv-qr-test/export_dict4x4_250_ts.py"
+"${VENV_PY}" "${ROOT}/tests/opencv-qr-test/verify_charuco_raster.py"
 
 echo "OK: OpenCV dict -> TypeScript export and raster check completed."

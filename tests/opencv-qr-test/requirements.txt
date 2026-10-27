@@ -1,0 +1,7 @@
+# Pinned Python tooling for the ArUco dictionary export and parity checks.
+# OpenCV Python wheels are 4-part; the OpenCV source tag is the 3-part prefix
+# (5.0.0.93 -> tag 5.0.0). Bump deliberately: CI runs the ArUco and QR checks
+# whenever this file changes. See docs/aruco-dictionary.md.
+opencv-contrib-python-headless==5.0.0.93
+# Pinned so the verification environment resolves identically every run.
+numpy==2.5.4

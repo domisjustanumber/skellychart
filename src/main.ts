@@ -364,6 +364,24 @@ function syncAddressBarChartQuery(): void {
     window.history.replaceState(history.state, '', next);
 }
 
+/** Advanced settings fold out on narrow screens only; on desktop they stay open (see style.css). */
+function initAdvancedFoldout(): void {
+    const advanced = document.getElementById('advancedSettings') as HTMLDetailsElement | null;
+    if (!advanced) {
+        return;
+    }
+    const desktop = window.matchMedia('(min-width: 1024px)');
+    const sync = (): void => {
+        if (desktop.matches) {
+            advanced.open = true;
+        }
+    };
+    sync();
+    desktop.addEventListener('change', sync);
+    // Desktop has no toggle, so keep it from being closed by any route.
+    advanced.addEventListener('toggle', sync);
+}
+
 /**
  * Dev-only control: choose whether QR links target production or this dev server. The encoded
  * URL is shown as a link so query-parameter round-tripping can be tested without a phone.
@@ -481,7 +499,6 @@ function syncUi(options: SyncUiOptions = {}): void {
     if (!lite) {
         byId('print-save-heading').textContent = S.printSave;
         byId('preview-title').textContent = S.previewTitle;
-        byId('lbl-fullchart').textContent = S.fullChart;
         byId('fullChartHint').textContent = S.fullChartHint;
         (byId('btnPdf') as HTMLButtonElement).textContent = S.printCharts;
         if (!pdfExportInProgress) {
@@ -778,7 +795,6 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     const statusEl = byId('previewStatus') as HTMLParagraphElement;
     const panelPreview = byId('panelPreview');
     const fullBlock = byId('fullPreviewBlock');
-    const hint = byId('fullChartHint');
     const boardImg = byId('boardImg') as HTMLImageElement;
     const overlays = byId('sheetOverlays');
     const thumbs = byId('thumbGrid');
@@ -796,8 +812,8 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     panelPreview.setAttribute('aria-busy', 'true');
     statusEl.textContent = '';
     // Assembly instructions only make sense when the chart spans several sheets.
-    hint.classList.toggle('hidden', tiling.pageCount <= 1);
-    fullBlock.classList.remove('hidden');
+    // The full-chart overview (and its hint) is only shown for multi-page results.
+    fullBlock.classList.toggle('hidden', tiling.pageCount <= 1);
     showFullPreviewPlaceholder(S.loadingPreview);
     setThumbGridPlaceholder(S.loadingPreviews);
     byId('sheetOverlays').innerHTML = '';
@@ -947,13 +963,6 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                 });
             }
             thumbs.innerHTML = '';
-            if (totalPages > 1) {
-                const hdr = document.createElement('p');
-                hdr.className = 'caption';
-                hdr.textContent = interpolate(S.pageCountLabel, {count: totalPages});
-                hdr.style.gridColumn = '1 / -1';
-                thumbs.appendChild(hdr);
-            }
             const layoutN = tiling.pageCount;
             pageImages.forEach((src, i) => {
                 const wrap = document.createElement('div');
@@ -1383,6 +1392,7 @@ function boot(): void {
     wireUi();
     if (import.meta.env.DEV) {
         initDevQrLinkTargetUi();
+        initAdvancedFoldout();
     }
     applyQrQueryFromLocation();
     syncQrVersionBanner();

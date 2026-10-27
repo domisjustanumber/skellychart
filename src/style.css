@@ -335,6 +335,13 @@ body {
   padding: 1rem;
 }
 
+/* Desktop has room to show the settings permanently, so drop the fold-out header. */
+@media (min-width: 1024px) {
+  .advanced-title {
+    display: none;
+  }
+}
+
 .advanced-body > .field:last-child {
   margin-bottom: 0;
 }
@@ -635,10 +642,10 @@ body {
   margin-bottom: 1.25rem;
 }
 
-/* Assembly hint under the Full ChArUco pattern heading; kept tight to the heading. */
+/* Assembly hint above the full-chart overview; spans the whole section. */
 .full-chart-hint {
-  max-width: 56ch;
-  margin-top: -0.35rem;
+  max-width: none;
+  width: 100%;
 }
 
 .preview-frame {

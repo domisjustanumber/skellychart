@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "jspdf": "4.2.1",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "svg2pdf.js": "2.8.1"
   }
 }

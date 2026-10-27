@@ -635,6 +635,12 @@ body {
   margin-bottom: 1.25rem;
 }
 
+/* Assembly hint under the Full ChArUco pattern heading; kept tight to the heading. */
+.full-chart-hint {
+  max-width: 56ch;
+  margin-top: -0.35rem;
+}
+
 .preview-frame {
   --preview-mat-px: 5px;
   position: relative;
@@ -764,7 +770,30 @@ body {
 .sheet-rect {
   position: absolute;
   box-sizing: border-box;
-  border: 2px solid;
+  /* Border and fill share --sheet-color (set per sheet in main.ts) so they cannot drift. */
+  border: 2px solid var(--sheet-color, currentColor);
+  /* Slightly darker and more opaque than the border colour so white numerals read over the board. */
+  background: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--sheet-color, currentColor) 82%, #000) 30%,
+    transparent
+  );
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sheet-rect-num {
+  /* JS measures one shared font size for the whole overlay set after paint. */
+  color: #fff;
+  font-size: var(--sheet-number-font-px, 1rem);
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  /* No badge: a black outline keeps white digits legible over black and white board squares. */
+  -webkit-text-stroke: max(4px, 0.18em) #000;
+  paint-order: stroke fill;
 }
 
 .thumb-grid {

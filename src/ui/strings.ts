@@ -63,12 +63,15 @@ export const S = {
         'This link’s OpenCV line (cv2) does not match this generator (expected {{ours}}; got {{theirs}}). Board detection or geometry may differ.',
     previewTitle: 'Preview',
     fullChart: 'Full ChArUco pattern',
+    fullChartHint:
+        'The numbered, colour-coded blocks show how each printed sheet maps onto the full chart. Print every sheet, cut away the dashed seam lines, then butt the matching numbered edges together in order — the page thumbnails below use the same numbers and colours.',
     loadingPreview: 'Loading preview',
     loadingPreviews: 'Loading previews',
     truncatedPreview:
         'Showing first {{shown}} of {{total}} pages in the preview. Use Print or Save as PDF to output every sheet.',
     pageCountLabel: '{{count}} pages',
     pageLabel: 'Page {{n}}',
+    pageBlockLabel: 'Page {{n}} of {{total}}',
     close: '1 - 2m',
     near: '2 - 4m',
     far: '4m +',

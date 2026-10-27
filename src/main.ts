@@ -162,7 +162,10 @@ function setThumbGridPlaceholder(message: string): void {
 }
 
 function resetPreviewVisualsEmpty(): void {
+    clearSheetNumberFit();
     hideFullPreviewPlaceholder();
+    // The hint describes the sheet blocks, so it must not outlive them (e.g. after a render error).
+    byId('fullChartHint').classList.add('hidden');
     const img = byId('boardImg') as HTMLImageElement;
     img.classList.add('board-img--hidden');
     img.removeAttribute('src');
@@ -263,6 +266,9 @@ let previewTimer: ReturnType<typeof setTimeout> | null = null;
 let previewAbort: AbortController | null = null;
 /** Bumped when a new preview run starts so stale async completions do not clear the busy UI. */
 let previewGeneration = 0;
+/** ResizeObserver / pending frame that keeps the shared page-number size fitted to the rendered blocks. */
+let sheetNumberResizeObserver: ResizeObserver | null = null;
+let sheetNumberFitRafId: number | null = null;
 /** Prevents a second PDF export while one is running (e.g. after a slider drag re-runs syncUi). */
 let pdfExportInProgress = false;
 
@@ -476,6 +482,7 @@ function syncUi(options: SyncUiOptions = {}): void {
         byId('print-save-heading').textContent = S.printSave;
         byId('preview-title').textContent = S.previewTitle;
         byId('lbl-fullchart').textContent = S.fullChart;
+        byId('fullChartHint').textContent = S.fullChartHint;
         (byId('btnPdf') as HTMLButtonElement).textContent = S.printCharts;
         if (!pdfExportInProgress) {
             (byId('btnSavePdf') as HTMLButtonElement).textContent = S.savePdfFiles;
@@ -678,7 +685,82 @@ async function awaitPreviewImagesDecodedAndPaint(boardImg: HTMLImageElement, thu
     }
 }
 
+const SHEET_NUMBER_PROBE_PX = 100;
+/** Breathing room between a number's glyph box and the inside edge of its block. */
+const SHEET_NUMBER_CLEARANCE_PX = 5;
+
+function clearSheetNumberFit(): void {
+    sheetNumberResizeObserver?.disconnect();
+    sheetNumberResizeObserver = null;
+    if (sheetNumberFitRafId !== null) {
+        cancelAnimationFrame(sheetNumberFitRafId);
+        sheetNumberFitRafId = null;
+    }
+    const overlays = document.getElementById('sheetOverlays');
+    overlays?.style.removeProperty('--sheet-number-font-px');
+}
+
+/**
+ * Finds one font size that fits the widest page number inside every page block. Measuring at a
+ * large probe size (rather than assuming glyph metrics) keeps 1-, 2-, and 3-digit numbers safe.
+ */
+function fitSheetNumbersToBlocks(overlays: HTMLElement): void {
+    const blocks = Array.from(overlays.querySelectorAll<HTMLElement>('.sheet-rect'));
+    const badges = blocks
+        .map((block) => block.querySelector<HTMLElement>('.sheet-rect-num'))
+        .filter((badge): badge is HTMLElement => badge !== null);
+    if (blocks.length === 0 || badges.length !== blocks.length) {
+        return;
+    }
+
+    // Probe large, then use the widest/tallest number so the shared size fits every block.
+    overlays.style.setProperty('--sheet-number-font-px', `${SHEET_NUMBER_PROBE_PX}px`);
+    let widestPx = 0;
+    let tallestPx = 0;
+    for (const badge of badges) {
+        const rect = badge.getBoundingClientRect();
+        widestPx = Math.max(widestPx, rect.width);
+        tallestPx = Math.max(tallestPx, rect.height);
+    }
+    if (widestPx <= 0 || tallestPx <= 0) {
+        return;
+    }
+
+    let scale = Number.POSITIVE_INFINITY;
+    for (const block of blocks) {
+        const availableW = Math.max(0, block.clientWidth - SHEET_NUMBER_CLEARANCE_PX);
+        const availableH = Math.max(0, block.clientHeight - SHEET_NUMBER_CLEARANCE_PX);
+        scale = Math.min(scale, availableW / widestPx, availableH / tallestPx);
+    }
+    // Round down so subpixel rounding can only make the number smaller, never cross the block edge.
+    const fontPx = Math.floor(SHEET_NUMBER_PROBE_PX * scale * 100) / 100;
+    overlays.style.setProperty('--sheet-number-font-px', `${fontPx}px`);
+}
+
+function watchSheetNumberFit(boardImg: HTMLImageElement, overlays: HTMLElement): void {
+    sheetNumberResizeObserver?.disconnect();
+    const observer = new ResizeObserver(() => {
+        if (sheetNumberFitRafId !== null) {
+            cancelAnimationFrame(sheetNumberFitRafId);
+        }
+        sheetNumberFitRafId = requestAnimationFrame(() => {
+            sheetNumberFitRafId = null;
+            if (!overlays.isConnected || overlays.childElementCount === 0) {
+                return;
+            }
+            fitSheetNumbersToBlocks(overlays);
+        });
+    });
+    observer.observe(boardImg);
+    // The panel width can change the frame/image size independently of the board image's aspect ratio.
+    if (overlays.parentElement) {
+        observer.observe(overlays.parentElement);
+    }
+    sheetNumberResizeObserver = observer;
+}
+
 async function runPreview(scheduleBaselineMs?: number): Promise<void> {
+    clearSheetNumberFit();
     previewAbort?.abort();
     previewAbort = new AbortController();
     const signal = previewAbort.signal;
@@ -696,6 +778,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     const statusEl = byId('previewStatus') as HTMLParagraphElement;
     const panelPreview = byId('panelPreview');
     const fullBlock = byId('fullPreviewBlock');
+    const hint = byId('fullChartHint');
     const boardImg = byId('boardImg') as HTMLImageElement;
     const overlays = byId('sheetOverlays');
     const thumbs = byId('thumbGrid');
@@ -712,6 +795,8 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
 
     panelPreview.setAttribute('aria-busy', 'true');
     statusEl.textContent = '';
+    // Assembly instructions only make sense when the chart spans several sheets.
+    hint.classList.toggle('hidden', tiling.pageCount <= 1);
     fullBlock.classList.remove('hidden');
     showFullPreviewPlaceholder(S.loadingPreview);
     setThumbGridPlaceholder(S.loadingPreviews);
@@ -828,6 +913,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
 
             overlays.innerHTML = '';
             if (rects) {
+                // One translucent, colour-coded block per printed sheet; the badge shows its page number.
                 for (const r of rects) {
                     const d = document.createElement('div');
                     d.className = 'sheet-rect';
@@ -835,7 +921,20 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                     d.style.top = `${r.top * 100}%`;
                     d.style.width = `${r.width * 100}%`;
                     d.style.height = `${r.height * 100}%`;
-                    d.style.borderColor = charucoPagePreviewBorderColor(r.sheetIndex, tiling.pageCount, dark);
+                    d.style.setProperty(
+                        '--sheet-color',
+                        charucoPagePreviewBorderColor(r.sheetIndex, tiling.pageCount, dark),
+                    );
+                    d.setAttribute('role', 'img');
+                    d.setAttribute(
+                        'aria-label',
+                        interpolate(S.pageBlockLabel, {n: r.sheetIndex, total: tiling.pageCount}),
+                    );
+                    const num = document.createElement('span');
+                    num.className = 'sheet-rect-num';
+                    num.textContent = String(r.sheetIndex);
+                    num.setAttribute('aria-hidden', 'true');
+                    d.appendChild(num);
                     overlays.appendChild(d);
                 }
             }
@@ -875,6 +974,13 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                 thumbs.appendChild(wrap);
             });
             await awaitPreviewImagesDecodedAndPaint(boardImg, thumbs);
+            if (signal.aborted || runId !== previewGeneration) {
+                return;
+            }
+            if (rects) {
+                fitSheetNumbersToBlocks(overlays);
+                watchSheetNumberFit(boardImg, overlays);
+            }
             if (perfDev()) {
                 perfLog('runPreview JS through paint proxy', performance.now() - previewWallStart, '');
                 if (scheduleBaselineMs !== undefined) {

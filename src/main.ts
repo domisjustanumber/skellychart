@@ -1,3 +1,4 @@
+import {APP_VERSION} from './appVersion.js';
 import freemocapLogoUrl from './freemocapLogoUrl.js';
 import {renderCharucoBoardSvg} from './charuco/board.js';
 import {renderCharucoPrintSvg} from './print/svgDocument.js';
@@ -27,13 +28,20 @@ import {
 import {ensureTilingFeasibilityForPaperId} from './print/tilingFeasibilityTables.js';
 import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from './print/tiling.js';
 import {perfDev, perfLog} from './print/perfDebug.js';
-import {CHARUCO_MARKER_LENGTH_RATIO, CHARUCO_PRINT_LABEL_SPEC_VERSION} from './print/constants.js';
+import {CHARUCO_MARKER_LENGTH_RATIO, getCharucoPrintSourceUrl} from './print/constants.js';
+import {compareChartVersions, parseChartVersion} from './print/chartVersion.js';
 import {svgRootOuterSizeAttrs} from './print/svgUtils.js';
 import {
+    buildCharucoDocumentationUrl,
     expectedCharucoCv2QueryValue,
     mergeCharucoQrParamsInto,
     parseCharucoQrSearchParams,
 } from './print/charucoDocUrl.js';
+import {
+    getQrLinkTarget,
+    isQrLinkTargetSwitchAvailable,
+    setQrLinkTarget,
+} from './print/qrLinkTarget.js';
 import {
     MAX_PREVIEW_PAGES,
     PREVIEW_DEBOUNCE_IDLE_MS,
@@ -326,26 +334,93 @@ function setIntroElement(el: HTMLElement): void {
     el.replaceChildren(prefix, a, suffix);
 }
 
-/** Keeps {@link window.location} query `v,w,h,s,cv2` aligned with QR / exported charts (printed grid may swap W×H when the pattern is rotated). */
-function syncAddressBarChartQuery(): void {
+/** Grid dimensions encoded in QR links (printed grid may swap W×H when the pattern is rotated). */
+function qrChartSquareDims(): {squaresX: number; squaresY: number} {
     const layout = effectivePrintLayout();
-    const {squaresX, squaresY} = layout
+    return layout
         ? printSquareDims(layout.patternRotated90)
         : {squaresX: state.squaresX, squaresY: state.squaresY};
+}
+
+/** Keeps {@link window.location} query `v,w,h,s,cv2` aligned with QR / exported charts. */
+function syncAddressBarChartQuery(): void {
+    const {squaresX, squaresY} = qrChartSquareDims();
     const u = new URL(window.location.href);
-    mergeCharucoQrParamsInto(
-        u.searchParams,
-        squaresX,
-        squaresY,
-        state.squareMm,
-        CHARUCO_MARKER_LENGTH_RATIO,
-    );
+    mergeCharucoQrParamsInto(u.searchParams, squaresX, squaresY, state.squareMm);
     const next = `${u.pathname}${u.search}${u.hash}`;
     const cur = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (next === cur) {
         return;
     }
     window.history.replaceState(history.state, '', next);
+}
+
+/**
+ * Dev-only control: choose whether QR links target production or this dev server. The encoded
+ * URL is shown as a link so query-parameter round-tripping can be tested without a phone.
+ * Not created at all in release builds.
+ */
+function initDevQrLinkTargetUi(): void {
+    if (!isQrLinkTargetSwitchAvailable()) {
+        return;
+    }
+    const advanced = document.querySelector<HTMLElement>('.advanced');
+    if (!advanced) {
+        return;
+    }
+
+    const field = document.createElement('div');
+    field.className = 'field';
+
+    const label = document.createElement('label');
+    label.htmlFor = 'qrLinkTarget';
+    label.textContent = 'QR link target (dev only)';
+
+    const select = document.createElement('select');
+    select.id = 'qrLinkTarget';
+    select.className = 'select';
+    for (const [value, text] of [
+        ['production', 'Production (skelly.cam)'],
+        ['local', 'Local dev server (LAN)'],
+    ] as const) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = text;
+        select.appendChild(option);
+    }
+    select.addEventListener('change', () => {
+        setQrLinkTarget(select.value === 'local' ? 'local' : 'production');
+        syncUi({previewDelayMs: 0});
+    });
+
+    const link = document.createElement('a');
+    link.id = 'qrLinkUrl';
+    link.className = 'caption qr-link-url';
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.title = 'Open this URL to test QR query parsing';
+
+    field.append(label, select, link);
+    advanced.appendChild(field);
+}
+
+/** Keeps the dev-only QR target selector and its encoded URL in sync with the current chart. */
+function syncDevQrLinkTargetUi(): void {
+    const select = document.getElementById('qrLinkTarget') as HTMLSelectElement | null;
+    const link = document.getElementById('qrLinkUrl') as HTMLAnchorElement | null;
+    if (!select || !link) {
+        return;
+    }
+    select.value = getQrLinkTarget();
+    const {squaresX, squaresY} = qrChartSquareDims();
+    const url = buildCharucoDocumentationUrl(
+        getCharucoPrintSourceUrl(),
+        squaresX,
+        squaresY,
+        state.squareMm,
+    );
+    link.href = url;
+    link.textContent = url;
 }
 
 function syncUi(options: SyncUiOptions = {}): void {
@@ -502,6 +577,9 @@ function syncUi(options: SyncUiOptions = {}): void {
         }
     }
     syncAddressBarChartQuery();
+    if (import.meta.env.DEV) {
+        syncDevQrLinkTargetUi();
+    }
     schedulePreview(previewDelayMs);
 }
 
@@ -995,11 +1073,17 @@ function applyQrQueryFromLocation(): void {
     const parsed = parseCharucoQrSearchParams(sp);
     const warnings: string[] = [];
 
-    if (parsed.labelSpecVersion !== null && parsed.labelSpecVersion !== CHARUCO_PRINT_LABEL_SPEC_VERSION) {
+    const currentVersion = parseChartVersion(APP_VERSION);
+    if (
+        parsed.chartVersionRaw !== null &&
+        parsed.chartVersion !== null &&
+        currentVersion !== null &&
+        compareChartVersions(parsed.chartVersion, currentVersion) > 0
+    ) {
         warnings.push(
-            interpolate(S.qrChartSpecMismatch, {
-                theirs: parsed.labelSpecVersion,
-                ours: CHARUCO_PRINT_LABEL_SPEC_VERSION,
+            interpolate(S.qrChartNewer, {
+                theirs: parsed.chartVersionRaw,
+                ours: APP_VERSION,
             }),
         );
     }
@@ -1153,6 +1237,9 @@ function boot(): void {
     (byId('brandLogo') as HTMLImageElement).src = freemocapLogoUrl;
     initTheme(() => schedulePreview());
     wireUi();
+    if (import.meta.env.DEV) {
+        initDevQrLinkTargetUi();
+    }
     applyQrQueryFromLocation();
     syncQrVersionBanner();
     syncUi();

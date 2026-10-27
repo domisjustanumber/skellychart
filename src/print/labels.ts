@@ -25,8 +25,7 @@ For instructions on how to use the chart, buy a pre-made one, or print another, 
     originChartInfo: `ChArUco calibration chart v{{version}}
 Square length: {{mm}} mm
 Width: {{squaresX}} squares
-Height: {{squaresY}} squares
-OpenCV {{opencv_version}} {{dictionary_name}}`,
+Height: {{squaresY}} squares`,
 } as const;
 
 export type OriginChartInfoVars = {
@@ -34,8 +33,6 @@ export type OriginChartInfoVars = {
     mm: string | number;
     squaresX: string | number;
     squaresY: string | number;
-    opencv_version: string;
-    dictionary_name: string;
 };
 
 /** First line → bold title; rest → wrapped detail lines on the sheet banner. */

@@ -96,7 +96,6 @@ export async function renderCharucoPrintSvg(params: PrintSvgParams): Promise<Pri
         params.squaresX,
         params.squaresY,
         params.squareLengthMm,
-        params.markerLengthRatio,
     );
     const qrSizePx = Math.max(32, Math.round(QR_SIZE_MM * ppm));
     const qrSvgFragment = await perfAsync('QR SVG fragment', () => generateQrSvgFragment(docUrl, qrSizePx));

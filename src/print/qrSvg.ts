@@ -17,6 +17,8 @@ export async function generateQrSvgFragment(url: string, sizePx: number): Promis
         type: 'svg',
         margin: 0,
         width: px,
+        // Pin M (qrcode's default) so a library upgrade cannot silently shrink printed modules.
+        errorCorrectionLevel: 'M',
     });
     const inner = raw.replace(/^\s*<\?xml[^>]*>\s*/i, '').replace(/^\s*<svg[^>]*>/i, '').replace(/<\/svg>\s*$/i, '');
     const viewBox = extractSvgViewBox(raw) ?? `0 0 ${px} ${px}`;

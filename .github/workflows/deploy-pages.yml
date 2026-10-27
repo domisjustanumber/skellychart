@@ -1,5 +1,10 @@
 name: Deploy site to GitHub Pages
 
+# One workflow does bump → build → push → deploy, so a merge to main produces exactly
+# one deployment. The bump commit is pushed with GITHUB_TOKEN (which never triggers
+# workflows) and carries [skip ci] (a second guard). The build job also refuses to run
+# for a commit whose message contains [skip ci], so a replayed release commit cannot
+# start a second deploy.
 on:
   push:
     branches: [main]
@@ -17,6 +22,14 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # workflow_dispatch always deploys; push events skip release commits.
+    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip ci]')
+    # contents: write is needed only for the version-bump push. Requires the repository's
+    # workflow permissions to allow write, and branch protection must let the Actions bot push.
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v6
 
@@ -26,11 +39,30 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      - name: Bump patch version
+        if: github.event_name == 'push'
+        run: npm version patch --no-git-tag-version
+
       - name: Build site
         run: npm run build
         env:
           # GitHub Pages project-site URL so printed-chart QR codes resolve for this repository.
-          VITE_CHARUCO_PRINT_SOURCE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+          VITE_CHARUCO_PRINT_SOURCE_URL: https://skelly.cam/c/
+
+      # Push before uploading/deploying: if the bump cannot land (branch protection,
+      # or another merge moved main), this run fails instead of deploying a version
+      # that never reaches main.
+      - name: Commit and push version bump
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "chore(release): v${VERSION} [skip ci]"
+          git push origin HEAD:main
 
       # Requires repo Settings → Pages → Source: GitHub Actions (not “Deploy from a branch”).
       # Branch deploy serves root index.html (/src/*.ts), which 404s on static hosting.

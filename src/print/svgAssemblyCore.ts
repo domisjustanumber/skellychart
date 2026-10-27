@@ -5,15 +5,14 @@ import {
     renderCharucoBoardSvgFragment,
 } from '../charuco/board.js';
 import type {CharucoGeometry} from '../charuco/board.js';
+import {APP_VERSION} from '../appVersion.js';
 import {
-    CHARUCO_PRINT_LABEL_SPEC_VERSION,
     JOIN_MEET_DASH_RGB,
     MM_JOIN_STRIP,
     MM_MARGIN_SHEET,
     MM_ORIGIN_BANNER_BELOW_GAP_MM,
     MM_PAGE_NUMBER_CLEARANCE_MM,
     MM_TAPE_LABEL_INSET_FROM_JOIN_MM,
-    OPENCV_LABEL_VERSION,
     ORIGIN_BANNER_CONTENT_SIDE_MM,
     ORIGIN_BANNER_CONTENT_TOP_MM,
     ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM,
@@ -539,13 +538,13 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
 
             const titleFont = `bold ${titleFontPx}px ${FONT}`;
             const bodyFont = `${bodyFontPx}px ${FONT}`;
+            // Full semver (longer in dev) is right-anchored at `boardInfoRight`, so it grows
+            // left into the instructions column instead of toward the QR code.
             const {titleLine: boardTitle, bodyBlock: boardInfoBody} = originChartInfoParts({
-                version: CHARUCO_PRINT_LABEL_SPEC_VERSION,
+                version: APP_VERSION,
                 mm: squareLengthMm,
                 squaresX,
                 squaresY,
-                opencv_version: OPENCV_LABEL_VERSION,
-                dictionary_name: 'DICT_4X4_250',
             });
             const boardInfoLines = wrapText(bodyFont, boardInfoBody, boardColMaxW);
             const vGap = Math.max(4, Math.round(ppm * bScale));

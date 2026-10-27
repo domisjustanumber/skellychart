@@ -290,6 +290,14 @@ body {
   line-height: 1.45;
 }
 
+/* Dev-only: encoded chart QR URL (long packed query) shown under the target selector. */
+.qr-link-url {
+  display: block;
+  margin: 0.5rem 0 0;
+  color: var(--primary);
+  word-break: break-all;
+}
+
 .tier-labels {
   display: flex;
   width: 100%;

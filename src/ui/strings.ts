@@ -55,8 +55,8 @@ export const S = {
     preparingPrint: 'Preparing print…',
     preparingSvgExport: 'Preparing SVG…',
     printInitFailed: 'Could not prepare printing in this browser. Try refreshing the page.',
-    qrChartSpecMismatch:
-        'This link’s chart metadata version (v={{theirs}}) does not match this generator (v={{ours}}). The sheet layout or labels may not match what FreeMoCap produced.',
+    qrChartNewer:
+        'This chart was made by a newer version (v={{theirs}}) than this generator (v={{ours}}). The sheet layout or labels may not match what FreeMoCap produced.',
     qrOpenCvMismatch:
         'This link’s OpenCV line (cv2) does not match this generator (expected {{ours}}; got {{theirs}}). Board detection or geometry may differ.',
     previewTitle: 'Preview',

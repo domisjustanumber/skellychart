@@ -2,8 +2,8 @@
  * Matches origin-sheet banner vertical extent in `pdfDocument.ts` so tiling reserves the same
  * height as the rendered PDF (instead of a flat {@link ORIGIN_PAGE_EXTRA_MM} slab).
  */
+import {APP_VERSION} from '../appVersion.js';
 import {
-    CHARUCO_PRINT_LABEL_SPEC_VERSION,
     MM_MARGIN_SHEET,
     MM_ORIGIN_BANNER_BELOW_GAP_MM,
     ORIGIN_BANNER_CONTENT_SIDE_MM,
@@ -15,7 +15,6 @@ import {
     ORIGIN_GAP_QR_TO_BOARD_INFO_MM,
     ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM,
     ORIGIN_PAGE_EXTRA_MM,
-    OPENCV_LABEL_VERSION,
     PIXELS_PER_MM,
     QR_SIZE_MM,
     SKELLY_TOP_HEIGHT_MM,
@@ -144,12 +143,10 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
     const bodyLineLead = bodyFontPx + Math.max(4, Math.round(0.52 * ppm * bScale));
 
     const {titleLine: boardTitle, bodyBlock: boardInfoBody} = originChartInfoParts({
-        version: CHARUCO_PRINT_LABEL_SPEC_VERSION,
+        version: APP_VERSION,
         mm: params.squareLengthMm,
         squaresX: params.squaresX,
         squaresY: params.squaresY,
-        opencv_version: OPENCV_LABEL_VERSION,
-        dictionary_name: 'DICT_4X4_250',
     });
 
     ctx.font = `${bodyFontPx}px system-ui, Segoe UI, sans-serif`;

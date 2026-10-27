@@ -1,5 +1,6 @@
 {
   "name": "skellychart",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +10,11 @@
     "generate:tiling-feasibility": "tsx scripts/generate-tiling-feasibility.ts",
     "generate:aruco-dict": "tsx scripts/run-export-aruco-dict.ts",
     "verify:opencv-raster": "uv run --with opencv-contrib-python-headless python scripts/verify_charuco_raster.py",
+    "check:version": "tsx scripts/check-app-version.ts",
+    "check:dist": "tsx scripts/check-dist-version.ts",
+    "prebuild": "npm run check:version",
     "build": "npm run generate && tsc -b && vite build",
+    "postbuild": "npm run check:dist",
     "preview": "vite preview"
   },
   "devDependencies": {

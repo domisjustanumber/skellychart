@@ -1,5 +1,7 @@
 /** Aligned with `charuco_board_print.py` / `charucoPrintLayout.ts` in freemocap. */
 
+import {resolveQrLinkSourceUrl} from './qrLinkTarget.js';
+
 /** Blank margin reserved on every sheet edge before join strips and printable content (mm). */
 export const MM_MARGIN_SHEET = 13;
 export const MM_PAGE_NUMBER_CLEARANCE_MM = 4;
@@ -49,10 +51,12 @@ export const ORIGIN_MARKER_AXIS_X_RGB: [number, number, number] = [0xa5, 0x28, 0
 export const ORIGIN_MARKER_AXIS_Y_RGB: [number, number, number] = [0x33, 0x6c, 0x34];
 export const JOIN_MEET_DASH_RGB: [number, number, number] = [90, 90, 90];
 export const PIXELS_PER_MM = 12;
+/**
+ * Printed label/layout contract version. Must equal the major component of the app
+ * version (`package.json`); bump both together when printed labels, layout, or QR
+ * query semantics change. The origin banner prints the full app semver, not this.
+ */
 export const CHARUCO_PRINT_LABEL_SPEC_VERSION = 1;
-
-const DEFAULT_CHARUCO_PRINT_SOURCE_URL =
-    'https://docs.freemocap.org/documentation/multi-camera-calibration.html';
 
 function resolveCharucoPrintSourceUrl(): string {
     const v = import.meta.env.VITE_CHARUCO_PRINT_SOURCE_URL;
@@ -62,24 +66,24 @@ function resolveCharucoPrintSourceUrl(): string {
             return t;
         }
     }
-    if (import.meta.env.DEV && typeof window !== 'undefined') {
-        return `${window.location.origin}/`;
-    }
-    return DEFAULT_CHARUCO_PRINT_SOURCE_URL;
+    return resolveQrLinkSourceUrl();
 }
 
 /**
  * Base URL QR codes on printed charts open.
- * - Explicit: `VITE_CHARUCO_PRINT_SOURCE_URL`.
- * - `npm run dev` in the browser: current dev server origin (including Vite’s chosen port).
- * - Otherwise: FreeMoCap documentation.
+ * - Explicit: `VITE_CHARUCO_PRINT_SOURCE_URL` (CI pins the skelly.cam short link).
+ * - `npm run dev`: skelly.cam short link by default, so dev output matches release output.
+ *   The dev-only “QR link target” switch selects the local dev server instead (encoded as a
+ *   LAN URL, so phones can scan it).
+ * - Otherwise: skelly.cam short link (keeps the printed QR short).
  *
- * Call this when generating URLs (e.g. QR codes) so dev mode always sees the live port.
+ * Call this when generating URLs (e.g. QR codes) so the current dev switch is honoured.
  */
 export function getCharucoPrintSourceUrl(): string {
     return resolveCharucoPrintSourceUrl();
 }
 
+/** OpenCV version written into the legacy `cv2` QR metadata (not printed on the sheet). */
 export const OPENCV_LABEL_VERSION = '4.10+';
 /** Default marker edge length as a fraction of square length (OpenCV ChArUco-style). */
 export const CHARUCO_MARKER_LENGTH_RATIO = 0.8;

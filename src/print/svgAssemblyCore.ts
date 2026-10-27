@@ -10,32 +10,31 @@ import {
     JOIN_MEET_DASH_RGB,
     MM_JOIN_STRIP,
     MM_MARGIN_SHEET,
-    MM_ORIGIN_BANNER_BELOW_GAP_MM,
     MM_PAGE_NUMBER_CLEARANCE_MM,
     MM_TAPE_LABEL_INSET_FROM_JOIN_MM,
-    ORIGIN_BANNER_CONTENT_SIDE_MM,
-    ORIGIN_BANNER_CONTENT_TOP_MM,
-    ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM,
     ORIGIN_BANNER_VISUAL_SCALE,
     ORIGIN_CORNER_MARKER_PAD_MM,
-    ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM,
-    ORIGIN_GAP_QR_TO_BOARD_INFO_MM,
-    ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM,
     ORIGIN_MARKER_AXIS_X_RGB,
     ORIGIN_MARKER_AXIS_Y_RGB,
-    ORIGIN_PAGE_EXTRA_MM,
+    ORIGIN_BANNER_MIN_TYPE_FRACTION,
     PIXELS_PER_MM,
-    QR_SIZE_MM,
 } from './constants.js';
-import {interpolate, originChartInfoParts, pdfLabels} from './labels.js';
+import {interpolate, pdfLabels} from './labels.js';
+import {layoutOriginBanner} from './originBannerLayout.js';
+import {originBannerReserveMm} from './originBannerStrip.js';
 import type {PageSpec, TilingInfo} from './tiling.js';
 import type {PrintSvgAssemblyParams, PrintSvgResult} from './svgAssemblyTypes.js';
-import {perfDev, perfLog, perfNote, perfSync} from './perfDebug.js';
-import {SKELLY_LOGO_VIEWBOX_H, SKELLY_LOGO_VIEWBOX_W} from './originBannerEstimate.js';
+import {perfDev, perfLog, perfNote} from './perfDebug.js';
+import {SKELLY_LOGO_VIEWBOX_H, SKELLY_LOGO_VIEWBOX_W} from './skellyLogo.js';
 import {escapeXml, rgbCss, svgRootOpen, svgRootOuterSizeAttrs, SVG_ROOT_CLOSE} from './svgUtils.js';
 import {yieldToMain} from '../ui/yieldToMain.js';
 
-const FONT = 'system-ui, Segoe UI, sans-serif';
+/**
+ * Helvetica is a PDF standard font, so Save as PDF (svg2pdf) draws the face the banner is wrapped with
+ * (`helveticaMetrics.ts`). The rest are its metric-compatible stand-ins for Print where Helvetica is not
+ * installed (Arial on Windows; Liberation Sans, Arimo or Nimbus Sans on Linux and ChromeOS).
+ */
+const FONT = "Helvetica, Arial, 'Liberation Sans', Arimo, 'Nimbus Sans', sans-serif";
 
 function layoutIntPx(x: number): number {
     return Math.max(0, Math.floor(x));
@@ -62,34 +61,6 @@ function measureCtx(): CanvasRenderingContext2D {
         measureCanvas = document.createElement('canvas');
     }
     return measureCanvas.getContext('2d')!;
-}
-
-function wrapText(font: string, text: string, maxW: number): string[] {
-    const ctx = measureCtx();
-    ctx.font = font;
-    const lines: string[] = [];
-    for (const para of text.split('\n')) {
-        const stripped = para.trim();
-        if (!stripped) {
-            lines.push('');
-            continue;
-        }
-        const words = stripped.split(/\s+/);
-        let lineWords: string[] = [];
-        for (const w of words) {
-            const trial = [...lineWords, w].join(' ');
-            if (ctx.measureText(trial).width <= maxW || lineWords.length === 0) {
-                lineWords.push(w);
-            } else {
-                lines.push(lineWords.join(' '));
-                lineWords = [w];
-            }
-        }
-        if (lineWords.length) {
-            lines.push(lineWords.join(' '));
-        }
-    }
-    return lines;
 }
 
 function svgDashedVline(x: number, y0: number, y1: number, ppm: number): string {
@@ -280,13 +251,11 @@ function pageCoordMap(
     tileW: number,
     tileH: number,
     paperHMm: number,
-    bannerBottomPx: number | null,
-    originTopReservePx: number,
+    /** Bottom of the origin banner (px); only read on the origin page. */
+    bannerBottomPx: number,
     ppm: number,
 ): [number, number] {
     const ph = paperHMm - 2 * MM_MARGIN_SHEET;
-    const phOriginPattern =
-        ph - ORIGIN_PAGE_EXTRA_MM - (tiling.npy > 1 ? MM_JOIN_STRIP : 0) - ORIGIN_CORNER_MARKER_PAD_MM;
 
     const leftX = marginPx + joinPx;
     if (spec.isOriginPage) {
@@ -296,28 +265,20 @@ function pageCoordMap(
         const innerRightExcl = pagePxW - marginPx - joinPx;
         const innerW = innerRightExcl - innerLeft;
 
-        if (bannerBottomPx != null) {
-            const slotTop = bannerBottomPx;
-            const slotBottom = pagePxH - marginPx - joinPy;
-            const availH = slotBottom - slotTop;
-            let y0 = tileH >= availH ? slotTop : slotTop + Math.floor((availH - tileH) / 2);
-            const minX0 = innerLeft + g + tri;
-            const maxX0 = innerRightExcl - tileW;
-            let x0: number;
-            if (maxX0 >= minX0) {
-                const centerX0 = innerLeft + Math.floor((innerW - tileW) / 2);
-                x0 = Math.min(Math.max(centerX0, minX0), maxX0);
-            } else {
-                x0 = leftX + g;
-            }
-            return [x0, y0];
+        const slotTop = bannerBottomPx;
+        const slotBottom = pagePxH - marginPx - joinPy;
+        const availH = slotBottom - slotTop;
+        const y0 = tileH >= availH ? slotTop : slotTop + Math.floor((availH - tileH) / 2);
+        const minX0 = innerLeft + g + tri;
+        const maxX0 = innerRightExcl - tileW;
+        let x0: number;
+        if (maxX0 >= minX0) {
+            const centerX0 = innerLeft + Math.floor((innerW - tileW) / 2);
+            x0 = Math.min(Math.max(centerX0, minX0), maxX0);
+        } else {
+            x0 = leftX + g;
         }
-
-        const availH = Math.floor(phOriginPattern * ppm);
-        const needH = tileH + g;
-        const yTop = marginPx + originTopReservePx;
-        const y = needH >= availH ? yTop : yTop + Math.floor((availH - needH) / 2);
-        return [leftX + g, y + g];
+        return [x0, y0];
     }
 
     const innerLeft = marginPx + joinPx;
@@ -463,13 +424,7 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
 
     const fullWPx = Math.max(1, layoutIntPx(squaresX * squareLengthMm * ppm));
     const fullHPx = Math.max(1, layoutIntPx(squaresY * squareLengthMm * ppm));
-    const boardInner = perfSync(`renderCharucoBoardSvgFragment (${fullWPx}×${fullHPx}px)`, () =>
-        renderCharucoBoardSvgFragment(fullWPx, fullHPx, geom),
-    );
-    perfNote(
-        'Full board embedded per sheet',
-        `${(boardInner.length / 1e6).toFixed(2)} MB SVG substring × ${pages.length} pages ≈ ${((boardInner.length * pages.length) / 1e6).toFixed(2)} MB total duplication`,
-    );
+    perfNote('Board per sheet', `only each sheet's own squares (${fullWPx}×${fullHPx}px board, ${pages.length} sheets)`);
     abortIfNeeded();
     await yieldStep();
 
@@ -480,17 +435,92 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
     const marginPx = layoutIntPx(MM_MARGIN_SHEET * ppm);
     const joinPx = tiling.npx > 1 ? Math.round(MM_JOIN_STRIP * ppm) : 0;
     const joinPy = tiling.npy > 1 ? Math.round(MM_JOIN_STRIP * ppm) : 0;
-    const totalPages = pages.length;
-    const originTopReservePx = layoutIntPx(ORIGIN_PAGE_EXTRA_MM * ppm);
+    const totalPages = params.totalPages ?? pages.length;
+    // Generated heights are whole px at PIXELS_PER_MM; round so float mm never loses a px.
+    const originTopReservePx = Math.round(originBannerReserveMm(paperWMm) * ppm);
     const bScale = ORIGIN_BANNER_VISUAL_SCALE;
     const bodyFontPx = Math.round(26 * (ppm / 12) * bScale);
-    const titleFontPx = Math.round(24 * (ppm / 12) * bScale);
-    const bodyLineLead = bodyFontPx + Math.max(4, Math.round(0.52 * ppm * bScale));
     const joinFontPx = bodyFontPx;
-    const qrSizePx = Math.max(32, Math.round(QR_SIZE_MM * ppm));
 
     const skellyW = logoSvgInner ? logoWidthPx : 0;
     const skellyH = logoSvgInner ? logoHeightPx : 0;
+
+    /**
+     * Origin banner (logo, instructions, chart info, QR) at a given type scale. Returns `null` when the
+     * text columns do not fit side by side at that scale.
+     */
+    const buildOriginBanner = (
+        typeScale: number,
+    ): {parts: string[]; bottom: number; obstacle: [number, number, number, number]} | null => {
+        const b = layoutOriginBanner({
+            paperWMm,
+            typeScale,
+            version: APP_VERSION_DISPLAY,
+            squareLengthMm,
+            squaresX,
+            squaresY,
+            logoWidthPx: skellyW,
+            logoHeightPx: skellyH,
+            ppm,
+        });
+        if (!b) {
+            return null;
+        }
+        const titleFont = `bold ${b.titleFontPx}px ${FONT}`;
+        const bodyFont = `${b.bodyFontPx}px ${FONT}`;
+        const parts: string[] = [
+            svgCharucoBoardInfoBlock(
+                b.boardInfoRight,
+                b.bannerTextTop,
+                b.boardTitle,
+                b.titleFontPx,
+                b.boardInfoLines,
+                b.bodyFontPx,
+                b.bodyLineLead,
+                b.vGap,
+            ),
+        ];
+        if (logoSvgInner && skellyW > 0) {
+            parts.push(
+                `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" x="${b.bannerLeft}" y="${b.bannerTitleTop}" width="${skellyW}" height="${skellyH}" viewBox="0 0 ${SKELLY_LOGO_VIEWBOX_W} ${SKELLY_LOGO_VIEWBOX_H}" preserveAspectRatio="xMidYMin meet" overflow="hidden">${logoSvgInner}</svg>`,
+            );
+        }
+        parts.push(
+            svgTextBlock([pdfLabels.originInstructionsTitle], b.instrLeft, b.bannerTextTop, b.bodyLineLead, 'start', titleFont, true),
+            svgTextBlock(b.instLines, b.instrLeft, b.instBodyY, b.bodyLineLead, 'start', bodyFont),
+            `<svg x="${b.qrX}" y="${b.bannerTitleTop}" width="${b.qrSizePx}" height="${b.qrSizePx}" overflow="hidden">${qrSvgFragment}</svg>`,
+        );
+        const padB = Math.max(2, Math.floor(ppm / 4));
+        return {
+            parts,
+            bottom: b.bottom,
+            obstacle: [b.bannerLeft - padB, b.bannerTitleTop - padB, b.qrX + b.qrSizePx + padB, b.bottom + padB],
+        };
+    };
+
+    // Tiling reserved exactly the banner's height (`originBannerStrip.generated.ts`, laid out by the same
+    // `layoutOriginBanner`), so the full-size banner fits. Stepping the type down only happens if that
+    // file is stale; `npm run check:banner` fails the build first.
+    let originBanner: ReturnType<typeof buildOriginBanner> = null;
+    if (pages.some((p) => p.isOriginPage)) {
+        const bannerMaxPx = marginPx + originTopReservePx;
+        for (let typeScale = bScale; typeScale >= bScale * ORIGIN_BANNER_MIN_TYPE_FRACTION - 1e-9; typeScale -= bScale * 0.05) {
+            const candidate = buildOriginBanner(typeScale);
+            if (candidate && candidate.bottom <= bannerMaxPx) {
+                originBanner = candidate;
+                break;
+            }
+        }
+        if (!originBanner) {
+            throw new Error('Origin banner does not fit the reserved strip on this paper size.');
+        }
+        // A stale table shows up as spare space or shrunk type; flag it while editing banner text.
+        if (typeof import.meta.env !== 'undefined' && import.meta.env.DEV && originBanner.bottom !== bannerMaxPx) {
+            console.warn(
+                `Origin banner is ${bannerMaxPx - originBanner.bottom} px off its reserved strip on a ${paperWMm} mm sheet; run \`npm run generate:banner\`.`,
+            );
+        }
+    }
 
     const pageSvgs: string[] = [];
     const pageLoopT0 = perfDev() ? performance.now() : 0;
@@ -510,124 +540,11 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
         let bannerBottomPx: number | null = null;
         const pageObstacles: [number, number, number, number][] = [];
 
-        if (spec.isOriginPage) {
-            const sidePad = Math.round(ORIGIN_BANNER_CONTENT_SIDE_MM * ppm);
-            const topPad = Math.round(ORIGIN_BANNER_CONTENT_TOP_MM * ppm);
-            const bannerLeft = marginPx + sidePad;
-            const bannerRightInner = pagePxW - marginPx - sidePad;
-            const qrY = marginPx + topPad;
-            /** Top edge of every banner column (logo, QR) — flush with inner sheet margin. */
-            const bannerTitleTop = qrY;
-            const bannerTextTop =
-                bannerTitleTop + Math.round(ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM * ppm);
-            const gapBoardQr = Math.round(ORIGIN_GAP_QR_TO_BOARD_INFO_MM * ppm);
-            const gapInstBoard = Math.round(ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM * ppm);
-            const gapSkellyInst = Math.round(ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM * ppm);
-
-            const qrX = bannerRightInner - qrSizePx;
-            const qrStackY = bannerTitleTop;
-            const instrLeft = bannerLeft + skellyW + (skellyW > 0 ? gapSkellyInst : 0);
-            const boardMetaTitleY = bannerTextTop;
-            const minInstColPx = Math.max(1, Math.round(12 * ppm));
-
-            const boardInfoRight = qrX - gapBoardQr;
-            const boardColMaxW = Math.max(
-                1,
-                boardInfoRight - instrLeft - gapInstBoard - minInstColPx,
-            );
-
-            const titleFont = `bold ${titleFontPx}px ${FONT}`;
-            const bodyFont = `${bodyFontPx}px ${FONT}`;
-            // The version line is right-anchored at `boardInfoRight`, so it grows left into
-            // the instructions column instead of toward the QR code.
-            const {titleLine: boardTitle, bodyBlock: boardInfoBody} = originChartInfoParts({
-                version: APP_VERSION_DISPLAY,
-                mm: squareLengthMm,
-                squaresX,
-                squaresY,
-            });
-            const boardInfoLines = wrapText(bodyFont, boardInfoBody, boardColMaxW);
-            const vGap = Math.max(4, Math.round(ppm * bScale));
-            let infoLeft = boardInfoRight;
-            const mctx = measureCtx();
-            mctx.font = titleFont;
-            infoLeft = Math.min(infoLeft, boardInfoRight - mctx.measureText(boardTitle).width);
-            mctx.font = bodyFont;
-            for (const line of boardInfoLines) {
-                const w = mctx.measureText(line).width;
-                infoLeft = Math.min(infoLeft, boardInfoRight - w);
-            }
-            const lineBoardBottom =
-                boardMetaTitleY + titleFontPx + vGap + boardInfoLines.length * bodyLineLead;
-            parts.push(
-                svgCharucoBoardInfoBlock(
-                    boardInfoRight,
-                    boardMetaTitleY,
-                    boardTitle,
-                    titleFontPx,
-                    boardInfoLines,
-                    bodyFontPx,
-                    bodyLineLead,
-                    vGap,
-                ),
-            );
-
-            const instructionAllowRight = infoLeft - gapInstBoard;
-            if (instructionAllowRight - instrLeft < minInstColPx) {
-                throw new Error(
-                    'Origin banner layout: insufficient horizontal space for logo, instructions, ChArUco info, and QR on this paper size.',
-                );
-            }
-
-            if (logoSvgInner && skellyW > 0) {
-                parts.push(
-                    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" x="${bannerLeft}" y="${bannerTitleTop}" width="${skellyW}" height="${skellyH}" viewBox="0 0 ${SKELLY_LOGO_VIEWBOX_W} ${SKELLY_LOGO_VIEWBOX_H}" preserveAspectRatio="xMidYMin meet" overflow="hidden">${logoSvgInner}</svg>`,
-                );
-            }
-
-            parts.push(
-                svgTextBlock(
-                    [pdfLabels.originInstructionsTitle],
-                    instrLeft,
-                    bannerTextTop,
-                    bodyLineLead,
-                    'start',
-                    titleFont,
-                    true,
-                ),
-            );
-            const bodyY = bannerTextTop + titleFontPx + vGap;
-            const colW = instructionAllowRight - instrLeft;
-            const instLines = wrapText(bodyFont, pdfLabels.originInstructionsBody, colW);
-            parts.push(svgTextBlock(instLines, instrLeft, bodyY, bodyLineLead, 'start', bodyFont));
-            const instBottom = bodyY + instLines.length * bodyLineLead;
-
-            parts.push(
-                `<svg x="${qrX}" y="${qrStackY}" width="${qrSizePx}" height="${qrSizePx}" overflow="hidden">${qrSvgFragment}</svg>`,
-            );
-
-            const qrBottom = qrStackY + qrSizePx;
-            const skellyBottomExtra = skellyW > 0 ? bannerTitleTop + skellyH : bannerTitleTop;
-            const bannerBottom =
-                Math.max(lineBoardBottom, instBottom, qrBottom, skellyBottomExtra) +
-                Math.round(MM_ORIGIN_BANNER_BELOW_GAP_MM * ppm);
-            bannerBottomPx = bannerBottom;
-            const bannerMaxPx = marginPx + originTopReservePx + Math.max(2, layoutIntPx(2 * ppm));
-            if (bannerBottomPx > bannerMaxPx) {
-                throw new Error(
-                    'Origin-page top banner taller than reserved strip; increase ORIGIN_PAGE_EXTRA_MM.',
-                );
-            }
-            const padB = Math.max(2, Math.floor(ppm / 4));
-            const obstacleRight = qrX + qrSizePx + padB;
-            pageObstacles.push([
-                bannerLeft - padB,
-                bannerTitleTop - padB,
-                obstacleRight,
-                bannerBottom + padB,
-            ]);
+        if (spec.isOriginPage && originBanner) {
+            parts.push(...originBanner.parts);
+            bannerBottomPx = originBanner.bottom;
+            pageObstacles.push(originBanner.obstacle);
         }
-
         const [x0, y0] = pageCoordMap(
             spec,
             tiling,
@@ -639,15 +556,14 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
             tw,
             th,
             paperHMm,
-            spec.isOriginPage ? bannerBottomPx : null,
-            originTopReservePx,
+            bannerBottomPx ?? marginPx + originTopReservePx,
             ppm,
         );
 
         parts.push(
             `<svg x="${x0}" y="${y0}" width="${tw}" height="${th}" viewBox="${l} ${t} ${tw} ${th}" overflow="hidden">` +
                 `<rect x="${l}" y="${t}" width="${tw}" height="${th}" fill="#fff"/>` +
-                boardInner +
+                renderCharucoBoardSvgFragment(fullWPx, fullHPx, geom, spec) +
                 `</svg>`,
         );
 

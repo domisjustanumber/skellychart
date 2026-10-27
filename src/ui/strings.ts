@@ -51,14 +51,21 @@ export const S = {
     printSave: 'Print & Save',
     printCharts: 'Print',
     savePdfFiles: 'Save as PDF',
-    printScaleHint:
-        'Print at 1:1 or 100% scaling, and measure your black squares after printing',
+    printAdviceShopLead: 'For best results',
+    printAdviceShop:
+        ', ask your local print shop to print this onto foam core or other rigid material. Their printers are (generally!) calibrated to do 100% accurate scaling and a rigid board that doesn’t bend will give best results.',
+    printAdviceHomeBody:
+        'Home printers often are not accurate even at 1:1 / 100% scale settings, so measure the black box size after printing and write the actual size on the chart for you to remember later.',
+    printAdviceHomeEmphasis:
+        'If printing at home, use 1:1 or 100% scaling and measure the black square sizes after printing!',
     preparingPrint: 'Preparing print…',
     preparingPdfExport: 'Preparing PDF…',
     preparingPdfPage: 'Preparing PDF… ({{current}}/{{total}})',
     printInitFailed: 'Could not prepare printing in this browser. Try refreshing the page.',
     qrChartNewer:
         'This chart was made by a newer version (v={{theirs}}) than this generator (v={{ours}}). The sheet layout or labels may not match what FreeMoCap produced.',
+    qrSquareSnapped:
+        'This link’s square length ({{theirs}} mm) cannot print on {{paper}}, so the nearest size that can ({{ours}} mm) is shown. Check the square size on your printed chart.',
     qrOpenCvMismatch:
         'This link’s OpenCV line (cv2) does not match this generator (expected {{ours}}; got {{theirs}}). Board detection or geometry may differ.',
     previewTitle: 'Preview',

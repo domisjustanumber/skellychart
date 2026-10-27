@@ -40,9 +40,12 @@ jobs:
 
       - run: npm ci
 
+      # The version is printed in the origin banner, so resize the banner strip for the new one.
       - name: Bump patch version
         if: github.event_name == 'push'
-        run: npm version patch --no-git-tag-version
+        run: |
+          npm version patch --no-git-tag-version
+          npm run generate:banner
 
       - name: Build site
         run: npm run build
@@ -60,7 +63,7 @@ jobs:
           VERSION="$(node -p "require('./package.json').version")"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json package-lock.json
+          git add package.json package-lock.json src/print/originBannerStrip.generated.ts
           git commit -m "chore(release): v${VERSION} [skip ci]"
           git push origin HEAD:main
 

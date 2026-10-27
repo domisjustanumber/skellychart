@@ -7,8 +7,6 @@ import {
     BOARD_GRID_MIN,
     CHARUCO_SQUARE_MM_MAX,
     CHARUCO_SQUARE_MM_MIN,
-    PAGE_COUNT_MAX,
-    PAGE_COUNT_MIN,
     PAPER_OPTIONS,
     paperById,
     charucoPagePreviewBorderColor,
@@ -17,15 +15,14 @@ import {
     defaultPaperId,
     layoutSummaryText,
     maxSquareMmForGridAndPages,
-    nearestValidTargetPages,
     resolveDistancePrintPlan,
     shouldUseImperialWorkingDistanceUnits,
     snapSquareMm,
     squareLengthTierBandEdgeFractions,
     validTargetPageCountsForGrid,
+    workingDistanceMinSquareMm,
     workingDistanceTierFromSquareLengthMm,
 } from './print/charucoLayout.js';
-import {ensureTilingFeasibilityForPaperId} from './print/tilingFeasibilityTables.js';
 import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from './print/tiling.js';
 import {perfDev, perfLog} from './print/perfDebug.js';
 import {CHARUCO_MARKER_LENGTH_RATIO, getCharucoPrintSourceUrlFor} from './print/constants.js';
@@ -115,6 +112,12 @@ const state: AppState = {
 /** Set from chart QR link query params; shown once at load (not cleared by `syncUi`). */
 let qrVersionBannerMessage: string | null = null;
 
+/**
+ * Square length (mm) a chart link asked for that could not print on the current paper. A paper change
+ * re-fits from it (so switching to the chart's paper restores it) until the user moves a board control.
+ */
+let linkSquareMm: number | null = null;
+
 function byId(id: string): HTMLElement {
     const el = document.getElementById(id);
     if (!el) {
@@ -196,46 +199,60 @@ function applyAutoPreset(): void {
     }
 }
 
-function effectivePrintLayout() {
-    const pd = paperDims();
-    return computeEffectivePrintLayout(
-        state.squaresX,
-        state.squaresY,
-        state.squareMm,
-        pd.wMm,
-        pd.hMm,
-        state.autoGrid,
-        autoPlan().targetPages,
-    );
-}
-
+/**
+ * The one printed layout every output reads (sliders, summary, preview, print, PDF, QR): the board is
+ * exactly squaresX×squaresY as set on the sliders, never transposed.
+ */
 function effectiveTiling() {
-    return effectivePrintLayout()?.tiling ?? null;
-}
-
-/** Grid dimensions passed to {@link buildPageSpecs} / {@link renderCharucoPrintSvg} when the pattern is transposed for tiling. */
-function printSquareDims(patternRotated90: boolean): {squaresX: number; squaresY: number} {
-    return patternRotated90
-        ? {squaresX: state.squaresY, squaresY: state.squaresX}
-        : {squaresX: state.squaresX, squaresY: state.squaresY};
+    const pd = paperDims();
+    return computeEffectivePrintLayout(state.squaresX, state.squaresY, state.squareMm, pd.wMm, pd.hMm);
 }
 
 function pagesSliderDisplay(tiling: ReturnType<typeof effectiveTiling>): number {
-    return state.autoGrid ? autoPlan().targetPages : tiling?.pageCount ?? 1;
+    return tiling?.pageCount ?? 1;
 }
 
-function syncDistanceFromSquareIfManual(): void {
-    if (state.autoGrid) {
-        return;
-    }
-    const tier = workingDistanceTierFromSquareLengthMm(state.squareMm);
-    if ((PRESET_IDS as readonly string[]).includes(tier)) {
-        state.distanceId = tier;
-    }
+/** Page counts the Pages slider steps through for the current grid, paper and working distance. */
+function pageCountTargets(): number[] {
+    const pd = paperDims();
+    return validTargetPageCountsForGrid(state.squaresX, state.squaresY, pd.wMm, pd.hMm, distanceMinSquareMm());
 }
 
-function isDarkMode(): boolean {
-    return document.documentElement.dataset.theme === 'dark';
+/** Index of the entry in ascending `values` nearest to `target` (0 when empty). */
+function nearestIndex(values: readonly number[], target: number): number {
+    let best = 0;
+    values.forEach((v, i) => {
+        if (Math.abs(v - target) < Math.abs(values[best]! - target)) {
+            best = i;
+        }
+    });
+    return best;
+}
+
+/**
+ * Square length is the distance slider: the distance drop-down only presets it, so when the square moves
+ * into another band the drop-down follows instead of blocking it.
+ */
+function setSquareFollowingBand(squareMm: number): void {
+    const bandBefore = workingDistanceTierFromSquareLengthMm(state.squareMm);
+    const bandAfter = workingDistanceTierFromSquareLengthMm(squareMm);
+    if (bandAfter !== bandBefore) {
+        state.distanceId = bandAfter;
+    }
+    state.squareMm = squareMm;
+}
+
+/** Smallest square length the selected working distance allows; the Pages slider end-stops here and never changes distance. */
+function distanceMinSquareMm(): number {
+    return workingDistanceMinSquareMm(state.distanceId);
+}
+
+/**
+ * X / Y keep the square length (so they never change the distance); the page count follows. Every grid
+ * prints every square length up to the paper's limit, so there is nothing to snap or end-stop here.
+ */
+function setGridSize(axis: 'squaresX' | 'squaresY', requested: number): void {
+    state[axis] = clampInt(requested, BOARD_GRID_MIN, BOARD_GRID_MAX);
 }
 
 function syncThemeToggle(): void {
@@ -343,19 +360,25 @@ function setIntroElement(el: HTMLElement): void {
     el.replaceChildren(prefix, a, suffix);
 }
 
-/** Grid dimensions encoded in QR links (printed grid may swap W×H when the pattern is rotated). */
-function qrChartSquareDims(): {squaresX: number; squaresY: number} {
-    const layout = effectivePrintLayout();
-    return layout
-        ? printSquareDims(layout.patternRotated90)
-        : {squaresX: state.squaresX, squaresY: state.squaresY};
+function setPrintAdviceElement(el: HTMLElement): void {
+    const shop = document.createElement('p');
+    const shopLead = document.createElement('strong');
+    shopLead.textContent = S.printAdviceShopLead;
+    shop.append(shopLead, document.createTextNode(S.printAdviceShop));
+    const home = document.createElement('p');
+    home.textContent = S.printAdviceHomeBody;
+    const homeRule = document.createElement('p');
+    const emphasis = document.createElement('strong');
+    emphasis.textContent = S.printAdviceHomeEmphasis;
+    homeRule.appendChild(emphasis);
+    el.replaceChildren(shop, home, homeRule);
 }
 
 /** Keeps {@link window.location} query `v,w,h,s,cv2` aligned with QR / exported charts. */
 function syncAddressBarChartQuery(): void {
-    const {squaresX, squaresY} = qrChartSquareDims();
+    const {squaresX, squaresY} = state;
     const u = new URL(window.location.href);
-    mergeCharucoQrParamsInto(u.searchParams, squaresX, squaresY, state.squareMm);
+    mergeCharucoQrParamsInto(u.searchParams, squaresX, squaresY, state.squareMm, state.paperId);
     const next = `${u.pathname}${u.search}${u.hash}`;
     const cur = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (next === cur) {
@@ -458,7 +481,7 @@ function syncDevQrLinkTargetUi(): void {
     for (const input of inputs) {
         input.checked = input.value === target;
     }
-    const {squaresX, squaresY} = qrChartSquareDims();
+    const {squaresX, squaresY} = state;
     for (const link of links) {
         const linkTarget = link.dataset.qrTarget === 'local' ? 'local' : 'production';
         const url = buildCharucoDocumentationUrl(
@@ -466,6 +489,7 @@ function syncDevQrLinkTargetUi(): void {
             squaresX,
             squaresY,
             state.squareMm,
+            state.paperId,
         );
         link.href = url;
         link.textContent = url;
@@ -482,9 +506,7 @@ function syncUi(options: SyncUiOptions = {}): void {
     state.distanceId = normalizeWorkingDistanceId(state.distanceId);
     applyAutoPreset();
     const imperial = shouldUseImperialWorkingDistanceUnits();
-    const pd = paperDims();
-    const layout = effectivePrintLayout();
-    const tiling = layout?.tiling ?? null;
+    const tiling = effectiveTiling();
 
     if (!lite) {
         byId('pageTitle').textContent = S.title;
@@ -505,7 +527,7 @@ function syncUi(options: SyncUiOptions = {}): void {
         if (!pdfExportInProgress) {
             (byId('btnSavePdf') as HTMLButtonElement).textContent = S.savePdfFiles;
         }
-        byId('printScaleHint').textContent = S.printScaleHint;
+        setPrintAdviceElement(byId('printAdvice'));
     }
 
     const frac = squareLengthTierBandEdgeFractions();
@@ -540,13 +562,17 @@ function syncUi(options: SyncUiOptions = {}): void {
     sqmm.step = '1';
     sqmm.value = String(state.squareMm);
 
+    // The Pages slider steps through the page counts this grid can print at the working distance,
+    // up to one square per sheet; its value is an index into that list, not a page count.
     const pages = byId('pages') as HTMLInputElement;
-    pages.min = String(PAGE_COUNT_MIN);
-    pages.max = String(PAGE_COUNT_MAX);
+    const pageTargets = pageCountTargets();
+    const pageCount = pagesSliderDisplay(tiling);
+    pages.min = '0';
+    pages.max = String(Math.max(0, pageTargets.length - 1));
     pages.step = '1';
-    pages.value = String(Math.round(pagesSliderDisplay(tiling)));
-    const manualTargets = validTargetPageCountsForGrid(state.squaresX, state.squaresY, pd.wMm, pd.hMm);
-    pages.disabled = !state.autoGrid && manualTargets.length === 0;
+    pages.value = String(nearestIndex(pageTargets, pageCount));
+    pages.setAttribute('aria-valuetext', String(pageCount));
+    pages.disabled = pageTargets.length <= 1;
 
     const sx = byId('sx') as HTMLInputElement;
     const sy = byId('sy') as HTMLInputElement;
@@ -592,12 +618,10 @@ function syncUi(options: SyncUiOptions = {}): void {
     }
     paperSel.value = state.paperId;
 
-    // Describe the printed grid so the squares agree with the sheet grid and the full-chart preview.
-    const printed = layout ? printSquareDims(layout.patternRotated90) : state;
     const summary = layoutSummaryText(
         tiling,
-        printed.squaresX,
-        printed.squaresY,
+        state.squaresX,
+        state.squaresY,
         state.squareMm,
         sheetCountPhrase,
         (cols, rows) => interpolate('; {{cols}}×{{rows}} sheet grid', {cols, rows}),
@@ -705,9 +729,25 @@ async function awaitPreviewImagesDecodedAndPaint(boardImg: HTMLImageElement, thu
     }
 }
 
+/** Intrinsic long edge of the full-chart preview image; large enough for a 2× display at the preview size. */
+const PREVIEW_BOARD_LONG_EDGE_PX = 1200;
+
 const SHEET_NUMBER_PROBE_PX = 100;
-/** Breathing room between a number's glyph box and the inside edge of its block. */
+/** Minimum breathing room between a number's painted ink and the inside edge of its block. */
 const SHEET_NUMBER_CLEARANCE_PX = 5;
+/**
+ * Largest share of a block's width / height a number's ink (including its outline) may cover, so a
+ * block that is a single square still leaves most of its ArUco marker visible around the number.
+ */
+const SHEET_NUMBER_MAX_BLOCK_FRACTION = 0.4;
+/** Smallest shared number size; blocks too small for it are sized on their own instead of shrinking every number. */
+const SHEET_NUMBER_MIN_LEGIBLE_PX = 11;
+/** Below this a block's number is hidden visually (the block keeps its aria-label). */
+const SHEET_NUMBER_MIN_VISIBLE_PX = 8;
+/** Must match `-webkit-text-stroke` on `.sheet-rect-num`: half lies outside the glyph on each side. */
+const SHEET_NUMBER_STROKE_EM = 0.18;
+
+let sheetNumberMeasureCtx: CanvasRenderingContext2D | null = null;
 
 function clearSheetNumberFit(): void {
     sheetNumberResizeObserver?.disconnect();
@@ -718,43 +758,76 @@ function clearSheetNumberFit(): void {
     }
     const overlays = document.getElementById('sheetOverlays');
     overlays?.style.removeProperty('--sheet-number-font-px');
+    overlays?.removeAttribute('data-fitted');
+}
+
+function measureSheetNumberText(ctx: CanvasRenderingContext2D, badge: HTMLElement, text: string): TextMetrics {
+    const cs = getComputedStyle(badge);
+    ctx.font = `${cs.fontWeight} ${SHEET_NUMBER_PROBE_PX}px ${cs.fontFamily}`;
+    return ctx.measureText(text);
+}
+
+/** Painted size of `text`, in em: glyph ink box plus the outer half of the outline on each side. */
+function sheetNumberInkEm(badge: HTMLElement, text: string): {w: number; h: number} {
+    sheetNumberMeasureCtx ??= document.createElement('canvas').getContext('2d');
+    const m = sheetNumberMeasureCtx ? measureSheetNumberText(sheetNumberMeasureCtx, badge, text) : null;
+    const inkW = m ? m.actualBoundingBoxLeft + m.actualBoundingBoxRight : 0;
+    const inkH = m ? m.actualBoundingBoxAscent + m.actualBoundingBoxDescent : 0;
+    if (!(inkW > 0) || !(inkH > 0)) {
+        // Conservative bold-digit metrics if the canvas cannot measure ink.
+        return {w: 0.6 * text.length + SHEET_NUMBER_STROKE_EM, h: 0.75 + SHEET_NUMBER_STROKE_EM};
+    }
+    return {
+        w: inkW / SHEET_NUMBER_PROBE_PX + SHEET_NUMBER_STROKE_EM,
+        h: inkH / SHEET_NUMBER_PROBE_PX + SHEET_NUMBER_STROKE_EM,
+    };
 }
 
 /**
- * Finds one font size that fits the widest page number inside every page block. Measuring at a
- * large probe size (rather than assuming glyph metrics) keeps 1-, 2-, and 3-digit numbers safe.
+ * Sizes the page numbers from their painted ink so each covers at most
+ * {@link SHEET_NUMBER_MAX_BLOCK_FRACTION} of its block. Numbers share one size taken from the blocks
+ * that can hold a legible number; thinner blocks (e.g. a one-square remainder strip) get their own
+ * smaller size, or no visible number, rather than shrinking every other sheet's number.
  */
 function fitSheetNumbersToBlocks(overlays: HTMLElement): void {
     const blocks = Array.from(overlays.querySelectorAll<HTMLElement>('.sheet-rect'));
-    const badges = blocks
-        .map((block) => block.querySelector<HTMLElement>('.sheet-rect-num'))
-        .filter((badge): badge is HTMLElement => badge !== null);
-    if (blocks.length === 0 || badges.length !== blocks.length) {
+    const badges = blocks.map((block) => block.querySelector<HTMLElement>('.sheet-rect-num'));
+    if (blocks.length === 0 || badges.some((badge) => badge === null)) {
         return;
     }
 
-    // Probe large, then use the widest/tallest number so the shared size fits every block.
-    overlays.style.setProperty('--sheet-number-font-px', `${SHEET_NUMBER_PROBE_PX}px`);
-    let widestPx = 0;
-    let tallestPx = 0;
-    for (const badge of badges) {
-        const rect = badge.getBoundingClientRect();
-        widestPx = Math.max(widestPx, rect.width);
-        tallestPx = Math.max(tallestPx, rect.height);
-    }
-    if (widestPx <= 0 || tallestPx <= 0) {
-        return;
+    const fits: number[] = [];
+    for (let i = 0; i < blocks.length; i++) {
+        const block = blocks[i]!;
+        const ink = sheetNumberInkEm(badges[i]!, badges[i]!.textContent ?? '');
+        const w = block.clientWidth;
+        const h = block.clientHeight;
+        const availableW = Math.max(0, Math.min(w * SHEET_NUMBER_MAX_BLOCK_FRACTION, w - SHEET_NUMBER_CLEARANCE_PX));
+        const availableH = Math.max(0, Math.min(h * SHEET_NUMBER_MAX_BLOCK_FRACTION, h - SHEET_NUMBER_CLEARANCE_PX));
+        // Round down so subpixel rounding can only make the number smaller, never cross the block edge.
+        fits.push(Math.floor(Math.min(availableW / ink.w, availableH / ink.h) * 100) / 100);
     }
 
-    let scale = Number.POSITIVE_INFINITY;
-    for (const block of blocks) {
-        const availableW = Math.max(0, block.clientWidth - SHEET_NUMBER_CLEARANCE_PX);
-        const availableH = Math.max(0, block.clientHeight - SHEET_NUMBER_CLEARANCE_PX);
-        scale = Math.min(scale, availableW / widestPx, availableH / tallestPx);
+    // Prefer sharing a legible size; if no block can hold one (e.g. many sheets on a phone), still share
+    // one size across the blocks that can show a number, so the numbers stay uniform.
+    const legible = fits.filter((f) => f >= SHEET_NUMBER_MIN_LEGIBLE_PX);
+    const visible = fits.filter((f) => f >= SHEET_NUMBER_MIN_VISIBLE_PX);
+    const pool = legible.length > 0 ? legible : visible;
+    const shared = pool.length > 0 ? Math.min(...pool) : null;
+    if (shared !== null) {
+        overlays.style.setProperty('--sheet-number-font-px', `${shared}px`);
     }
-    // Round down so subpixel rounding can only make the number smaller, never cross the block edge.
-    const fontPx = Math.floor(SHEET_NUMBER_PROBE_PX * scale * 100) / 100;
-    overlays.style.setProperty('--sheet-number-font-px', `${fontPx}px`);
+    blocks.forEach((block, i) => {
+        const fit = fits[i]!;
+        const own = shared !== null && fit >= shared ? null : fit;
+        if (own === null) {
+            block.style.removeProperty('--sheet-number-font-px');
+        } else {
+            block.style.setProperty('--sheet-number-font-px', `${own}px`);
+        }
+        badges[i]!.classList.toggle('sheet-rect-num--hidden', own !== null && own < SHEET_NUMBER_MIN_VISIBLE_PX);
+    });
+    overlays.setAttribute('data-fitted', '');
 }
 
 function watchSheetNumberFit(boardImg: HTMLImageElement, overlays: HTMLElement): void {
@@ -793,8 +866,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
         byId('panelPreview').setAttribute('aria-busy', 'false');
     };
 
-    const layout = effectivePrintLayout();
-    const tiling = layout?.tiling ?? null;
+    const tiling = effectiveTiling();
     const statusEl = byId('previewStatus') as HTMLParagraphElement;
     const panelPreview = byId('panelPreview');
     const fullBlock = byId('fullPreviewBlock');
@@ -803,7 +875,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     const thumbs = byId('thumbGrid');
     const trunc = byId('previewTruncated');
 
-    if (!layout || !tiling || tiling.pageCount < 1) {
+    if (!tiling || tiling.pageCount < 1) {
         statusEl.textContent = '';
         panelPreview.setAttribute('aria-busy', 'false');
         fullBlock.classList.add('hidden');
@@ -825,25 +897,23 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     try {
         const previewWallStart = perfDev() ? performance.now() : 0;
 
-        // Preview the board that is actually printed: when the layout transposes the grid, print / PDF /
-        // thumbnails render squaresY×squaresX, so the full chart and its sheet blocks must use the same grid.
-        const {squaresX: px, squaresY: py} = printSquareDims(layout.patternRotated90);
+        const {squaresX: px, squaresY: py} = state;
         const markerMm = state.squareMm * CHARUCO_MARKER_LENGTH_RATIO;
-        const maxEdge = 560;
+        // Fixed long edge (not 1px/mm) so CSS only ever scales the board down to the shared preview height.
+        const longEdge = PREVIEW_BOARD_LONG_EDGE_PX;
         const wMm = px * state.squareMm;
         const hMm = py * state.squareMm;
         let cW: number;
         let cH: number;
         if (wMm >= hMm) {
-            cW = Math.min(maxEdge, Math.max(32, Math.round(wMm)));
+            cW = longEdge;
             cH = Math.max(1, Math.round(cW * (hMm / wMm)));
         } else {
-            cH = Math.min(maxEdge, Math.max(32, Math.round(hMm)));
+            cH = longEdge;
             cW = Math.max(1, Math.round(cH * (wMm / hMm)));
         }
 
         const rects = computeCharucoPagePreviewRects(px, py, tiling, cW, cH);
-        const dark = isDarkMode();
 
         await yieldToMain();
         if (signal.aborted) {
@@ -871,7 +941,9 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
         const pd = paperDims();
         const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
 
-        const pages = buildPageSpecs(px, py, tiling).pages;
+        const allPages = buildPageSpecs(px, py, tiling).pages;
+        // Only the thumbnails that are shown are rendered; footers still count every sheet.
+        const pages = allPages.slice(0, MAX_PREVIEW_PAGES);
 
         let printResult: Awaited<ReturnType<typeof renderCharucoPrintSvg>>;
         try {
@@ -885,6 +957,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                 markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
                 tiling,
                 pages,
+                totalPages: allPages.length,
                 signal,
                 cooperativeYield: true,
             });
@@ -936,9 +1009,10 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                     d.style.top = `${r.top * 100}%`;
                     d.style.width = `${r.width * 100}%`;
                     d.style.height = `${r.height * 100}%`;
+                    // The board is black/white in every theme, so blocks always use the darker palette.
                     d.style.setProperty(
                         '--sheet-color',
-                        charucoPagePreviewBorderColor(r.sheetIndex, tiling.pageCount, dark),
+                        charucoPagePreviewBorderColor(r.sheetIndex, tiling.pageCount, false),
                     );
                     d.setAttribute('role', 'img');
                     d.setAttribute(
@@ -952,6 +1026,18 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                     d.appendChild(num);
                     overlays.appendChild(d);
                 }
+                // Fit as soon as the board has its size, not after every thumbnail decodes (numbers stay
+                // hidden until `data-fitted` is set, so they never flash at the fallback size).
+                void boardImg
+                    .decode()
+                    .catch(() => {})
+                    .then(() => {
+                        if (signal.aborted || runId !== previewGeneration) {
+                            return;
+                        }
+                        fitSheetNumbersToBlocks(overlays);
+                        watchSheetNumberFit(boardImg, overlays);
+                    });
             }
 
             trunc.classList.toggle('hidden', !truncated);
@@ -963,31 +1049,34 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
             }
             thumbs.innerHTML = '';
             const layoutN = tiling.pageCount;
+            // A single sheet is the whole chart, so it is shown at full-chart size without a page caption.
+            const singlePage = totalPages <= 1;
+            thumbs.classList.toggle('thumb-grid--single', singlePage);
             pageImages.forEach((src, i) => {
                 const wrap = document.createElement('div');
                 wrap.className = 'thumb-wrap';
-                const cap = document.createElement('p');
-                cap.className = 'cap';
-                cap.textContent = interpolate(S.pageLabel, {n: i + 1});
+                if (!singlePage) {
+                    const cap = document.createElement('p');
+                    cap.className = 'cap';
+                    cap.textContent = interpolate(S.pageLabel, {n: i + 1});
+                    wrap.appendChild(cap);
+                }
                 const img = document.createElement('img');
                 img.className = 'thumb-img';
                 img.src = src;
                 img.alt = interpolate(S.pageLabel, {n: i + 1});
                 if (layoutN > 1 && totalPages > 1) {
-                    img.style.border = `2px solid ${charucoPagePreviewBorderColor(i + 1, layoutN, dark)}`;
+                    // Same palette as the full-chart blocks so each thumbnail matches its block's colour.
+                    img.style.border = `2px solid ${charucoPagePreviewBorderColor(i + 1, layoutN, false)}`;
                 } else {
                     img.style.border = '1px solid var(--border)';
                 }
-                wrap.append(cap, img);
+                wrap.appendChild(img);
                 thumbs.appendChild(wrap);
             });
             await awaitPreviewImagesDecodedAndPaint(boardImg, thumbs);
             if (signal.aborted || runId !== previewGeneration) {
                 return;
-            }
-            if (rects) {
-                fitSheetNumbersToBlocks(overlays);
-                watchSheetNumberFit(boardImg, overlays);
             }
             if (perfDev()) {
                 perfLog('runPreview JS through paint proxy', performance.now() - previewWallStart, '');
@@ -1045,9 +1134,8 @@ async function savePdfFile(): Promise<void> {
         return;
     }
     showErr(null);
-    const layout = effectivePrintLayout();
-    const tiling = layout?.tiling ?? null;
-    if (!tiling || !layout) {
+    const tiling = effectiveTiling();
+    if (!tiling) {
         showErr(S.layoutCannotFit);
         return;
     }
@@ -1067,9 +1155,8 @@ async function savePdfFile(): Promise<void> {
     const prefix = exportBasenamePrefix();
     const pd = paperById(paperId) ?? PAPER_OPTIONS[0]!;
     const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
-    const {squaresX: px, squaresY: py} = layout.patternRotated90
-        ? {squaresX: gridY, squaresY: gridX}
-        : {squaresX: gridX, squaresY: gridY};
+    const px = gridX;
+    const py = gridY;
     await yieldToMain();
 
     try {
@@ -1159,9 +1246,8 @@ function printHtmlDocumentInHiddenIframe(html: string): void {
 
 async function openPrintDialog(): Promise<void> {
     showErr(null);
-    const layout = effectivePrintLayout();
-    const tiling = layout?.tiling ?? null;
-    if (!tiling || !layout) {
+    const tiling = effectiveTiling();
+    if (!tiling) {
         showErr(S.layoutCannotFit);
         return;
     }
@@ -1174,7 +1260,7 @@ async function openPrintDialog(): Promise<void> {
 
     const pd = paperDims();
     const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
-    const {squaresX: px, squaresY: py} = printSquareDims(layout.patternRotated90);
+    const {squaresX: px, squaresY: py} = state;
     const pages = buildPageSpecs(px, py, tiling).pages;
     try {
         const {pages: svgs} = await renderCharucoPrintSvg({
@@ -1258,21 +1344,47 @@ function applyQrQueryFromLocation(): void {
         if (parsed.squaresY !== null) {
             state.squaresY = clampInt(parsed.squaresY, BOARD_GRID_MIN, BOARD_GRID_MAX);
         }
+        if (parsed.paperId !== null && paperById(parsed.paperId)) {
+            state.paperId = parsed.paperId;
+        }
         const pd = paperDims();
         if (parsed.squareLengthMm !== null) {
             state.squareMm = Math.round(parsed.squareLengthMm);
         }
-        state.squareMm = snapSquareMm(state.squareMm, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
-        syncDistanceFromSquareIfManual();
+        const linkedSquareMm = state.squareMm;
+        // A link is not a slider: pick the largest distance whose minimum this square length meets.
+        state.distanceId = workingDistanceTierFromSquareLengthMm(state.squareMm);
+        const snapped = snapSquareMm(state.squareMm, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
+        if (snapped !== null) {
+            state.squareMm = snapped;
+        }
+        linkSquareMm = state.squareMm !== linkedSquareMm ? linkedSquareMm : null;
     }
 
     qrVersionBannerMessage = warnings.length ? warnings.join(' ') : null;
 }
 
+/** The user took over the board: stop re-fitting to the link's square length and drop its notice. */
+function forgetLinkSquare(): void {
+    if (linkSquareMm !== null) {
+        linkSquareMm = null;
+        syncQrVersionBanner();
+    }
+}
+
 function syncQrVersionBanner(): void {
     const el = byId('qrVersionBanner');
-    if (qrVersionBannerMessage) {
-        el.textContent = qrVersionBannerMessage;
+    const snapNotice =
+        linkSquareMm === null
+            ? null
+            : interpolate(S.qrSquareSnapped, {
+                  theirs: linkSquareMm,
+                  ours: state.squareMm,
+                  paper: paperLabel(state.paperId),
+              });
+    const message = [qrVersionBannerMessage, snapNotice].filter((m) => m !== null).join(' ');
+    if (message) {
+        el.textContent = message;
         el.classList.remove('hidden');
     } else {
         el.classList.add('hidden');
@@ -1309,6 +1421,7 @@ function wireUi(): void {
         distanceArmClearForNextPrimaryDown = true;
         state.distanceId = normalizeWorkingDistanceId((e.target as HTMLSelectElement).value);
         state.autoGrid = true;
+        forgetLinkSquare();
         syncUi();
     });
 
@@ -1326,19 +1439,34 @@ function wireUi(): void {
 
     (byId('paper') as HTMLSelectElement).addEventListener('change', (e) => {
         state.paperId = (e.target as HTMLSelectElement).value;
-        state.autoGrid = true;
+        if (!state.autoGrid) {
+            // Keep the board the user set (or opened from a link); re-fit only the square length, from
+            // the link's own size while it is still pending, so the chart's paper restores it exactly.
+            const pd = paperDims();
+            const wanted = linkSquareMm ?? state.squareMm;
+            const snapped = snapSquareMm(wanted, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
+            if (snapped !== null) {
+                setSquareFollowingBand(snapped);
+            }
+            if (linkSquareMm !== null && state.squareMm === linkSquareMm) {
+                linkSquareMm = null;
+            }
+            syncQrVersionBanner();
+        }
         syncUi();
-        void ensureTilingFeasibilityForPaperId(state.paperId).then(() => syncUi({lite: true}));
     });
 
     const sqmmEl = byId('sqmm') as HTMLInputElement;
     wireRangeResponsiveUi(sqmmEl);
     sqmmEl.addEventListener('input', (e) => {
         state.autoGrid = false;
+        forgetLinkSquare();
         const raw = Number((e.target as HTMLInputElement).value);
         const pd = paperDims();
-        state.squareMm = snapSquareMm(raw, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
-        syncDistanceFromSquareIfManual();
+        const snapped = snapSquareMm(raw, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
+        if (snapped !== null) {
+            setSquareFollowingBand(snapped);
+        }
         scheduleSyncUi();
     });
 
@@ -1346,10 +1474,13 @@ function wireUi(): void {
     wireRangeResponsiveUi(pagesEl);
     pagesEl.addEventListener('input', (e) => {
         state.autoGrid = false;
-        const raw = Math.round(Number((e.target as HTMLInputElement).value));
+        forgetLinkSquare();
+        const targets = pageCountTargets();
+        const index = Math.round(Number((e.target as HTMLInputElement).value));
+        const n = targets[Math.max(0, Math.min(targets.length - 1, index))];
         const pd = paperDims();
-        const n = nearestValidTargetPages(raw, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
-        const sq = maxSquareMmForGridAndPages(state.squaresX, state.squaresY, pd.wMm, pd.hMm, n);
+        const sq =
+            n === undefined ? null : maxSquareMmForGridAndPages(state.squaresX, state.squaresY, pd.wMm, pd.hMm, n);
         if (sq !== null) {
             state.squareMm = sq;
         }
@@ -1360,7 +1491,8 @@ function wireUi(): void {
     wireRangeResponsiveUi(sxEl);
     sxEl.addEventListener('input', (e) => {
         state.autoGrid = false;
-        state.squaresX = clampInt(Number((e.target as HTMLInputElement).value), BOARD_GRID_MIN, BOARD_GRID_MAX);
+        forgetLinkSquare();
+        setGridSize('squaresX', Number((e.target as HTMLInputElement).value));
         scheduleSyncUi();
     });
 
@@ -1368,7 +1500,8 @@ function wireUi(): void {
     wireRangeResponsiveUi(syEl);
     syEl.addEventListener('input', (e) => {
         state.autoGrid = false;
-        state.squaresY = clampInt(Number((e.target as HTMLInputElement).value), BOARD_GRID_MIN, BOARD_GRID_MAX);
+        forgetLinkSquare();
+        setGridSize('squaresY', Number((e.target as HTMLInputElement).value));
         scheduleSyncUi();
     });
 
@@ -1396,7 +1529,6 @@ function boot(): void {
     applyQrQueryFromLocation();
     syncQrVersionBanner();
     syncUi();
-    void ensureTilingFeasibilityForPaperId(state.paperId).then(() => syncUi({lite: true}));
 }
 
 boot();

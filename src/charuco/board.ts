@@ -240,13 +240,18 @@ export function putGrayOnCanvas(canvas: HTMLCanvasElement, gray: Uint8Array): vo
     ctx.putImageData(new ImageData(rgba as Uint8ClampedArray<ArrayBuffer>, width, height), 0, 0);
 }
 
-function arucoMarkerSvgRects(id: number, sidePx: number, borderBits: number): string {
+/**
+ * One `<path>` holding every black cell of a marker. A single fill (rather than a `<rect>` per cell)
+ * keeps PDF viewers that anti-alias each fill separately from showing hairline seams between
+ * abutting cells. Every subpath winds the same way, so the nonzero fill is the exact union.
+ */
+function arucoMarkerSvgPath(id: number, sidePx: number, borderBits: number): string {
     const markerSize = ARUCO_MARKER_SIZE_4X4;
     const tiny = markerSize + 2 * borderBits;
     const byte0 = DICT_4X4_250_ROT0_BYTES[id * 2]!;
     const byte1 = DICT_4X4_250_ROT0_BYTES[id * 2 + 1]!;
     const bits = getBitsFromByteList(new Uint8Array([byte0, byte1]), markerSize);
-    const parts: string[] = [];
+    const d: string[] = [];
     for (let row = 0; row < tiny; row++) {
         const y0 = Math.round((row * sidePx) / tiny);
         const y1 = Math.round(((row + 1) * sidePx) / tiny);
@@ -265,18 +270,31 @@ function arucoMarkerSvgRects(id: number, sidePx: number, borderBits: number): st
                 black = bits[br * markerSize + bc]! === 0;
             }
             if (black && rw > 0 && rh > 0) {
-                parts.push(`<rect x="${x0}" y="${y0}" width="${rw}" height="${rh}" fill="#000"/>`);
+                d.push(`M${x0} ${y0}h${rw}v${rh}h-${rw}z`);
             }
         }
     }
-    return parts.join('');
+    return d.length > 0 ? `<path d="${d.join('')}" fill="#000"/>` : '';
 }
 
-/** Inner `<g>` for a ChArUco board in pixel coordinates (same layout as `renderCharucoBoardGray`). */
+/** Square-index range [gx0, gx1) × [gy0, gy1) of a board. */
+export interface CharucoSquareRange {
+    gx0: number;
+    gx1: number;
+    gy0: number;
+    gy1: number;
+}
+
+/**
+ * Inner `<g>` for a ChArUco board in pixel coordinates (same layout as `renderCharucoBoardGray`).
+ * With `squares`, only the checker squares and markers inside that square range are emitted (same
+ * positions), so a printed sheet that shows one crop does not carry the whole board.
+ */
 export function renderCharucoBoardSvgFragment(
     widthPx: number,
     heightPx: number,
     geom: CharucoGeometry,
+    squares?: CharucoSquareRange,
 ): string {
     const {squaresX: w, squaresY: h, squareLength, markerLength} = geom;
     const parts: string[] = ['<g fill="#000">'];
@@ -309,8 +327,12 @@ export function renderCharucoBoardSvgFragment(
     const zoneOffX = startX + arucoX0;
     const zoneOffY = startY + arucoY0;
 
-    for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
+    const gx0 = squares?.gx0 ?? 0;
+    const gx1 = squares?.gx1 ?? w;
+    const gy0 = squares?.gy0 ?? 0;
+    const gy1 = squares?.gy1 ?? h;
+    for (let y = gy0; y < gy1; y++) {
+        for (let x = gx0; x < gx1; x++) {
             if (y % 2 !== x % 2) {
                 continue;
             }
@@ -331,6 +353,12 @@ export function renderCharucoBoardSvgFragment(
     for (const m of markers) {
         const oc0 = m.cornersMm[0]!;
         const oc2 = m.cornersMm[2]!;
+        // Each marker sits inside one white square; skip markers outside the requested range.
+        const mx = Math.floor(oc0.x / squareLength);
+        const my = Math.floor(oc0.y / squareLength);
+        if (mx < gx0 || mx >= gx1 || my < gy0 || my >= gy1) {
+            continue;
+        }
         const p0 = {x: ((oc0.x - minX) / sizeX) * arucoW, y: ((oc0.y - minY) / sizeY) * arucoH};
         const p2 = {x: ((oc2.x - minX) / sizeX) * arucoW, y: ((oc2.y - minY) / sizeY) * arucoH};
         const dstW = Math.round(p2.x - p0.x);
@@ -342,7 +370,7 @@ export function renderCharucoBoardSvgFragment(
         const dx = zoneOffX + Math.round(p0.x);
         const dy = zoneOffY + Math.round(p0.y);
         parts.push(
-            `<g transform="translate(${dx} ${dy})" shape-rendering="crispEdges">${arucoMarkerSvgRects(m.id, side, 1)}</g>`,
+            `<g transform="translate(${dx} ${dy})" shape-rendering="crispEdges">${arucoMarkerSvgPath(m.id, side, 1)}</g>`,
         );
     }
     parts.push('</g>');

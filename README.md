@@ -17,11 +17,14 @@ npm run build
 
 Serve `dist/` with any static file host; Vite is configured with `base: './'` for relative asset URLs.
 
-## Regenerate codegen output
+## Build checks
 
-`npm run dev` / `npm run build` run **`npm run generate`** first, which emits only:
+`npm run build` runs two checks first:
 
-- `src/print/generated/` — tiling feasibility blobs (`generate:tiling-feasibility`)
+- **`npm run check:presets`** (`scripts/check-presets.ts`): every working-distance preset must print exactly its target page count, at the largest square length that does so, and at or above the distance's minimum square length. Layout feasibility itself is computed live in the browser (`src/print/feasibilityRules.ts`).
+- **`npm run check:banner`**: the committed origin-banner heights in `src/print/originBannerStrip.generated.ts` must match the banner layout. After changing banner text, type, gaps, QR or logo size, paper sizes, the square-length or grid ranges, or the version, run **`npm run generate:banner`** and commit the result (CI does this for its own version bump).
+
+## ArUco dictionary data
 
 The ArUco dictionary module **`src/skelly-charuco/dict4x4_250_rot0.ts`** is **checked in** and is **not** regenerated during `npm run build` (CI has no OpenCV). Refresh it on your machine with **`npm run generate:aruco-dict`** (runs `scripts/export_dict4x4_250_ts.py` via `scripts/run-export-aruco-dict.ts`) or the PowerShell/bash sync scripts below.
 

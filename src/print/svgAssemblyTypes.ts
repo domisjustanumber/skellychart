@@ -10,7 +10,10 @@ export interface PrintSvgParams {
     paperHMm: number;
     markerLengthRatio: number;
     tiling: TilingInfo;
+    /** Sheets to render; may be a leading subset of the layout (e.g. preview thumbnails). */
     pages: PageSpec[];
+    /** Sheets in the whole layout, for "Page N of M" footers; defaults to `pages.length`. */
+    totalPages?: number;
     documentationSourceUrl?: string;
     signal?: AbortSignal;
     /**

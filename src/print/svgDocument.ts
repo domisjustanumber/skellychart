@@ -1,7 +1,8 @@
 import freemocapLogoUrl from '../freemocapLogoUrl.js';
 import {getCharucoPrintSourceUrl, PIXELS_PER_MM, QR_SIZE_MM, SKELLY_TOP_HEIGHT_MM} from './constants.js';
 import {buildCharucoDocumentationUrl} from './charucoDocUrl.js';
-import {SKELLY_LOGO_NATURAL_W_OVER_H} from './originBannerEstimate.js';
+import {bannerLogoSizePx} from './originBannerLayout.js';
+import {SKELLY_LOGO_NATURAL_W_OVER_H} from './skellyLogo.js';
 import {generateQrSvgFragment} from './qrSvg.js';
 import {perfAsync} from './perfDebug.js';
 import {renderCharucoPrintSvgCore} from './svgAssemblyCore.js';
@@ -84,9 +85,8 @@ async function resolveLogoForPrint(ppm: number): Promise<{
     if (memoLogoSvgInner === undefined) {
         memoLogoSvgInner = logoInnerMarkupFromXml(xml);
     }
-    const nh = Math.max(1, Math.round(SKELLY_TOP_HEIGHT_MM * ppm));
-    const nw = Math.max(1, Math.round(SKELLY_LOGO_NATURAL_W_OVER_H * nh));
-    return {logoSvgInner: memoLogoSvgInner || null, widthPx: nw, heightPx: nh};
+    const {widthPx, heightPx} = bannerLogoSizePx(SKELLY_TOP_HEIGHT_MM, SKELLY_LOGO_NATURAL_W_OVER_H, ppm);
+    return {logoSvgInner: memoLogoSvgInner || null, widthPx, heightPx};
 }
 
 export async function renderCharucoPrintSvg(params: PrintSvgParams): Promise<PrintSvgResult> {
@@ -96,6 +96,7 @@ export async function renderCharucoPrintSvg(params: PrintSvgParams): Promise<Pri
         params.squaresX,
         params.squaresY,
         params.squareLengthMm,
+        params.paperId,
     );
     const qrSizePx = Math.max(32, Math.round(QR_SIZE_MM * ppm));
     const qrSvgFragment = await perfAsync('QR SVG fragment', () => generateQrSvgFragment(docUrl, qrSizePx));

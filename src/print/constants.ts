@@ -24,19 +24,18 @@ export const ORIGIN_BANNER_VISUAL_SCALE = QR_SIZE_MM / ORIGIN_BANNER_QR_BASELINE
  */
 export const ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM = 0.35;
 
-/**
- * Conservative slab (mm) when banner height cannot be measured (no canvas) on portrait-shaped sheets.
- * Rendered layout uses one top-aligned banner row on both orientations; this stays as a safe upper bound.
- * @see {@link ORIGIN_BANNER_STRIP_FALLBACK_NO_CANVAS_LANDSCAPE_MM} for landscape-shaped fallback.
- */
-export const ORIGIN_PAGE_EXTRA_MM = 77;
-/**
- * No-canvas fallback strip height (mm) for landscape-shaped sheets (tiling passes `portraitQrAboveCharucoInfo === false`).
- * Must stay plausible vs real SVG; feasibility uses canvas measurement when available.
- * Calibrated for US Letter landscape printable height (~205.9 mm): five rows at 34 mm need
- * strip + {@link ORIGIN_CORNER_MARKER_PAD_MM} ≤ ~35.9 mm → strip ≈ 32.9 mm.
- */
-export const ORIGIN_BANNER_STRIP_FALLBACK_NO_CANVAS_LANDSCAPE_MM = 32;
+/** Square length range (mm) of the Square length slider, and of the layouts it can choose. */
+export const CHARUCO_SQUARE_MM_MIN = 10;
+export const CHARUCO_SQUARE_MM_MAX = 225;
+
+/** Smallest banner type scale (fraction of normal) the renderer may step down to so the banner fits its reserve. */
+export const ORIGIN_BANNER_MIN_TYPE_FRACTION = 0.7;
+
+/** Key of the generated origin-banner heights (`originBannerStrip.ts`): sheet width (mm) as printed, to 0.1 mm. */
+export function sheetWidthKey(paperWMm: number): string {
+    return String(Math.round(paperWMm * 10) / 10);
+}
+
 /** Extra inset (mm) below {@link MM_MARGIN_SHEET} before banner content; 0 = flush to sheet margin. */
 export const ORIGIN_BANNER_CONTENT_TOP_MM = 0;
 /** Extra inset (mm) inside {@link MM_MARGIN_SHEET} on left/right before banner content; 0 = flush to sheet margin. */
@@ -56,7 +55,7 @@ export const PIXELS_PER_MM = 12;
  * version (`package.json`); bump both together when printed labels, layout, or QR
  * query semantics change. The origin banner prints the full app semver, not this.
  */
-export const CHARUCO_PRINT_LABEL_SPEC_VERSION = 1;
+export const CHARUCO_PRINT_LABEL_SPEC_VERSION = 2;
 
 function explicitCharucoPrintSourceUrl(): string | null {
     const v = import.meta.env.VITE_CHARUCO_PRINT_SOURCE_URL;

@@ -2,17 +2,9 @@
  * Print layout + preset rules matching freemocap `charucoPrintLayout.ts`
  * (tiling math is in `tiling.ts`; this module adds UI presets and snapping).
  */
-import {
-    computeTilingInfo,
-    computeTilingInfoMatchingPageCount,
-    type TilingInfo,
-} from './tiling.js';
-import {
-    resolveStaticFeasibilitySlot,
-    staticEnumerateValidSquareMm,
-    staticMaxSquareMmForPages,
-    staticValidTargetPageCounts,
-} from './tilingFeasibilityTables.js';
+import {buildPageSpecs, type TilingInfo} from './tiling.js';
+import {CHARUCO_SQUARE_MM_MAX, CHARUCO_SQUARE_MM_MIN} from './constants.js';
+import {gridFeasibility, printedLayout} from './feasibilityRules.js';
 import {charucoBoardPixelLayout, charucoCropXRange, charucoCropYRange} from '../charuco/board.js';
 
 export const PAPER_OPTIONS: {id: string; wMm: number; hMm: number}[] = [
@@ -184,8 +176,7 @@ export function resolveDistancePrintPlan(
     return {squaresX: 5, squaresY: 3, targetPages: 1};
 }
 
-export const CHARUCO_SQUARE_MM_MIN = 10;
-export const CHARUCO_SQUARE_MM_MAX = 200;
+export {CHARUCO_SQUARE_MM_MAX, CHARUCO_SQUARE_MM_MIN} from './constants.js';
 
 /**
  * Square lengths up to this (mm) map to the `close` preset (UI: “1 - 2m”); between this and
@@ -223,224 +214,75 @@ export function squareLengthTierBandEdgeFractions(): {closeNear: number; nearFar
 
 export const BOARD_GRID_MIN = 2;
 export const BOARD_GRID_MAX = 40;
-export const PAGE_COUNT_MIN = 1;
-export const PAGE_COUNT_MAX = 9;
 
-const SQ_MIN = CHARUCO_SQUARE_MM_MIN;
-const SQ_MAX = CHARUCO_SQUARE_MM_MAX;
-
-function squareSizeFitsTargetPageCountEitherOrientation(
-    squaresX: number,
-    squaresY: number,
-    squareMm: number,
-    paperWMm: number,
-    paperHMm: number,
-    targetPages: number,
-): boolean {
-    if (computeTilingInfoMatchingPageCount(squaresX, squaresY, squareMm, paperWMm, paperHMm, targetPages) !== null) {
-        return true;
+/**
+ * Smallest square length (mm) allowed at a working distance. Distance bands are minimums, not ranges:
+ * a large square is fine at any distance, but squares below the band are too small to detect from there.
+ */
+export function workingDistanceMinSquareMm(tier: WorkingDistanceTierId): number {
+    if (tier === 'far') {
+        return SQUARE_LENGTH_LT_4M_MAX_MM + 1;
     }
-    if (squaresX !== squaresY) {
-        return (
-            computeTilingInfoMatchingPageCount(squaresY, squaresX, squareMm, paperWMm, paperHMm, targetPages) !== null
-        );
+    if (tier === 'near') {
+        return SQUARE_LENGTH_LT_2M_MAX_MM + 1;
     }
-    return false;
+    return CHARUCO_SQUARE_MM_MIN;
 }
 
-function maxSquareMmForGridAndPagesUncached(
-    squaresX: number,
-    squaresY: number,
-    paperWMm: number,
-    paperHMm: number,
-    targetPages: number,
-): number | null {
-    for (let s = SQ_MAX; s >= SQ_MIN; s--) {
-        if (squareSizeFitsTargetPageCountEitherOrientation(squaresX, squaresY, s, paperWMm, paperHMm, targetPages)) {
-            return s;
-        }
-    }
-    return null;
-}
-
+/** Largest square length that prints on exactly `pages` sheets, or `null` if no square length does. */
 export function maxSquareMmForGridAndPages(
     squaresX: number,
     squaresY: number,
     paperWMm: number,
     paperHMm: number,
-    targetPages: number,
+    pages: number,
 ): number | null {
-    const slot = resolveStaticFeasibilitySlot(paperWMm, paperHMm, squaresX, squaresY);
-    if (slot !== undefined) {
-        return staticMaxSquareMmForPages(slot, targetPages);
-    }
-    return maxSquareMmForGridAndPagesUncached(squaresX, squaresY, paperWMm, paperHMm, targetPages);
+    return gridFeasibility(squaresX, squaresY, paperWMm, paperHMm).maxSquareMmByPageCount.get(pages) ?? null;
 }
 
-function validTargetPageCountsForGridUncached(
-    squaresX: number,
-    squaresY: number,
-    paperWMm: number,
-    paperHMm: number,
-): number[] {
-    const out: number[] = [];
-    for (let p = PAGE_COUNT_MIN; p <= PAGE_COUNT_MAX; p++) {
-        let any = false;
-        for (let s = SQ_MIN; s <= SQ_MAX; s++) {
-            // Existence-only: stops as soon as *some* square length satisfies `p` sheets (much cheaper than
-            // walking all `s` to find the maximum, which `maxSquareMmForGridAndPages` does when needed).
-            if (squareSizeFitsTargetPageCountEitherOrientation(squaresX, squaresY, s, paperWMm, paperHMm, p)) {
-                any = true;
-                break;
-            }
-        }
-        if (any) {
-            out.push(p);
-        }
-    }
-    return out;
-}
-
+/**
+ * Page counts the Pages slider offers, ascending: each prints exactly that many sheets at its largest
+ * square length, and that square is at least `minSquareMm` (the working distance minimum). The last is
+ * one square per sheet at the largest square length that prints.
+ */
 export function validTargetPageCountsForGrid(
     squaresX: number,
     squaresY: number,
     paperWMm: number,
     paperHMm: number,
+    minSquareMm: number = CHARUCO_SQUARE_MM_MIN,
 ): number[] {
-    const slot = resolveStaticFeasibilitySlot(paperWMm, paperHMm, squaresX, squaresY);
-    if (slot !== undefined) {
-        return staticValidTargetPageCounts(slot);
-    }
-    return validTargetPageCountsForGridUncached(squaresX, squaresY, paperWMm, paperHMm);
+    const f = gridFeasibility(squaresX, squaresY, paperWMm, paperHMm);
+    return f.pageCounts.filter((p) => f.maxSquareMmByPageCount.get(p)! >= minSquareMm);
 }
 
-function enumerateValidSquareSizesUncached(
-    squaresX: number,
-    squaresY: number,
-    paperWMm: number,
-    paperHMm: number,
-): number[] {
-    const out = new Set<number>();
-    for (let s = SQ_MIN; s <= SQ_MAX; s++) {
-        if (computeTilingInfo(squaresX, squaresY, s, paperWMm, paperHMm) !== null) {
-            out.add(s);
-        } else if (squaresX !== squaresY && computeTilingInfo(squaresY, squaresX, s, paperWMm, paperHMm) !== null) {
-            out.add(s);
-        }
-    }
-    return [...out].sort((a, b) => a - b);
-}
-
+/** Square lengths (mm) that print on this paper, ascending. */
 export function enumerateValidSquareSizes(
     squaresX: number,
     squaresY: number,
     paperWMm: number,
     paperHMm: number,
 ): number[] {
-    const slot = resolveStaticFeasibilitySlot(paperWMm, paperHMm, squaresX, squaresY);
-    if (slot !== undefined) {
-        return staticEnumerateValidSquareMm(slot);
-    }
-    return enumerateValidSquareSizesUncached(squaresX, squaresY, paperWMm, paperHMm);
+    return gridFeasibility(squaresX, squaresY, paperWMm, paperHMm).validSquaresMm;
 }
 
-export function enumerateValidSquareSizesForGridMatchingSheetsTarget(
-    squaresX: number,
-    squaresY: number,
-    paperWMm: number,
-    paperHMm: number,
-    targetSheets: number,
-): number[] {
-    const out = new Set<number>();
-    for (let s = SQ_MIN; s <= SQ_MAX; s++) {
-        if (squareSizeFitsTargetPageCountEitherOrientation(squaresX, squaresY, s, paperWMm, paperHMm, targetSheets)) {
-            out.add(s);
-        }
-    }
-    return [...out].sort((a, b) => a - b);
-}
-
-export function nearestValidTargetPages(
-    desired: number,
-    squaresX: number,
-    squaresY: number,
-    paperWMm: number,
-    paperHMm: number,
-): number {
-    const valid = validTargetPageCountsForGrid(squaresX, squaresY, paperWMm, paperHMm);
-    const d0 = Math.round(Math.max(PAGE_COUNT_MIN, Math.min(PAGE_COUNT_MAX, desired)));
-    if (valid.length === 0) {
-        return d0;
-    }
-    let best = valid[0]!;
-    let bestDist = Math.abs(best - d0);
-    for (const v of valid) {
-        const d = Math.abs(v - d0);
-        if (d < bestDist || (d === bestDist && v < best)) {
-            best = v;
-            bestDist = d;
-        }
-    }
-    return best;
-}
-
+/** Nearest printable square length at or above `minSquareMm` (ties go smaller), or `null` if none exists. */
 export function snapSquareMm(
     raw: number,
     squaresX: number,
     squaresY: number,
     paperWMm: number,
     paperHMm: number,
-): number {
-    const target = Math.round(Math.max(SQ_MIN, Math.min(SQ_MAX, raw)));
-    const valid = enumerateValidSquareSizes(squaresX, squaresY, paperWMm, paperHMm);
-    if (valid.length === 0) {
-        return target;
-    }
-    let best = valid[0]!;
-    let bestDist = Math.abs(best - target);
-    for (const v of valid) {
-        const d = Math.abs(v - target);
-        if (d < bestDist || (d === bestDist && v < best)) {
-            best = v;
-            bestDist = d;
+    minSquareMm: number = CHARUCO_SQUARE_MM_MIN,
+): number | null {
+    const target = Math.round(Math.max(CHARUCO_SQUARE_MM_MIN, Math.min(CHARUCO_SQUARE_MM_MAX, raw)));
+    let best: number | null = null;
+    for (const s of enumerateValidSquareSizes(squaresX, squaresY, paperWMm, paperHMm)) {
+        if (s >= minSquareMm && (best === null || Math.abs(s - target) < Math.abs(best - target))) {
+            best = s;
         }
     }
     return best;
-}
-
-export interface CharucoPageSquareRegion {
-    sheetIndex: number;
-    gx0: number;
-    gx1: number;
-    gy0: number;
-    gy1: number;
-}
-
-export function computeCharucoPageSquareRegions(
-    squaresX: number,
-    squaresY: number,
-    tiling: TilingInfo,
-): CharucoPageSquareRegion[] {
-    const {maxCx, maxCyFirst, maxCyRest, npx} = tiling;
-    const rowRanges: [number, number][] = [];
-    let gy = 0;
-    while (gy < squaresY) {
-        const cap = gy === 0 ? maxCyFirst : maxCyRest;
-        const gyEnd = Math.min(gy + cap, squaresY);
-        rowRanges.push([gy, gyEnd]);
-        gy = gyEnd;
-    }
-    let sheet = 0;
-    const out: CharucoPageSquareRegion[] = [];
-    for (const [gy0, gy1] of rowRanges) {
-        for (let col = 0; col < npx; col++) {
-            sheet += 1;
-            const gx0 = col * maxCx;
-            const gx1 = Math.min(gx0 + maxCx, squaresX);
-            out.push({sheetIndex: sheet, gx0, gx1, gy0, gy1});
-        }
-    }
-    return out;
 }
 
 export interface CharucoPagePreviewRect {
@@ -451,6 +293,7 @@ export interface CharucoPagePreviewRect {
     height: number;
 }
 
+/** Full-chart overlay rects (fractions of the preview canvas), one per printed sheet from {@link buildPageSpecs}. */
 export function computeCharucoPagePreviewRects(
     squaresX: number,
     squaresY: number,
@@ -464,7 +307,7 @@ export function computeCharucoPagePreviewRects(
     const pw = Math.max(1, Math.round(previewCanvasW));
     const ph = Math.max(1, Math.round(previewCanvasH));
     const layout = charucoBoardPixelLayout(pw, ph, squaresX, squaresY);
-    return computeCharucoPageSquareRegions(squaresX, squaresY, tiling).map((r) => {
+    return buildPageSpecs(squaresX, squaresY, tiling).pages.map((r) => {
         const [l, rPx] = charucoCropXRange(r.gx0, r.gx1, layout);
         const [t, bPx] = charucoCropYRange(r.gy0, r.gy1, layout);
         return {
@@ -492,116 +335,15 @@ export function charucoPagePreviewBorderColor(
     return `hsl(${hue} ${sat}% ${light}%)`;
 }
 
-/** Tiling plus whether the print uses the grid transposed (90°) vs logical {@link squaresX}×{@link squaresY}. */
-export interface EffectivePrintLayout {
-    tiling: TilingInfo;
-    patternRotated90: boolean;
-}
-
-function tilingFitPreferenceKey(tiling: TilingInfo, patternRotated90: boolean): [number, number, number] {
-    const prod = tiling.maxCx * tiling.maxCyRest;
-    return [tiling.pageCount, -prod, patternRotated90 ? 1 : 0];
-}
-
-function pickBetterEffectiveLayout(a: EffectivePrintLayout | null, b: EffectivePrintLayout | null): EffectivePrintLayout | null {
-    if (!a) {
-        return b;
-    }
-    if (!b) {
-        return a;
-    }
-    const ka = tilingFitPreferenceKey(a.tiling, a.patternRotated90);
-    const kb = tilingFitPreferenceKey(b.tiling, b.patternRotated90);
-    for (let i = 0; i < ka.length; i++) {
-        if (ka[i] !== kb[i]) {
-            return ka[i]! < kb[i]! ? a : b;
-        }
-    }
-    return a;
-}
-
-/**
- * Effective tiling for UI and PDF/SVG — same sheet count as freemocap auto mode when possible, but also considers
- * transposing the grid (90° pattern rotation) when that yields larger per-sheet coverage or a valid auto match.
- */
+/** The layout printed for this board: exactly squaresX×squaresY, fewest sheets, best paper orientation. */
 export function computeEffectivePrintLayout(
     squaresX: number,
     squaresY: number,
     squareMm: number,
     paperWMm: number,
     paperHMm: number,
-    autoGrid: boolean,
-    targetPagesWhenAuto: number,
-): EffectivePrintLayout | null {
-    if (autoGrid) {
-        const nat = computeTilingInfoMatchingPageCount(
-            squaresX,
-            squaresY,
-            squareMm,
-            paperWMm,
-            paperHMm,
-            targetPagesWhenAuto,
-        );
-        const rot =
-            squaresX === squaresY
-                ? null
-                : computeTilingInfoMatchingPageCount(
-                      squaresY,
-                      squaresX,
-                      squareMm,
-                      paperWMm,
-                      paperHMm,
-                      targetPagesWhenAuto,
-                  );
-
-        let chosen: EffectivePrintLayout | null = null;
-        if (nat && rot) {
-            const prodN = nat.maxCx * nat.maxCyRest;
-            const prodR = rot.maxCx * rot.maxCyRest;
-            chosen =
-                prodR > prodN
-                    ? {tiling: rot, patternRotated90: true}
-                    : {tiling: nat, patternRotated90: false};
-        } else if (nat) {
-            chosen = {tiling: nat, patternRotated90: false};
-        } else if (rot) {
-            chosen = {tiling: rot, patternRotated90: true};
-        }
-
-        if (chosen) {
-            return chosen;
-        }
-    }
-
-    const nat = computeTilingInfo(squaresX, squaresY, squareMm, paperWMm, paperHMm);
-    const rot =
-        squaresX === squaresY ? null : computeTilingInfo(squaresY, squaresX, squareMm, paperWMm, paperHMm);
-
-    return pickBetterEffectiveLayout(
-        nat ? {tiling: nat, patternRotated90: false} : null,
-        rot ? {tiling: rot, patternRotated90: true} : null,
-    );
-}
-
-/** Effective tiling for UI (matches freemocap `CharucoPrintPage` useMemo). */
-export function computeEffectiveTiling(
-    squaresX: number,
-    squaresY: number,
-    squareMm: number,
-    paperWMm: number,
-    paperHMm: number,
-    autoGrid: boolean,
-    targetPagesWhenAuto: number,
 ): TilingInfo | null {
-    return computeEffectivePrintLayout(
-        squaresX,
-        squaresY,
-        squareMm,
-        paperWMm,
-        paperHMm,
-        autoGrid,
-        targetPagesWhenAuto,
-    )?.tiling ?? null;
+    return printedLayout(squaresX, squaresY, squareMm, paperWMm, paperHMm);
 }
 
 export function layoutSummaryText(

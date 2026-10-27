@@ -2,12 +2,8 @@
  * Sheet tiling for ChArUco print PDFs — same convergence as `charucoPrintLayout.ts` /
  * `_compute_tiling` in `charuco_board_print.py`.
  */
-import {
-    MM_JOIN_STRIP,
-    MM_MARGIN_SHEET,
-    ORIGIN_CORNER_MARKER_PAD_MM,
-} from './constants.js';
-import {estimateOriginBannerStripFromPrintableTopMm} from './originBannerEstimate.js';
+import {MM_JOIN_STRIP, MM_MARGIN_SHEET, ORIGIN_CORNER_MARKER_PAD_MM} from './constants.js';
+import {originBannerReserveMm} from './originBannerStrip.js';
 
 export interface TilingInfo {
     pageCount: number;
@@ -38,7 +34,6 @@ function computeTilingInfoSingle(
     squareMm: number,
     paperWMm: number,
     paperHMm: number,
-    portraitQrAboveCharucoInfo: boolean,
 ): Omit<TilingInfo, 'landscape'> | null {
     const ph = paperHMm - 2 * MM_MARGIN_SHEET;
     if (ph <= 0) {
@@ -67,13 +62,7 @@ function computeTilingInfoSingle(
         const joinH0 = npyForJoin > 1 ? MM_JOIN_STRIP : 0;
         const joinHr = npyForJoin > 1 ? 2 * MM_JOIN_STRIP : 0;
 
-        const bannerStripMm = estimateOriginBannerStripFromPrintableTopMm({
-            paperWMm,
-            squaresX,
-            squaresY,
-            squareLengthMm: squareMm,
-            portraitQrAboveCharucoInfo,
-        });
+        const bannerStripMm = originBannerReserveMm(paperWMm);
         const phOriginPattern = ph - bannerStripMm - joinH0 - ORIGIN_CORNER_MARKER_PAD_MM;
         if (phOriginPattern <= squareMm) {
             return null;
@@ -143,11 +132,11 @@ export function computeTilingInfo(
     nominalHMm: number,
 ): TilingInfo | null {
     if (Math.abs(nominalWMm - nominalHMm) < 0.01) {
-        const t = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm, true);
+        const t = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm);
         return t ? {...t, landscape: false} : null;
     }
-    const portrait = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm, true);
-    const landscape = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalHMm, nominalWMm, false);
+    const portrait = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm);
+    const landscape = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalHMm, nominalWMm);
     const scored: {
         info: Omit<TilingInfo, 'landscape'>;
         landscape: boolean;
@@ -184,46 +173,6 @@ export function computeTilingInfo(
     return {...best.info, landscape: best.landscape};
 }
 
-export function computeTilingInfoMatchingPageCount(
-    squaresX: number,
-    squaresY: number,
-    squareMm: number,
-    nominalWMm: number,
-    nominalHMm: number,
-    targetPages: number,
-): TilingInfo | null {
-    if (Math.abs(nominalWMm - nominalHMm) < 0.01) {
-        const t = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm, true);
-        if (!t || t.pageCount !== targetPages) {
-            return null;
-        }
-        return {...t, landscape: false};
-    }
-    const scored: {info: Omit<TilingInfo, 'landscape'>; landscape: boolean; prod: number}[] = [];
-    const portrait = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm, true);
-    if (portrait && portrait.pageCount === targetPages) {
-        scored.push({info: portrait, landscape: false, prod: portrait.maxCx * portrait.maxCyRest});
-    }
-    const landscape = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalHMm, nominalWMm, false);
-    if (landscape && landscape.pageCount === targetPages) {
-        scored.push({info: landscape, landscape: true, prod: landscape.maxCx * landscape.maxCyRest});
-    }
-    if (scored.length === 0) {
-        return null;
-    }
-    scored.sort((a, b) => {
-        if (b.prod !== a.prod) {
-            return b.prod - a.prod;
-        }
-        return (
-            paperOrientationPreferenceTieBreak(squaresX, squaresY, a.landscape) -
-            paperOrientationPreferenceTieBreak(squaresX, squaresY, b.landscape)
-        );
-    });
-    const best = scored[0]!;
-    return {...best.info, landscape: best.landscape};
-}
-
 /**
  * PDF / physical sheet width×height (mm) for a nominal paper size from presets (`wMm`×`hMm`, short×long).
  * Must match the orientation used when `tiling` was computed (`computeTilingInfo*` swaps dimensions
@@ -242,77 +191,6 @@ export function nominalPaperToPdfDimensionsMm(
         return {paperWMm: nominalHMm, paperHMm: nominalWMm};
     }
     return {paperWMm: nominalWMm, paperHMm: nominalHMm};
-}
-
-export function selectPaperDimensionsMm(
-    squaresX: number,
-    squaresY: number,
-    squareMm: number,
-    nominalWMm: number,
-    nominalHMm: number,
-    targetPageCount: number | undefined,
-): {paperWMm: number; paperHMm: number} {
-    if (Math.abs(nominalWMm - nominalHMm) < 0.01) {
-        return {paperWMm: nominalWMm, paperHMm: nominalHMm};
-    }
-    const scored: {nPages: number; negProd: number; pref: number; w: number; h: number}[] = [];
-    for (const [effW, effH, portraitFlag] of [
-        [nominalWMm, nominalHMm, true],
-        [nominalHMm, nominalWMm, false],
-    ] as const) {
-        const pages = computePagesForPaper(squaresX, squaresY, squareMm, effW, effH);
-        if (!pages) {
-            continue;
-        }
-        const {tiling, paperWMm, paperHMm} = pages;
-        if (targetPageCount !== undefined && tiling.pageCount !== targetPageCount) {
-            continue;
-        }
-        const pw = paperWMm - 2 * MM_MARGIN_SHEET - (tiling.npx > 1 ? 2 * MM_JOIN_STRIP : 0);
-        const ph = paperHMm - 2 * MM_MARGIN_SHEET;
-        const maxCx = Math.floor((pw - ORIGIN_CORNER_MARKER_PAD_MM) / squareMm);
-        const maxCyRest = Math.floor((ph - (tiling.npy > 1 ? 2 * MM_JOIN_STRIP : 0)) / squareMm);
-        const prod = maxCx * maxCyRest;
-        scored.push({
-            nPages: tiling.pageCount,
-            negProd: -prod,
-            pref: portraitFlag ? 0 : 1,
-            w: paperWMm,
-            h: paperHMm,
-        });
-    }
-    if (scored.length === 0) {
-        throw new Error(
-            targetPageCount !== undefined
-                ? `Cannot tile this board with exactly ${targetPageCount} sheet(s) on the selected paper.`
-                : 'Cannot tile this board on the selected paper (try larger paper or smaller squares).',
-        );
-    }
-    scored.sort((a, b) => {
-        if (a.nPages !== b.nPages) {
-            return a.nPages - b.nPages;
-        }
-        if (a.negProd !== b.negProd) {
-            return a.negProd - b.negProd;
-        }
-        return a.pref - b.pref;
-    });
-    const best = scored[0]!;
-    return {paperWMm: best.w, paperHMm: best.h};
-}
-
-function computePagesForPaper(
-    squaresX: number,
-    squaresY: number,
-    squareMm: number,
-    effW: number,
-    effH: number,
-): {tiling: TilingInfo; paperWMm: number; paperHMm: number} | null {
-    const t = computeTilingInfo(squaresX, squaresY, squareMm, effW, effH);
-    if (!t) {
-        return null;
-    }
-    return {tiling: t, paperWMm: effW, paperHMm: effH};
 }
 
 export function buildPageSpecs(

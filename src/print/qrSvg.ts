@@ -22,5 +22,7 @@ export async function generateQrSvgFragment(url: string, sizePx: number): Promis
     });
     const inner = raw.replace(/^\s*<\?xml[^>]*>\s*/i, '').replace(/^\s*<svg[^>]*>/i, '').replace(/<\/svg>\s*$/i, '');
     const viewBox = extractSvgViewBox(raw) ?? `0 0 ${px} ${px}`;
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" width="100%" height="100%" preserveAspectRatio="xMidYMin meet" shape-rendering="crispEdges">${inner.trim()}</svg>`;
+    // No width/height: a nested <svg> already fills its parent, and svg2pdf (PDF export) reads
+    // width="100%" as 100 user units, which shrinks the QR on the sheet.
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}" preserveAspectRatio="xMidYMin meet" shape-rendering="crispEdges">${inner.trim()}</svg>`;
 }

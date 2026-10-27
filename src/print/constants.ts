@@ -52,9 +52,10 @@ export const ORIGIN_MARKER_AXIS_Y_RGB: [number, number, number] = [0x33, 0x6c, 0
 export const JOIN_MEET_DASH_RGB: [number, number, number] = [90, 90, 90];
 export const PIXELS_PER_MM = 12;
 /**
- * Printed label/layout contract version. Must equal the major component of the app
- * version (`package.json`); bump both together when printed labels, layout, or QR
- * query semantics change. The origin banner prints the full app semver, not this.
+ * Printed-output contract version. Must equal the app major (enforced by
+ * `npm run check:version`); bump both only for a chart spec change — one that makes
+ * older printed sheets incompatible or ambiguous. See README “Versioning and
+ * releases” for what counts. The origin banner prints the full app semver, not this.
  */
 export const CHARUCO_PRINT_LABEL_SPEC_VERSION = 1;
 

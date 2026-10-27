@@ -231,8 +231,15 @@ body {
   }
 }
 
-.panel-preview {
+.layout-side {
+  display: flex;
   flex: 1 1 420px;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0;
+}
+
+.panel-preview {
   min-width: 0;
 }
 
@@ -271,16 +278,65 @@ body {
 
 .advanced {
   margin-top: 0.5rem;
-  padding: 1rem;
   border: 1px solid var(--divider);
   border-radius: 6px;
   background: var(--advanced-bg);
 }
 
 .advanced-title {
-  margin: 0 0 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
   font-size: 1rem;
   font-weight: 500;
+  line-height: 1.3;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.advanced-title::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-title::before {
+  content: '';
+  flex-shrink: 0;
+  width: 0.45rem;
+  height: 0.45rem;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 0.15s ease;
+}
+
+.advanced-title:hover {
+  background: var(--action-hover);
+}
+
+.advanced-title:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+.advanced[open] > .advanced-title {
+  border-bottom: 1px solid var(--divider);
+  border-radius: 6px 6px 0 0;
+}
+
+.advanced[open] > .advanced-title::before {
+  transform: translateY(2px) rotate(-135deg);
+}
+
+.advanced-body {
+  padding: 1rem;
+}
+
+.advanced-body > .field:last-child {
+  margin-bottom: 0;
 }
 
 .caption {
@@ -290,10 +346,52 @@ body {
   line-height: 1.45;
 }
 
-/* Dev-only: encoded chart QR URL (long packed query) shown under the target selector. */
+/* Dev-only: QR link target radios below the Advanced settings fold-out. */
+.qr-link-target-field {
+  min-width: 0;
+  margin: 1rem 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.qr-link-target-field legend {
+  padding: 0;
+  margin-bottom: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.qr-link-target-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* One radio option plus the URL it would encode; both stay visible when selection changes. */
+.qr-link-target-option-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.75rem;
+  row-gap: 0.2rem;
+}
+
+.qr-link-target-option {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.8125rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* Dev-only: encoded chart QR URL (long packed query) shown beside its target option. */
 .qr-link-url {
-  display: block;
-  margin: 0.5rem 0 0;
+  display: inline-block;
+  min-width: 0;
+  margin: 0;
   color: var(--primary);
   word-break: break-all;
 }
@@ -406,7 +504,7 @@ body {
 .layout-summary {
   font-size: 0.8125rem;
   color: var(--muted);
-  margin: 1rem 0;
+  margin: 0 0 1rem;
 }
 
 .actions {
@@ -486,7 +584,7 @@ body {
   display: none !important;
 }
 
-.preview-heading {
+.panel-heading {
   margin: 0 0 0.5rem;
   font-size: 1rem;
   font-weight: 500;
@@ -695,6 +793,7 @@ body {
   background: var(--thumb-bg);
 }
 
-input[type='checkbox'] {
+input[type='checkbox'],
+input[type='radio'] {
   accent-color: var(--primary);
 }

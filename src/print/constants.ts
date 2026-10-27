@@ -1,6 +1,6 @@
 /** Aligned with `charuco_board_print.py` / `charucoPrintLayout.ts` in freemocap. */
 
-import {resolveQrLinkSourceUrl} from './qrLinkTarget.js';
+import {resolveQrLinkSourceUrl, resolveQrLinkSourceUrlFor, type QrLinkTarget} from './qrLinkTarget.js';
 
 /** Blank margin reserved on every sheet edge before join strips and printable content (mm). */
 export const MM_MARGIN_SHEET = 13;
@@ -58,7 +58,7 @@ export const PIXELS_PER_MM = 12;
  */
 export const CHARUCO_PRINT_LABEL_SPEC_VERSION = 1;
 
-function resolveCharucoPrintSourceUrl(): string {
+function explicitCharucoPrintSourceUrl(): string | null {
     const v = import.meta.env.VITE_CHARUCO_PRINT_SOURCE_URL;
     if (typeof v === 'string') {
         const t = v.trim();
@@ -66,7 +66,11 @@ function resolveCharucoPrintSourceUrl(): string {
             return t;
         }
     }
-    return resolveQrLinkSourceUrl();
+    return null;
+}
+
+function resolveCharucoPrintSourceUrl(): string {
+    return explicitCharucoPrintSourceUrl() ?? resolveQrLinkSourceUrl();
 }
 
 /**
@@ -81,6 +85,14 @@ function resolveCharucoPrintSourceUrl(): string {
  */
 export function getCharucoPrintSourceUrl(): string {
     return resolveCharucoPrintSourceUrl();
+}
+
+/**
+ * Base URL QR codes would encode for an explicit target, regardless of the current dev
+ * selection. Used by the dev-only QR link target UI to show what each option produces.
+ */
+export function getCharucoPrintSourceUrlFor(target: QrLinkTarget): string {
+    return explicitCharucoPrintSourceUrl() ?? resolveQrLinkSourceUrlFor(target);
 }
 
 /** OpenCV version written into the legacy `cv2` QR metadata (not printed on the sheet). */

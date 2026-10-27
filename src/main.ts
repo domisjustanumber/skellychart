@@ -28,7 +28,7 @@ import {
 import {ensureTilingFeasibilityForPaperId} from './print/tilingFeasibilityTables.js';
 import {buildPageSpecs, nominalPaperToPdfDimensionsMm} from './print/tiling.js';
 import {perfDev, perfLog} from './print/perfDebug.js';
-import {CHARUCO_MARKER_LENGTH_RATIO, getCharucoPrintSourceUrl} from './print/constants.js';
+import {CHARUCO_MARKER_LENGTH_RATIO, getCharucoPrintSourceUrlFor} from './print/constants.js';
 import {compareChartVersions, parseChartVersion} from './print/chartVersion.js';
 import {svgRootOuterSizeAttrs} from './print/svgUtils.js';
 import {
@@ -48,6 +48,7 @@ import {
     PREVIEW_DEBOUNCE_INTERACTIVE_MS,
     svgToDataUrl,
 } from './ui/previewSvg.js';
+import {buildPdfBlobFromSvgPages} from './ui/pdfExport.js';
 import {yieldToMain} from './ui/yieldToMain.js';
 import {
     applyThemePreference,
@@ -262,6 +263,8 @@ let previewTimer: ReturnType<typeof setTimeout> | null = null;
 let previewAbort: AbortController | null = null;
 /** Bumped when a new preview run starts so stale async completions do not clear the busy UI. */
 let previewGeneration = 0;
+/** Prevents a second PDF export while one is running (e.g. after a slider drag re-runs syncUi). */
+let pdfExportInProgress = false;
 
 let syncUiRafId: number | null = null;
 /** Cached so we don't rebuild selects on every drag frame (expensive and blocks paint). */
@@ -364,63 +367,85 @@ function initDevQrLinkTargetUi(): void {
     if (!isQrLinkTargetSwitchAvailable()) {
         return;
     }
-    const advanced = document.querySelector<HTMLElement>('.advanced');
+    const advanced = document.getElementById('advancedSettings');
     if (!advanced) {
         return;
     }
 
-    const field = document.createElement('div');
-    field.className = 'field';
+    const field = document.createElement('fieldset');
+    field.className = 'qr-link-target-field';
 
-    const label = document.createElement('label');
-    label.htmlFor = 'qrLinkTarget';
-    label.textContent = 'QR link target (dev only)';
+    const legend = document.createElement('legend');
+    legend.textContent = 'QR link target (dev only)';
 
-    const select = document.createElement('select');
-    select.id = 'qrLinkTarget';
-    select.className = 'select';
+    const options = document.createElement('div');
+    options.className = 'qr-link-target-options';
     for (const [value, text] of [
         ['production', 'Production (skelly.cam)'],
         ['local', 'Local dev server (LAN)'],
     ] as const) {
-        const option = document.createElement('option');
-        option.value = value;
-        option.textContent = text;
-        select.appendChild(option);
+        const row = document.createElement('div');
+        row.className = 'qr-link-target-option-row';
+
+        const label = document.createElement('label');
+        label.className = 'qr-link-target-option';
+
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = 'qrLinkTarget';
+        input.value = value;
+        input.checked = getQrLinkTarget() === value;
+        input.addEventListener('change', () => {
+            if (!input.checked) {
+                return;
+            }
+            setQrLinkTarget(value);
+            syncUi({previewDelayMs: 0});
+        });
+
+        const link = document.createElement('a');
+        link.className = 'caption qr-link-url';
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.title = 'Open this URL to test QR query parsing';
+        link.dataset.qrTarget = value;
+
+        label.append(input, document.createTextNode(text));
+        row.append(label, link);
+        options.appendChild(row);
     }
-    select.addEventListener('change', () => {
-        setQrLinkTarget(select.value === 'local' ? 'local' : 'production');
-        syncUi({previewDelayMs: 0});
-    });
 
-    const link = document.createElement('a');
-    link.id = 'qrLinkUrl';
-    link.className = 'caption qr-link-url';
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.title = 'Open this URL to test QR query parsing';
-
-    field.append(label, select, link);
-    advanced.appendChild(field);
+    field.append(legend, options);
+    advanced.insertAdjacentElement('afterend', field);
 }
 
-/** Keeps the dev-only QR target selector and its encoded URL in sync with the current chart. */
+/** Keeps the dev-only QR target radios and both candidate URLs in sync with the current chart. */
 function syncDevQrLinkTargetUi(): void {
-    const select = document.getElementById('qrLinkTarget') as HTMLSelectElement | null;
-    const link = document.getElementById('qrLinkUrl') as HTMLAnchorElement | null;
-    if (!select || !link) {
+    const inputs = document.querySelectorAll<HTMLInputElement>(
+        '.qr-link-target-field input[name="qrLinkTarget"]',
+    );
+    const links = document.querySelectorAll<HTMLAnchorElement>(
+        '.qr-link-target-field a.qr-link-url',
+    );
+    if (inputs.length === 0 || links.length === 0) {
         return;
     }
-    select.value = getQrLinkTarget();
+    const target = getQrLinkTarget();
+    for (const input of inputs) {
+        input.checked = input.value === target;
+    }
     const {squaresX, squaresY} = qrChartSquareDims();
-    const url = buildCharucoDocumentationUrl(
-        getCharucoPrintSourceUrl(),
-        squaresX,
-        squaresY,
-        state.squareMm,
-    );
-    link.href = url;
-    link.textContent = url;
+    for (const link of links) {
+        const linkTarget = link.dataset.qrTarget === 'local' ? 'local' : 'production';
+        const url = buildCharucoDocumentationUrl(
+            getCharucoPrintSourceUrlFor(linkTarget),
+            squaresX,
+            squaresY,
+            state.squareMm,
+        );
+        link.href = url;
+        link.textContent = url;
+    }
 }
 
 function syncUi(options: SyncUiOptions = {}): void {
@@ -448,10 +473,13 @@ function syncUi(options: SyncUiOptions = {}): void {
     byId('lbl-sx').textContent = interpolate(S.squaresInX, {n: state.squaresX});
     byId('lbl-sy').textContent = interpolate(S.squaresInY, {n: state.squaresY});
     if (!lite) {
+        byId('print-save-heading').textContent = S.printSave;
         byId('preview-title').textContent = S.previewTitle;
         byId('lbl-fullchart').textContent = S.fullChart;
         (byId('btnPdf') as HTMLButtonElement).textContent = S.printCharts;
-        (byId('btnSaveSvg') as HTMLButtonElement).textContent = S.saveSvgFiles;
+        if (!pdfExportInProgress) {
+            (byId('btnSavePdf') as HTMLButtonElement).textContent = S.savePdfFiles;
+        }
         byId('printScaleHint').textContent = S.printScaleHint;
     }
 
@@ -557,10 +585,10 @@ function syncUi(options: SyncUiOptions = {}): void {
     byId('layoutSummary').textContent = summary;
 
     const btnPdf = byId('btnPdf') as HTMLButtonElement;
-    const btnSaveSvg = byId('btnSaveSvg') as HTMLButtonElement;
+    const btnSavePdf = byId('btnSavePdf') as HTMLButtonElement;
     const exportDisabled = !tiling || tiling.pageCount < 1;
     btnPdf.disabled = exportDisabled;
-    btnSaveSvg.disabled = exportDisabled;
+    btnSavePdf.disabled = exportDisabled || pdfExportInProgress;
 
     if (!lite) {
         syncThemeToggle();
@@ -874,13 +902,8 @@ function stripXmlDeclaration(svg: string): string {
     return svg.replace(/^\s*<\?xml[\s\S]*?\?>\s*/i, '').trimStart();
 }
 
-function delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** Trigger a file download from string contents (UTF-8 SVG). */
-function downloadSvgString(content: string, filename: string): void {
-    const blob = new Blob([content], {type: 'image/svg+xml;charset=utf-8'});
+/** Trigger a file download from blob contents. */
+function downloadBlob(blob: Blob, filename: string): void {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -889,10 +912,11 @@ function downloadSvgString(content: string, filename: string): void {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    // Give the browser time to start the download before revoking the object URL.
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
-function exportSvgBasenamePrefix(): string {
+function exportBasenamePrefix(): string {
     const parts = [
         'skellychart',
         state.paperId,
@@ -902,7 +926,10 @@ function exportSvgBasenamePrefix(): string {
     return parts.join('-').replace(/[^\w.-]+/g, '_');
 }
 
-async function saveSvgFiles(): Promise<void> {
+async function savePdfFile(): Promise<void> {
+    if (pdfExportInProgress) {
+        return;
+    }
     showErr(null);
     const layout = effectivePrintLayout();
     const tiling = layout?.tiling ?? null;
@@ -910,47 +937,58 @@ async function saveSvgFiles(): Promise<void> {
         showErr(S.layoutCannotFit);
         return;
     }
-    const btnSave = byId('btnSaveSvg') as HTMLButtonElement;
-    const idleLabel = S.saveSvgFiles;
+    pdfExportInProgress = true;
+    const btnSave = byId('btnSavePdf') as HTMLButtonElement;
+    const idleLabel = S.savePdfFiles;
     btnSave.disabled = true;
     btnSave.classList.add('btn--busy');
-    btnSave.textContent = S.preparingSvgExport;
+    btnSave.textContent = S.preparingPdfExport;
+
+    // Snapshot the chart before yielding so slider/paper changes during the export cannot
+    // produce a PDF that differs from the filename or the layout we measured.
+    const paperId = state.paperId;
+    const squareMm = state.squareMm;
+    const gridX = state.squaresX;
+    const gridY = state.squaresY;
+    const prefix = exportBasenamePrefix();
+    const pd = paperById(paperId) ?? PAPER_OPTIONS[0]!;
+    const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
+    const {squaresX: px, squaresY: py} = layout.patternRotated90
+        ? {squaresX: gridY, squaresY: gridX}
+        : {squaresX: gridX, squaresY: gridY};
     await yieldToMain();
 
-    const pd = paperDims();
-    const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
-    const {squaresX: px, squaresY: py} = printSquareDims(layout.patternRotated90);
-    const pages = buildPageSpecs(px, py, tiling).pages;
     try {
+        const pages = buildPageSpecs(px, py, tiling).pages;
         const {pages: svgs} = await renderCharucoPrintSvg({
-            paperId: state.paperId,
+            paperId,
             squaresX: px,
             squaresY: py,
-            squareLengthMm: state.squareMm,
+            squareLengthMm: squareMm,
             paperWMm,
             paperHMm,
             markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
             tiling,
             pages,
-            cooperativeYield: false,
+            // Keep the busy label/spinner alive while many sheets are assembled.
+            cooperativeYield: true,
         });
-        const prefix = exportSvgBasenamePrefix();
-        const staggerMs = 120;
-        for (let i = 0; i < svgs.length; i++) {
-            if (i > 0) {
-                await delay(staggerMs);
-            }
-            const n = i + 1;
-            downloadSvgString(svgs[i]!, `${prefix}-${n}-of-${svgs.length}.svg`);
-        }
+        const blob = await buildPdfBlobFromSvgPages(
+            svgs.map((svg) => ({svg, widthMm: paperWMm, heightMm: paperHMm})),
+            ({current, total}) => {
+                btnSave.textContent = interpolate(S.preparingPdfPage, {current, total});
+            },
+        );
+        downloadBlob(blob, `${prefix}.pdf`);
     } catch (e) {
         showErr(e instanceof Error ? e.message : String(e));
+    } finally {
+        pdfExportInProgress = false;
+        btnSave.classList.remove('btn--busy');
+        btnSave.textContent = idleLabel;
+        const t = effectiveTiling();
+        btnSave.disabled = !t || t.pageCount < 1;
     }
-
-    btnSave.classList.remove('btn--busy');
-    btnSave.textContent = idleLabel;
-    const t = effectiveTiling();
-    btnSave.disabled = !t || t.pageCount < 1;
 }
 
 function printHtmlDocumentInHiddenIframe(html: string): void {
@@ -1221,7 +1259,7 @@ function wireUi(): void {
     });
 
     byId('btnPdf').addEventListener('click', () => void openPrintDialog());
-    byId('btnSaveSvg').addEventListener('click', () => void saveSvgFiles());
+    byId('btnSavePdf').addEventListener('click', () => void savePdfFile());
 
     const themeGroup = byId('themeToggle');
     for (const btn of themeGroup.querySelectorAll<HTMLButtonElement>('[data-theme-pick]')) {

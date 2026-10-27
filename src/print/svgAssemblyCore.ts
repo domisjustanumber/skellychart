@@ -5,7 +5,7 @@ import {
     renderCharucoBoardSvgFragment,
 } from '../charuco/board.js';
 import type {CharucoGeometry} from '../charuco/board.js';
-import {APP_VERSION} from '../appVersion.js';
+import {APP_VERSION_DISPLAY} from '../appVersion.js';
 import {
     JOIN_MEET_DASH_RGB,
     MM_JOIN_STRIP,
@@ -538,10 +538,10 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
 
             const titleFont = `bold ${titleFontPx}px ${FONT}`;
             const bodyFont = `${bodyFontPx}px ${FONT}`;
-            // Full semver (longer in dev) is right-anchored at `boardInfoRight`, so it grows
-            // left into the instructions column instead of toward the QR code.
+            // The version line is right-anchored at `boardInfoRight`, so it grows left into
+            // the instructions column instead of toward the QR code.
             const {titleLine: boardTitle, bodyBlock: boardInfoBody} = originChartInfoParts({
-                version: APP_VERSION,
+                version: APP_VERSION_DISPLAY,
                 mm: squareLengthMm,
                 squaresX,
                 squaresY,

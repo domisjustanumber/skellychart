@@ -1,4 +1,3 @@
-import {execFileSync} from 'node:child_process';
 import {readFileSync} from 'node:fs';
 import {networkInterfaces} from 'node:os';
 import {join} from 'node:path';
@@ -14,27 +13,16 @@ if (!SEMVER.test(pkg.version)) {
     throw new Error(`package.json "version" must be semver, got ${String(pkg.version)}`);
 }
 
-function gitDevSuffix(): string {
-    try {
-        const sha = execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], {
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
-        }).trim();
-        if (!sha) {
-            return '';
-        }
-        const dirty = execFileSync('git', ['status', '--porcelain'], {
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
-        }).trim().length > 0;
-        return `.${sha}${dirty ? '.dirty' : ''}`;
-    } catch {
-        return '';
-    }
-}
+/**
+ * Fixed dev token, deliberately 7 characters like the current release semver (`1.10.10`).
+ * Dev-printed charts then keep the same banner layout and QR density as production while
+ * still being obviously not a release.
+ */
+const DEV_APP_VERSION = 'develop';
 
 /**
- * - `npm run dev`: `1.0.0-dev.<short-sha>[.dirty]`, so a dev-printed QR is never mistaken for a release.
+ * - `npm run dev`: the literal {@link DEV_APP_VERSION}, so a dev-printed QR is never mistaken
+ *   for a release and the printed banner/QR stay the same width as production.
  * - `npm run build` / CI: the exact package.json version.
  * - `VITE_APP_VERSION` is an optional one-off override; CI does not set it.
  */
@@ -43,7 +31,7 @@ function resolveAppVersion(command: 'build' | 'serve'): string {
     if (override) {
         return override;
     }
-    return command === 'serve' ? `${pkg.version}-dev${gitDevSuffix()}` : pkg.version;
+    return command === 'serve' ? DEV_APP_VERSION : pkg.version;
 }
 
 /**

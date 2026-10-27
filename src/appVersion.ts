@@ -10,3 +10,10 @@
  */
 export const APP_VERSION: string =
     typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0-dev';
+
+/**
+ * Printed-banner form of {@link APP_VERSION}: the dev token is title-cased so the sheet reads
+ * “vDevelop” (the QR token and URL stay the lowercase `develop`). Release versions pass through.
+ */
+export const APP_VERSION_DISPLAY: string =
+    APP_VERSION === 'develop' ? 'Develop' : APP_VERSION;

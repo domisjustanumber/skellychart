@@ -30,8 +30,13 @@ export interface ParsedCharucoQrQuery {
     cv2: string | null;
 }
 
+/**
+ * `develop` is the fixed token dev servers stamp (see `DEV_APP_VERSION` in `vite.config.ts`).
+ * It has no numeric core, so `parseChartVersion` returns null for it — but the board
+ * parameters still round-trip.
+ */
 const PACKED_CHART_RE =
-    /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)w(\d+)h(\d+)s(\d+(?:\.\d+)?)$/;
+    /^(develop|\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)w(\d+)h(\d+)s(\d+(?:\.\d+)?)$/;
 
 type PackedChartValues = Pick<
     ParsedCharucoQrQuery,

@@ -2,7 +2,7 @@
  * Matches origin-sheet banner vertical extent in `pdfDocument.ts` so tiling reserves the same
  * height as the rendered PDF (instead of a flat {@link ORIGIN_PAGE_EXTRA_MM} slab).
  */
-import {APP_VERSION} from '../appVersion.js';
+import {APP_VERSION_DISPLAY} from '../appVersion.js';
 import {
     MM_MARGIN_SHEET,
     MM_ORIGIN_BANNER_BELOW_GAP_MM,
@@ -143,7 +143,7 @@ export function estimateOriginBannerStripFromPrintableTopMm(params: OriginBanner
     const bodyLineLead = bodyFontPx + Math.max(4, Math.round(0.52 * ppm * bScale));
 
     const {titleLine: boardTitle, bodyBlock: boardInfoBody} = originChartInfoParts({
-        version: APP_VERSION,
+        version: APP_VERSION_DISPLAY,
         mm: params.squareLengthMm,
         squaresX: params.squaresX,
         squaresY: params.squaresY,

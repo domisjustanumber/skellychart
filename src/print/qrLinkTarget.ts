@@ -80,10 +80,15 @@ function localDevQrSourceUrl(): string {
     return `${protocol}//${host}${port ? `:${port}` : ''}/`;
 }
 
+/**
+ * Base URL for an explicit target, independent of the current selection. The dev QR-target UI
+ * uses this to show both candidate URLs at once.
+ */
+export function resolveQrLinkSourceUrlFor(target: QrLinkTarget): string {
+    return target === 'local' ? localDevQrSourceUrl() : PRODUCTION_PRINT_SOURCE_URL;
+}
+
 /** Base URL QR codes should encode right now (the packed chart query is appended later). */
 export function resolveQrLinkSourceUrl(): string {
-    if (isQrLinkTargetSwitchAvailable() && getQrLinkTarget() === 'local') {
-        return localDevQrSourceUrl();
-    }
-    return PRODUCTION_PRINT_SOURCE_URL;
+    return resolveQrLinkSourceUrlFor(getQrLinkTarget());
 }

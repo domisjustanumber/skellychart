@@ -457,7 +457,6 @@ export function computeCharucoPagePreviewRects(
     tiling: TilingInfo,
     previewCanvasW: number,
     previewCanvasH: number,
-    patternRotated90 = false,
 ): CharucoPagePreviewRect[] | null {
     if (tiling.pageCount <= 1 || squaresX < 1 || squaresY < 1) {
         return null;
@@ -465,16 +464,7 @@ export function computeCharucoPagePreviewRects(
     const pw = Math.max(1, Math.round(previewCanvasW));
     const ph = Math.max(1, Math.round(previewCanvasH));
     const layout = charucoBoardPixelLayout(pw, ph, squaresX, squaresY);
-    const regions = patternRotated90
-        ? computeCharucoPageSquareRegions(squaresY, squaresX, tiling).map((r) => ({
-              sheetIndex: r.sheetIndex,
-              gx0: r.gy0,
-              gx1: r.gy1,
-              gy0: r.gx0,
-              gy1: r.gx1,
-          }))
-        : computeCharucoPageSquareRegions(squaresX, squaresY, tiling);
-    return regions.map((r) => {
+    return computeCharucoPageSquareRegions(squaresX, squaresY, tiling).map((r) => {
         const [l, rPx] = charucoCropXRange(r.gx0, r.gx1, layout);
         const [t, bPx] = charucoCropYRange(r.gy0, r.gy1, layout);
         return {

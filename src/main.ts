@@ -483,7 +483,8 @@ function syncUi(options: SyncUiOptions = {}): void {
     applyAutoPreset();
     const imperial = shouldUseImperialWorkingDistanceUnits();
     const pd = paperDims();
-    const tiling = effectiveTiling();
+    const layout = effectivePrintLayout();
+    const tiling = layout?.tiling ?? null;
 
     if (!lite) {
         byId('pageTitle').textContent = S.title;
@@ -591,10 +592,12 @@ function syncUi(options: SyncUiOptions = {}): void {
     }
     paperSel.value = state.paperId;
 
+    // Describe the printed grid so the squares agree with the sheet grid and the full-chart preview.
+    const printed = layout ? printSquareDims(layout.patternRotated90) : state;
     const summary = layoutSummaryText(
         tiling,
-        state.squaresX,
-        state.squaresY,
+        printed.squaresX,
+        printed.squaresY,
         state.squareMm,
         sheetCountPhrase,
         (cols, rows) => interpolate('; {{cols}}×{{rows}} sheet grid', {cols, rows}),
@@ -822,10 +825,13 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     try {
         const previewWallStart = perfDev() ? performance.now() : 0;
 
+        // Preview the board that is actually printed: when the layout transposes the grid, print / PDF /
+        // thumbnails render squaresY×squaresX, so the full chart and its sheet blocks must use the same grid.
+        const {squaresX: px, squaresY: py} = printSquareDims(layout.patternRotated90);
         const markerMm = state.squareMm * CHARUCO_MARKER_LENGTH_RATIO;
         const maxEdge = 560;
-        const wMm = state.squaresX * state.squareMm;
-        const hMm = state.squaresY * state.squareMm;
+        const wMm = px * state.squareMm;
+        const hMm = py * state.squareMm;
         let cW: number;
         let cH: number;
         if (wMm >= hMm) {
@@ -836,14 +842,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
             cW = Math.max(1, Math.round(cH * (wMm / hMm)));
         }
 
-        const rects = computeCharucoPagePreviewRects(
-            state.squaresX,
-            state.squaresY,
-            tiling,
-            cW,
-            cH,
-            layout.patternRotated90,
-        );
+        const rects = computeCharucoPagePreviewRects(px, py, tiling, cW, cH);
         const dark = isDarkMode();
 
         await yieldToMain();
@@ -854,8 +853,8 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
         const tBoardSvg = perfDev() ? performance.now() : 0;
         const boardDataUrl = svgToDataUrl(
             renderCharucoBoardSvg(cW, cH, {
-                squaresX: state.squaresX,
-                squaresY: state.squaresY,
+                squaresX: px,
+                squaresY: py,
                 squareLength: state.squareMm,
                 markerLength: markerMm,
             }),
@@ -872,7 +871,6 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
         const pd = paperDims();
         const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
 
-        const {squaresX: px, squaresY: py} = printSquareDims(layout.patternRotated90);
         const pages = buildPageSpecs(px, py, tiling).pages;
 
         let printResult: Awaited<ReturnType<typeof renderCharucoPrintSvg>>;
@@ -923,6 +921,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
             }
 
             hideFullPreviewPlaceholder();
+            byId('fullChartHint').classList.remove('hidden');
             boardImg.src = boardDataUrl;
             boardImg.alt = S.fullChart;
             boardImg.classList.remove('board-img--hidden');

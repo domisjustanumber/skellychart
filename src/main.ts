@@ -19,7 +19,9 @@ import {
     shouldUseImperialWorkingDistanceUnits,
     snapSquareMm,
     squareLengthTierBandEdgeFractions,
-    validTargetPageCountsForGrid,
+    pageStepNeighbours,
+    steppablePageCounts,
+    type PageStep,
     workingDistanceMinSquareMm,
     workingDistanceTierFromSquareLengthMm,
 } from './print/charucoLayout.js';
@@ -63,6 +65,7 @@ import {
     paperOptionDimensions,
     S,
     sheetCountPhrase,
+    sheetsShort,
 } from './ui/strings.js';
 
 const PRESET_IDS = ['close', 'near', 'far'] as const;
@@ -212,21 +215,128 @@ function pagesSliderDisplay(tiling: ReturnType<typeof effectiveTiling>): number 
     return tiling?.pageCount ?? 1;
 }
 
-/** Page counts the Pages slider steps through for the current grid, paper and working distance. */
-function pageCountTargets(): number[] {
+/** Stops of the sheets stepper for the current grid, paper and working distance. */
+function pageSteps(): PageStep[] {
     const pd = paperDims();
-    return validTargetPageCountsForGrid(state.squaresX, state.squaresY, pd.wMm, pd.hMm, distanceMinSquareMm());
+    return steppablePageCounts(state.squaresX, state.squaresY, pd.wMm, pd.hMm, distanceMinSquareMm());
 }
 
-/** Index of the entry in ascending `values` nearest to `target` (0 when empty). */
-function nearestIndex(values: readonly number[], target: number): number {
-    let best = 0;
-    values.forEach((v, i) => {
-        if (Math.abs(v - target) < Math.abs(values[best]! - target)) {
-            best = i;
+type PageStepTarget = 'fewer' | 'more' | 'fewest' | 'most';
+
+/**
+ * Moves the sheets stepper: sets the square length to the largest that prints the chosen page count.
+ * Like the other board sliders it never changes the distance. Returns false when there is nowhere to go.
+ */
+function stepPages(which: PageStepTarget): boolean {
+    const target = pageStepNeighbours(pageSteps(), pagesSliderDisplay(effectiveTiling()))[which];
+    if (!target || target.squareMm === state.squareMm) {
+        return false;
+    }
+    state.autoGrid = false;
+    forgetLinkSquare();
+    state.squareMm = target.squareMm;
+    scheduleSyncUi();
+    return true;
+}
+
+/** Assembled chart size for the stepper readout, in cm (or inches with imperial units). */
+function chartSizeParts(imperial: boolean): {w: string; h: string; unit: string} {
+    const fmt = (v: number): string => v.toLocaleString(undefined, {maximumFractionDigits: 1});
+    const wMm = state.squaresX * state.squareMm;
+    const hMm = state.squaresY * state.squareMm;
+    return imperial
+        ? {w: fmt(wMm / 25.4), h: fmt(hMm / 25.4), unit: 'in'}
+        : {w: fmt(wMm / 10), h: fmt(hMm / 10), unit: 'cm'};
+}
+
+function renderPageStepButton(
+    btn: HTMLElement,
+    step: PageStep | null,
+    sign: string,
+    noneLabel: string,
+    ariaTemplate: string,
+): void {
+    const main = btn.querySelector('.page-step-main')!;
+    const sub = btn.querySelector('.page-step-sub')!;
+    // aria-disabled (not disabled) keeps keyboard focus on the button when it reaches an end stop.
+    btn.setAttribute('aria-disabled', String(step === null));
+    if (step) {
+        main.textContent = `${sign} ${sheetsShort(step.pages)}`;
+        sub.textContent = interpolate(S.pagesStepSquares, {mm: step.squareMm});
+        btn.setAttribute('aria-label', interpolate(ariaTemplate, {sheets: sheetsShort(step.pages), mm: step.squareMm}));
+    } else {
+        main.textContent = `${sign} ${noneLabel}`;
+        sub.textContent = '';
+        btn.setAttribute('aria-label', noneLabel);
+    }
+}
+
+/** Sheets stepper: the printed page count, the stops either side, and why it stops at an end. */
+function syncPageStepper(tiling: ReturnType<typeof effectiveTiling>, imperial: boolean): void {
+    const count = pagesSliderDisplay(tiling);
+    const {fewer, more} = tiling ? pageStepNeighbours(pageSteps(), count) : {fewer: null, more: null};
+    byId('lbl-pages').textContent = S.sheetsOfPaper;
+    byId('pagesValue').textContent = tiling ? sheetsShort(count) : '—';
+    const size = chartSizeParts(imperial);
+    byId('pagesDetail').textContent = !tiling
+        ? ''
+        : tiling.pageCount > 1
+          ? interpolate(S.pagesDetail, {cols: tiling.npx, rows: tiling.npy, ...size})
+          : interpolate(S.pagesDetailOne, size);
+    renderPageStepButton(byId('pagesFewer'), fewer, '−', S.pagesFewerNone, S.pagesFewerAria);
+    renderPageStepButton(byId('pagesMore'), more, '+', S.pagesMoreNone, S.pagesMoreAria);
+
+    let hint = '';
+    if (tiling && !fewer && count > 1) {
+        hint = interpolate(S.pagesFewestHint, {distance: bandLabel(state.distanceId, imperial), mm: distanceMinSquareMm()});
+    } else if (tiling && !more) {
+        hint =
+            tiling.pageCount === state.squaresX * state.squaresY
+                ? S.pagesMostOnePerSheetHint
+                : interpolate(S.pagesMostLargestHint, {mm: state.squareMm});
+    }
+    const hintEl = byId('pagesHint');
+    hintEl.textContent = hint;
+    hintEl.classList.toggle('hidden', hint === '');
+}
+
+/** Click steps once; holding repeats (after 400 ms, every 120 ms) until an end stop. */
+function wirePageStepButton(btn: HTMLElement, which: 'fewer' | 'more'): void {
+    let delayTimer: number | undefined;
+    let repeatTimer: number | undefined;
+    let repeated = false;
+    const stop = (): void => {
+        window.clearTimeout(delayTimer);
+        window.clearInterval(repeatTimer);
+        delayTimer = undefined;
+        repeatTimer = undefined;
+    };
+    btn.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) {
+            return;
         }
+        stop();
+        repeated = false;
+        delayTimer = window.setTimeout(() => {
+            repeatTimer = window.setInterval(() => {
+                repeated = true;
+                if (!stepPages(which)) {
+                    stop();
+                }
+            }, 120);
+        }, 400);
     });
-    return best;
+    for (const type of ['pointerup', 'pointerleave', 'pointercancel', 'blur']) {
+        btn.addEventListener(type, stop);
+    }
+    btn.addEventListener('click', () => {
+        // A hold already stepped; the click that ends it must not step again.
+        if (repeated) {
+            repeated = false;
+            return;
+        }
+        stepPages(which);
+    });
 }
 
 /**
@@ -516,7 +626,6 @@ function syncUi(options: SyncUiOptions = {}): void {
         byId('lbl-advanced').textContent = S.advanced;
     }
     byId('lbl-square').textContent = interpolate(S.squareLengthHeading, {mm: state.squareMm});
-    byId('lbl-pages').textContent = interpolate(S.numberOfPages, {n: pagesSliderDisplay(tiling)});
     byId('lbl-sx').textContent = interpolate(S.squaresInX, {n: state.squaresX});
     byId('lbl-sy').textContent = interpolate(S.squaresInY, {n: state.squaresY});
     if (!lite) {
@@ -562,17 +671,7 @@ function syncUi(options: SyncUiOptions = {}): void {
     sqmm.step = '1';
     sqmm.value = String(state.squareMm);
 
-    // The Pages slider steps through the page counts this grid can print at the working distance,
-    // up to one square per sheet; its value is an index into that list, not a page count.
-    const pages = byId('pages') as HTMLInputElement;
-    const pageTargets = pageCountTargets();
-    const pageCount = pagesSliderDisplay(tiling);
-    pages.min = '0';
-    pages.max = String(Math.max(0, pageTargets.length - 1));
-    pages.step = '1';
-    pages.value = String(nearestIndex(pageTargets, pageCount));
-    pages.setAttribute('aria-valuetext', String(pageCount));
-    pages.disabled = pageTargets.length <= 1;
+    syncPageStepper(tiling, imperial);
 
     const sx = byId('sx') as HTMLInputElement;
     const sy = byId('sy') as HTMLInputElement;
@@ -1470,21 +1569,22 @@ function wireUi(): void {
         scheduleSyncUi();
     });
 
-    const pagesEl = byId('pages') as HTMLInputElement;
-    wireRangeResponsiveUi(pagesEl);
-    pagesEl.addEventListener('input', (e) => {
-        state.autoGrid = false;
-        forgetLinkSquare();
-        const targets = pageCountTargets();
-        const index = Math.round(Number((e.target as HTMLInputElement).value));
-        const n = targets[Math.max(0, Math.min(targets.length - 1, index))];
-        const pd = paperDims();
-        const sq =
-            n === undefined ? null : maxSquareMmForGridAndPages(state.squaresX, state.squaresY, pd.wMm, pd.hMm, n);
-        if (sq !== null) {
-            state.squareMm = sq;
+    wirePageStepButton(byId('pagesFewer'), 'fewer');
+    wirePageStepButton(byId('pagesMore'), 'more');
+    const pageStepKeys: Record<string, PageStepTarget> = {
+        ArrowLeft: 'fewer',
+        ArrowDown: 'fewer',
+        ArrowRight: 'more',
+        ArrowUp: 'more',
+        Home: 'fewest',
+        End: 'most',
+    };
+    byId('pagesGroup').addEventListener('keydown', (e) => {
+        const which = pageStepKeys[e.key];
+        if (which) {
+            e.preventDefault();
+            stepPages(which);
         }
-        scheduleSyncUi();
     });
 
     const sxEl = byId('sx') as HTMLInputElement;

@@ -43,7 +43,18 @@ export const S = {
     paperOption: '{{paper}} ({{dims}})',
     advanced: 'Advanced settings',
     squareLengthHeading: 'Square length ({{mm}} mm)',
-    numberOfPages: 'Number of pages ({{n}})',
+    sheetsOfPaper: 'Sheets of paper',
+    pagesStepSquares: '{{mm}} mm squares',
+    pagesFewerAria: 'Fewer sheets: {{sheets}}, {{mm}} millimetre squares',
+    pagesMoreAria: 'More sheets: {{sheets}}, {{mm}} millimetre squares',
+    pagesFewerNone: 'Fewer sheets',
+    pagesMoreNone: 'More sheets',
+    pagesDetail: '{{cols}}×{{rows}} sheets · chart {{w}} × {{h}} {{unit}}',
+    pagesDetailOne: 'chart {{w}} × {{h}} {{unit}}',
+    pagesFewestHint:
+        'Fewest sheets for {{distance}}: squares must be at least {{mm}} mm. Use fewer squares or larger paper to go lower.',
+    pagesMostOnePerSheetHint: 'One square per sheet: the most this grid can use.',
+    pagesMostLargestHint: 'Largest square that prints on this paper ({{mm}} mm).',
     squaresInX: 'Squares in X ({{n}})',
     squaresInY: 'Squares in Y ({{n}})',
     layoutCannotFit:
@@ -131,6 +142,11 @@ export function bandLabel(tier: WorkingDistanceTierId, imperial: boolean): strin
 
 export function sheetCountPhrase(count: number): string {
     return count === 1 ? `${count} sheet of paper` : `${count} sheets of paper`;
+}
+
+/** Short count for the sheets stepper: “1 sheet”, “6 sheets”. */
+export function sheetsShort(count: number): string {
+    return count === 1 ? '1 sheet' : `${count} sheets`;
 }
 
 export function paperLabel(id: string): string {

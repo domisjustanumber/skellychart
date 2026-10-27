@@ -256,6 +256,55 @@ export function validTargetPageCountsForGrid(
     return f.pageCounts.filter((p) => f.maxSquareMmByPageCount.get(p)! >= minSquareMm);
 }
 
+/** One stop of the sheets stepper: a page count and the largest square length that prints exactly it. */
+export interface PageStep {
+    pages: number;
+    squareMm: number;
+}
+
+/**
+ * Stops of the sheets stepper, ascending: the page counts from {@link validTargetPageCountsForGrid}, minus
+ * near-duplicates (a count whose largest square is less than max(1 mm, 3%) bigger than the previous kept
+ * stop). The fewest and the most sheets are always kept.
+ */
+export function steppablePageCounts(
+    squaresX: number,
+    squaresY: number,
+    paperWMm: number,
+    paperHMm: number,
+    minSquareMm: number = CHARUCO_SQUARE_MM_MIN,
+): PageStep[] {
+    const all = validTargetPageCountsForGrid(squaresX, squaresY, paperWMm, paperHMm, minSquareMm).map((pages) => ({
+        pages,
+        squareMm: maxSquareMmForGridAndPages(squaresX, squaresY, paperWMm, paperHMm, pages)!,
+    }));
+    const kept: PageStep[] = [];
+    all.forEach((step, i) => {
+        const prev = kept[kept.length - 1];
+        const isLast = i === all.length - 1;
+        if (!prev || isLast || step.squareMm - prev.squareMm >= Math.max(1, Math.ceil(0.03 * prev.squareMm))) {
+            kept.push(step);
+        }
+    });
+    return kept;
+}
+
+/**
+ * The stepper stops either side of the printed page count (which may itself be a skipped near-duplicate,
+ * e.g. after moving the square slider), plus the fewest and most.
+ */
+export function pageStepNeighbours(
+    steps: readonly PageStep[],
+    currentPages: number,
+): {fewer: PageStep | null; more: PageStep | null; fewest: PageStep | null; most: PageStep | null} {
+    return {
+        fewer: [...steps].reverse().find((s) => s.pages < currentPages) ?? null,
+        more: steps.find((s) => s.pages > currentPages) ?? null,
+        fewest: steps[0] ?? null,
+        most: steps[steps.length - 1] ?? null,
+    };
+}
+
 /** Square lengths (mm) that print on this paper, ascending. */
 export function enumerateValidSquareSizes(
     squaresX: number,

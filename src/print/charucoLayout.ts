@@ -215,6 +215,19 @@ export function squareLengthTierBandEdgeFractions(): {closeNear: number; nearFar
 export const BOARD_GRID_MIN = 2;
 export const BOARD_GRID_MAX = 40;
 
+/** Markers the dictionary holds (DICT_4X4_250); a board needs one per white square. */
+export const BOARD_MARKERS_MAX = 250;
+
+/** Markers on an X×Y board: one in every white square, floor(X·Y/2). */
+export function charucoMarkerCount(squaresX: number, squaresY: number): number {
+    return Math.floor((squaresX * squaresY) / 2);
+}
+
+/** Largest count on one axis that keeps the board within the dictionary, given the other axis (X·Y ≤ 501). */
+export function boardGridAxisMax(otherAxisCount: number): number {
+    return Math.min(BOARD_GRID_MAX, Math.floor((2 * BOARD_MARKERS_MAX + 1) / otherAxisCount));
+}
+
 /**
  * Smallest square length (mm) allowed at a working distance. Distance bands are minimums, not ranges:
  * a large square is fine at any distance, but squares below the band are too small to detect from there.

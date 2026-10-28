@@ -247,6 +247,9 @@ export function putGrayOnCanvas(canvas: HTMLCanvasElement, gray: Uint8Array): vo
  */
 function arucoMarkerSvgPath(id: number, sidePx: number, borderBits: number): string {
     const markerSize = ARUCO_MARKER_SIZE_4X4;
+    if (id < 0 || id >= 250) {
+        throw new RangeError(`ArUco id ${id} out of range for DICT_4X4_250`);
+    }
     const tiny = markerSize + 2 * borderBits;
     const byte0 = DICT_4X4_250_ROT0_BYTES[id * 2]!;
     const byte1 = DICT_4X4_250_ROT0_BYTES[id * 2 + 1]!;

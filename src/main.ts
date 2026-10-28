@@ -4,6 +4,8 @@ import {renderCharucoPrintSvg} from './print/svgDocument.js';
 import {
     BOARD_GRID_MAX,
     BOARD_GRID_MIN,
+    BOARD_MARKERS_MAX,
+    boardGridAxisMax,
     CHARUCO_SQUARE_MM_MAX,
     CHARUCO_SQUARE_MM_MIN,
     PAPER_OPTIONS,
@@ -366,10 +368,12 @@ function distanceMinSquareMm(): number {
 
 /**
  * X / Y keep the square length (so they never change the distance); the page count follows. Every grid
- * prints every square length up to the paper's limit, so there is nothing to snap or end-stop here.
+ * prints every square length up to the paper's limit; the only end-stop is the marker dictionary, so
+ * each axis stops where the board would need more than 250 markers.
  */
 function setGridSize(axis: 'squaresX' | 'squaresY', requested: number): void {
-    state[axis] = clampInt(requested, BOARD_GRID_MIN, BOARD_GRID_MAX);
+    const other = axis === 'squaresX' ? state.squaresY : state.squaresX;
+    state[axis] = clampInt(requested, BOARD_GRID_MIN, boardGridAxisMax(other));
 }
 
 function syncThemeToggle(): void {
@@ -1260,6 +1264,18 @@ function applyQrQueryFromLocation(): void {
         }
         if (parsed.squaresY !== null) {
             state.squaresY = clampInt(parsed.squaresY, BOARD_GRID_MIN, BOARD_GRID_MAX);
+        }
+        // Older generators let a board outgrow the marker dictionary; keep X and end-stop Y as the slider does.
+        const linkedSquaresY = state.squaresY;
+        state.squaresY = Math.min(state.squaresY, boardGridAxisMax(state.squaresX));
+        if (state.squaresY !== linkedSquaresY) {
+            warnings.push(
+                interpolate(S.qrGridClamped, {
+                    theirs: `${state.squaresX} × ${linkedSquaresY}`,
+                    ours: `${state.squaresX} × ${state.squaresY}`,
+                    markers: BOARD_MARKERS_MAX,
+                }),
+            );
         }
         if (parsed.paperId !== null && paperById(parsed.paperId)) {
             state.paperId = parsed.paperId;

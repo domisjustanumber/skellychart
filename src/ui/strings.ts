@@ -77,6 +77,8 @@ export const S = {
         'This chart was made by a newer version (v={{theirs}}) than this generator (v={{ours}}). The sheet layout or labels may not match what FreeMoCap produced.',
     qrSquareSnapped:
         'This link’s square length ({{theirs}} mm) cannot print on {{paper}}, so the nearest size that can ({{ours}} mm) is shown. Check the square size on your printed chart.',
+    qrGridClamped:
+        'This link’s board ({{theirs}} squares) needs more ArUco markers than the dictionary holds ({{markers}}), so its markers cannot be detected; the largest board that fits ({{ours}}) is shown instead.',
     qrOpenCvMismatch:
         'This link’s OpenCV line (cv2) does not match this generator (expected {{ours}}; got {{theirs}}). Board detection or geometry may differ.',
     previewTitle: 'Preview',

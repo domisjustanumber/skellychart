@@ -1,6 +1,8 @@
 /**
  * Origin-sheet banner geometry (logo, instructions, chart info, QR), shared by the sheet renderer and
- * `scripts/generate-banner-size.ts`, which sizes the reserved banner strip from this same layout.
+ * `scripts/generate-banner-size.ts`, which sizes the reserved banner strip from this same layout. The
+ * compact variant (print-shop boards: logo, chart info and QR, no instructions) is laid out in a given box
+ * and sized at runtime with {@link compactBannerHeightMm}, never from the generated strip table.
  *
  * Text is measured with fixed Helvetica metrics rather than a browser canvas, so the banner wraps
  * identically on every device and in both Print and Save as PDF, and the generated strip height is
@@ -25,7 +27,16 @@ import {sheetSafeMarginsMm} from './sheetGeometry.js';
 import {ORIGIN_WRITE_IN_BOX_MARK, originChartInfoParts, pdfLabels} from './labels.js';
 
 export interface OriginBannerLayoutParams {
-    /** Sheet size (mm) as printed, after any landscape swap; the banner fills its safe margins. */
+    /** `full` (default): home sheets, inside the sheet's safe margins. `compact`: print-shop boards, in {@link box}. */
+    variant?: 'full' | 'compact';
+    /** Compact only: the banner's box in px (the shop content block); it replaces the sheet's safe margins. */
+    box?: {leftPx: number; rightPx: number; topPx: number};
+    /**
+     * Cap height (em) of the face the banner is drawn in, for centring the write-in label on its box:
+     * 0.718 for Helvetica (default); outlined shop text passes `GLYPH_CAP_HEIGHT_EM`.
+     */
+    capHeightEm?: number;
+    /** Sheet size (mm) as printed, after any landscape swap; the full banner fills its safe margins. */
     paperWMm: number;
     paperHMm: number;
     /** Banner type scale (`ORIGIN_BANNER_VISUAL_SCALE` at full size). */
@@ -65,6 +76,8 @@ export interface OriginBannerLayout {
     boardInfoLines: {text: string; right: number; y: number}[];
     /** Empty box for writing the measured square length in; `null` if the label has no box. */
     writeInBox: {x: number; y: number; w: number; h: number} | null;
+    /** Left edge of the widest chart-info line. */
+    infoLeft: number;
     /** Bottom of the chart-info column. */
     infoBottom: number;
     instrLeft: number;
@@ -112,22 +125,26 @@ export function bannerLogoSizePx(heightMm: number, naturalWOverH: number, ppm = 
 
 /**
  * Lay out the origin banner at one type scale. Returns `null` when the instruction and chart-info
- * columns do not fit side by side at that scale.
+ * columns do not fit side by side at that scale, or (compact) when a chart-info line would wrap.
  */
 export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBannerLayout | null {
     const {paperWMm, paperHMm, typeScale, version, squareLengthMm, squaresX, squaresY, logoWidthPx, logoHeightPx} =
         params;
     const ppm = params.ppm ?? PIXELS_PER_MM;
-    const margins = sheetSafeMarginsMm(paperWMm, paperHMm);
-    const marginTopPx = Math.ceil(margins.top * ppm);
+    const compact = params.variant === 'compact';
+    if (compact && !params.box) {
+        throw new Error('A compact banner needs a box.');
+    }
+    const margins = compact ? null : sheetSafeMarginsMm(paperWMm, paperHMm);
+    const marginTopPx = margins ? Math.ceil(margins.top * ppm) : params.box!.topPx;
     const bodyFontPx = Math.round(26 * (ppm / 12) * typeScale);
     const titleFontPx = Math.round(24 * (ppm / 12) * typeScale);
     const bodyLineLead = bodyFontPx + Math.max(4, Math.round(0.52 * ppm * typeScale));
     const vGap = Math.max(4, Math.round(ppm * typeScale));
     const sidePad = Math.round(ORIGIN_BANNER_CONTENT_SIDE_MM * ppm);
-    const bannerLeft = Math.ceil(margins.left * ppm) + sidePad;
+    const bannerLeft = margins ? Math.ceil(margins.left * ppm) + sidePad : params.box!.leftPx;
     // Rounded inwards from the exact sheet size (Letter and Tabloid are not whole px).
-    const bannerRightInner = Math.floor((paperWMm - margins.right) * ppm) - sidePad;
+    const bannerRightInner = margins ? Math.floor((paperWMm - margins.right) * ppm) - sidePad : params.box!.rightPx;
     const bannerTitleTop = marginTopPx + Math.round(ORIGIN_BANNER_CONTENT_TOP_MM * ppm);
     const bannerTextTop = bannerTitleTop + Math.round(ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM * ppm);
     const qrSizePx = Math.max(32, Math.round(QR_SIZE_MM * ppm));
@@ -135,12 +152,15 @@ export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBann
     const gapInstBoard = Math.round(ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM * ppm);
     const instrLeft =
         bannerLeft + logoWidthPx + (logoWidthPx > 0 ? Math.round(ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM * ppm) : 0);
-    const minInstColPx = Math.max(1, Math.round(12 * ppm));
+    // The compact banner has no instructions column, so chart info may run up to the logo.
+    const minInstColPx = compact ? 0 : Math.max(1, Math.round(12 * ppm));
 
     // The chart-info block is right-anchored at `boardInfoRight`, so it grows left into the
     // instructions column instead of toward the QR code.
     const boardInfoRight = qrX - Math.round(ORIGIN_GAP_QR_TO_BOARD_INFO_MM * ppm);
-    const boardColMaxW = Math.max(1, boardInfoRight - instrLeft - gapInstBoard - minInstColPx);
+    const boardColMaxW = compact
+        ? boardInfoRight - instrLeft
+        : Math.max(1, boardInfoRight - instrLeft - gapInstBoard - minInstColPx);
     const {titleLine: boardTitle, bodyBlock: boardInfoBody} = originChartInfoParts({
         version,
         mm: squareLengthMm,
@@ -154,7 +174,11 @@ export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBann
     for (const para of boardInfoBody.split('\n')) {
         const markAt = para.indexOf(ORIGIN_WRITE_IN_BOX_MARK);
         if (markAt === -1) {
-            for (const line of wrapHelvetica(para, bodyFontPx, false, boardColMaxW)) {
+            const lines = wrapHelvetica(para, bodyFontPx, false, boardColMaxW);
+            if (compact && lines.length > 1) {
+                return null;
+            }
+            for (const line of lines) {
                 boardInfoLines.push({text: line, right: boardInfoRight, y});
                 infoLeft = Math.min(infoLeft, boardInfoRight - helveticaTextWidthPx(line, bodyFontPx));
                 y += bodyLineLead;
@@ -168,8 +192,8 @@ export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBann
         const w = Math.round(ORIGIN_WRITE_IN_BOX_W_MM * ppm);
         const h = Math.round(ORIGIN_WRITE_IN_BOX_H_MM * ppm);
         const boxTop = y + gap;
-        // Helvetica cap height is 0.718 em; the `hanging` baseline sits at the cap top.
-        const textY = boxTop + Math.round((h - 0.718 * bodyFontPx) / 2);
+        // The `hanging` baseline sits at the cap top (0.718 em for Helvetica).
+        const textY = boxTop + Math.round((h - (params.capHeightEm ?? 0.718) * bodyFontPx) / 2);
         let right = boardInfoRight;
         if (after) {
             boardInfoLines.push({text: after, right, y: textY});
@@ -186,17 +210,24 @@ export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBann
     }
     const infoBottom = y;
 
-    const instructionAllowRight = infoLeft - gapInstBoard;
-    if (instructionAllowRight - instrLeft < minInstColPx) {
-        return null;
-    }
     const instBodyY = bannerTextTop + titleFontPx + vGap;
-    const instLines = wrapHelvetica(
-        params.instructionsBody ?? pdfLabels.originInstructionsBody,
-        bodyFontPx,
-        false,
-        instructionAllowRight - instrLeft,
-    );
+    let instLines: string[] = [];
+    if (compact) {
+        if (infoLeft < instrLeft) {
+            return null;
+        }
+    } else {
+        const instructionAllowRight = infoLeft - gapInstBoard;
+        if (instructionAllowRight - instrLeft < minInstColPx) {
+            return null;
+        }
+        instLines = wrapHelvetica(
+            params.instructionsBody ?? pdfLabels.originInstructionsBody,
+            bodyFontPx,
+            false,
+            instructionAllowRight - instrLeft,
+        );
+    }
     const instBottom = instBodyY + instLines.length * bodyLineLead;
 
     const qrBottom = bannerTitleTop + qrSizePx;
@@ -219,6 +250,7 @@ export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBann
         boardTitle,
         boardInfoLines,
         writeInBox,
+        infoLeft,
         infoBottom,
         instrLeft,
         instBodyY,
@@ -230,4 +262,37 @@ export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBann
 /** Banner strip (px) from the safe top margin through the gap below the banner. */
 export function originBannerStripPx(layout: OriginBannerLayout): number {
     return layout.bottom - layout.marginTopPx;
+}
+
+/** Inputs that set a compact banner's size: everything but its box. */
+export type CompactBannerParams = Omit<
+    OriginBannerLayoutParams,
+    'variant' | 'box' | 'paperWMm' | 'paperHMm' | 'instructionsBody'
+>;
+
+const COMPACT_PROBE_RIGHT_PX = 1e6;
+
+function layoutCompactProbe(params: CompactBannerParams): OriginBannerLayout {
+    const layout = layoutOriginBanner({
+        ...params,
+        paperWMm: 0,
+        paperHMm: 0,
+        variant: 'compact',
+        box: {leftPx: 0, rightPx: COMPACT_PROBE_RIGHT_PX, topPx: 0},
+    });
+    if (!layout) {
+        throw new Error('Compact banner does not lay out even on an unbounded width.');
+    }
+    return layout;
+}
+
+/** Narrowest box (px) the compact banner fits without wrapping: logo, gap, widest chart-info line, gap, QR. */
+export function compactBannerMinWidthPx(params: CompactBannerParams): number {
+    const layout = layoutCompactProbe(params);
+    return Math.ceil(layout.instrLeft + (COMPACT_PROBE_RIGHT_PX - layout.infoLeft));
+}
+
+/** Compact banner height (mm) from its top through the gap below it; it does not depend on the box width. */
+export function compactBannerHeightMm(params: CompactBannerParams): number {
+    return layoutCompactProbe(params).bottom / (params.ppm ?? PIXELS_PER_MM);
 }

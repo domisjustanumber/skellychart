@@ -1,6 +1,6 @@
 # Print-shop mode plan
 
-**Status:** in progress on branch `print-shop` (worktree `C:\Users\Dom\GitHub\skellychart-print-shop`), rebased onto `ui-tweaks` `509ef6f`. Done and committed: steps −1 (`593c1d9`), 0 (`b9a926e`, LF fix `033e2a6`), 0b (`524bd25`), 1 (`4dc3f73`), 2 (`7181759`), 3 (`bb3bdf6`), 4 (`5b1517f`), the rework of steps 1 and 2 for the 2026-10-28 decisions (standard sizes only, no monochrome in phase 1; `5698a35`), 5 (`93102c1`), 6. Next: step 7. Plan file: `plans/print-shop.md`. All `file:line` references are to the `ui-tweaks` code.
+**Status:** in progress on branch `print-shop` (worktree `C:\Users\Dom\GitHub\skellychart-print-shop`), rebased onto `ui-tweaks` `509ef6f`. Done and committed: steps −1 (`593c1d9`), 0 (`b9a926e`, LF fix `033e2a6`), 0b (`524bd25`), 1 (`4dc3f73`), 2 (`7181759`), 3 (`bb3bdf6`), 4 (`5b1517f`), the rework of steps 1 and 2 for the 2026-10-28 decisions (standard sizes only, no monochrome in phase 1; `5698a35`), 5 (`93102c1`), 6 (`e5ff234`), 7. Next: step 8a. Plan file: `plans/print-shop.md`. All `file:line` references are to the `ui-tweaks` code.
 
 ## Goal
 
@@ -484,7 +484,8 @@ It also asserts the writer-to-parser round trip for every size × every bleed in
 - a square is s × 12 px (1:1);
 - the QR input URL parses back to X, Y, s, the size and the options.
 
-**7. PDF export (`src/ui/pdfExport.ts`) and the PDF check.**
+**7. PDF export (`src/ui/pdfExport.ts`) and the PDF check. Done.**
+- Built as specified; the properties come from `shopPdfProperties()` in `shopSheet.ts` (the keywords carry the chart link). `check:shop-pdf` drives the system Chrome through `playwright-core` (no browser download; `PLAYWRIGHT_CHANNEL=msedge` to switch) against a Vite server on `scripts/shop-pdf-harness/`; `npm run check:all` runs `build` then it. Deploy still runs only `build`. jsPDF writes zero as `0.`, so black reads `0. g`.
 - `buildPdfBlobFromSvgPages(pages, onProgress, options?)`. Called without options, it does exactly what it does today (`125-132`).
 - With `options.shop`:
   - `putOnlyUsedFonts: true`;

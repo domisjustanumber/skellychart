@@ -111,14 +111,57 @@ function pageOrientation(widthMm: number, heightMm: number): 'portrait' | 'lands
     return widthMm > heightMm ? 'landscape' : 'portrait';
 }
 
-/** Pack every sheet into a single PDF. The returned blob contains all pages, in print order. */
+/** A page box in mm from the page's top-left corner. */
+export interface PdfBoxMm {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+}
+
+/** Print-shop file: one font-free page with its trim and bleed boxes, and document properties for the shop. */
+export interface PdfShopOptions {
+    trimBoxMm: PdfBoxMm;
+    bleedBoxMm: PdfBoxMm;
+    title: string;
+    subject: string;
+    keywords: string;
+    creator: string;
+}
+
+/** Largest page jsPDF writes (14400 pt); it clamps bigger pages with only a console warning. */
+const PDF_PAGE_MAX_MM = (14400 * 25.4) / 72;
+
+/** Elements that would put fonts or images in a print-shop PDF; its SVG draws text as paths. */
+const SHOP_FORBIDDEN_ELEMENTS = 'text, tspan, textPath, foreignObject, image, use';
+
+/** A box (mm, top-left origin) as PDF points with a bottom-left origin, on a page `pageHMm` tall. */
+function pdfBoxPt(box: PdfBoxMm, pageHMm: number) {
+    const k = 72 / 25.4;
+    return {
+        bottomLeftX: box.x * k,
+        bottomLeftY: (pageHMm - box.y - box.h) * k,
+        topRightX: (box.x + box.w) * k,
+        topRightY: (pageHMm - box.y) * k,
+    };
+}
+
+/**
+ * Pack every sheet into a single PDF. The returned blob contains all pages, in print order. With
+ * `options.shop`, the PDF is the print-shop file: exactly one page, no fonts, a TrimBox and BleedBox.
+ */
 export async function buildPdfBlobFromSvgPages(
     pages: readonly PdfSvgPage[],
     onProgress?: PdfExportProgressHandler,
+    options?: {shop?: PdfShopOptions},
 ): Promise<Blob> {
     const first = pages[0];
     if (!first) {
         throw new Error('No printable pages to export.');
+    }
+    const shop = options?.shop;
+    if (shop && (pages.length !== 1 || first.widthMm > PDF_PAGE_MAX_MM || first.heightMm > PDF_PAGE_MAX_MM)) {
+        throw new Error('A print-shop file is one page of at most 5080 mm.');
     }
 
     const [{jsPDF}, {svg2pdf}] = await Promise.all([import('jspdf'), import('svg2pdf.js')]);
@@ -127,6 +170,8 @@ export async function buildPdfBlobFromSvgPages(
         format: [first.widthMm, first.heightMm],
         orientation: pageOrientation(first.widthMm, first.heightMm),
         compress: true,
+        // Otherwise jsPDF writes all 14 standard fonts into every file, used or not.
+        ...(shop ? {putOnlyUsedFonts: true} : {}),
     });
     // Ask PDF viewers to print at actual size rather than fit to the page (Acrobat and Chrome honour it).
     doc.viewerPreferences({PrintScaling: 'None'});
@@ -141,12 +186,29 @@ export async function buildPdfBlobFromSvgPages(
         }
         // jsPDF units are mm, so the root SVG viewport maps straight onto the page box.
         const root = parseSvgPage(page.svg);
+        if (shop && root.querySelector(SHOP_FORBIDDEN_ELEMENTS)) {
+            throw new Error('The print-shop sheet contains text or images; it must be paths only.');
+        }
         normaliseTextBaselines(root);
         await svg2pdf(root, doc, {
             x: 0,
             y: 0,
             width: page.widthMm,
             height: page.heightMm,
+        });
+    }
+
+    if (shop) {
+        const {pageContext} = doc.getCurrentPageInfo() as unknown as {
+            pageContext: {trimBox: ReturnType<typeof pdfBoxPt> | null; bleedBox: ReturnType<typeof pdfBoxPt> | null};
+        };
+        pageContext.trimBox = pdfBoxPt(shop.trimBoxMm, first.heightMm);
+        pageContext.bleedBox = pdfBoxPt(shop.bleedBoxMm, first.heightMm);
+        doc.setDocumentProperties({
+            title: shop.title,
+            subject: shop.subject,
+            keywords: shop.keywords,
+            creator: shop.creator,
         });
     }
 

@@ -238,3 +238,26 @@ export async function renderShopPrintSvg(params: {
         chartUrl,
     };
 }
+
+/**
+ * PDF document properties for the print-shop file. The subject carries the same facts as the slug and the
+ * order note (100%, trim, square size); the keywords carry the chart link.
+ */
+export function shopPdfProperties(p: {
+    squaresX: number;
+    squaresY: number;
+    squareMm: number;
+    layout: ShopLayout;
+    size: ShopSizeChoice;
+    chartUrl: string;
+    version?: string;
+}): {title: string; subject: string; keywords: string; creator: string} {
+    const version = p.version ?? APP_VERSION_DISPLAY;
+    const trim = formatShopTrim(p.layout.trimWMm, p.layout.trimHMm, p.size.unit).replace(/ × /g, ' x ');
+    return {
+        title: `FreeMoCap ChArUco calibration board ${p.squaresX} x ${p.squaresY}, ${p.squareMm} mm squares`,
+        subject: `Trim ${trim} - print at 100%, do not scale - square ${p.squareMm} mm`,
+        keywords: `FreeMoCap, ChArUco, calibration, print shop, ${p.chartUrl}`,
+        creator: `skellychart v${version}`,
+    };
+}

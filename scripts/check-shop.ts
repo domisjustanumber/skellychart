@@ -1,10 +1,11 @@
 /**
  * Build guard for print-shop mode: the size catalogue and its frozen link codes, the 36 in walk-in trim
- * cap, the bleed choices and page sizes, outlined text, the compact banner and the board geometry.
+ * cap, the bleed choices and page sizes, outlined text, the compact banner, the board geometry and the
+ * rendered sheet SVG.
  */
 import fs from 'node:fs';
 import {displayAppVersion} from '../src/appVersion.js';
-import {SHOP_SIZE_LINK_CODES, shopStandardBleedMm} from '../src/print/charucoDocUrl.js';
+import {parseCharucoQrSearchParams, SHOP_SIZE_LINK_CODES, shopStandardBleedMm} from '../src/print/charucoDocUrl.js';
 import {GLYPH_CAP_HEIGHT_EM, GLYPH_OUTLINES, GLYPH_X_HEIGHT_EM} from '../src/print/glyphOutlines.generated.js';
 import {helveticaTextWidthPx} from '../src/print/helveticaMetrics.js';
 import {canOutlineText, outlineText} from '../src/print/outlineText.js';
@@ -33,6 +34,7 @@ import {
 } from '../src/print/originBannerLayout.js';
 import {SKELLY_LOGO_NATURAL_W_OVER_H} from '../src/print/skellyLogo.js';
 import {
+    SHOP_CROP_MARK_LENGTH_MM,
     SHOP_CROP_MARK_MARGIN_MM,
     SHOP_SIZES,
     SHOP_SQUARE_MM_MAX,
@@ -360,11 +362,93 @@ for (const [squareMm, area, limit] of [[101, 88, '8×11'], [50, 391, '17×23'], 
     }
 }
 
+// Shop sheet SVG: every size × bleed × crop marks, font-free, sized to the page, 1:1, marks where they belong.
+process.env.CHARUCO_LOGO_FILE = new URL('../public/freemocap-logo.svg', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+const {renderShopPrintSvg} = await import('../src/print/shopSheet.js');
+const FORBIDDEN = ['<text', '<tspan', '<textPath', '<foreignObject', '<image', '<use', 'font-family', '@font-face', 'rgba(', 'opacity'];
+const toMm = (attr: string) => (attr.endsWith('in') ? Number.parseFloat(attr) * 25.4 : Number.parseFloat(attr));
+let sheetsRendered = 0;
+for (const size of SHOP_SIZES) {
+    const [squaresX, squaresY] = [7, 5];
+    const squareMm = maxShopSquareMm(squaresX, squaresY, size.id)!;
+    const layout = shopSheetLayout(squaresX, squaresY, squareMm, size.id)!;
+    for (const unit of UNITS) {
+        for (const bleed of shopBleedChoices(unit)) {
+            const plainOutlines: number[] = [];
+            for (const cropMarks of [false, true]) {
+                const options = {bleed, cropMarks, colour: 'colour' as const};
+                const shopSize = {id: size.id, unit};
+                const r = await renderShopPrintSvg({squaresX, squaresY, squareMm, layout, size: shopSize, options, documentationSourceUrl: 'https://skelly.cam/c/'});
+                const b = bleedMmForUnit(bleed, unit);
+                const label = `${size.id} ${unit} bleed ${b} mm${cropMarks ? ' + crop marks' : ''}`;
+                const found = FORBIDDEN.filter((t) => r.svg.includes(t));
+                if (found.length) {
+                    failures.push(`${label}: SVG contains ${found.join(', ')}`);
+                }
+                const root = /<svg [^>]*viewBox="0 0 ([\d.]+) ([\d.]+)" width="([\d.]+(?:mm|in))" height="([\d.]+(?:mm|in))"/.exec(r.svg);
+                const m = b + (cropMarks ? SHOP_CROP_MARK_MARGIN_MM : 0);
+                const mediaW = layout.trimWMm + 2 * m;
+                const mediaH = layout.trimHMm + 2 * m;
+                if (!root || Math.abs(toMm(root[3]!) - mediaW) > 1e-3 || Math.abs(toMm(root[4]!) - mediaH) > 1e-3 || Math.abs(Number(root[1]) - mediaW * PIXELS_PER_MM) > 1e-2 || Math.abs(Number(root[2]) - mediaH * PIXELS_PER_MM) > 1e-2) {
+                    failures.push(`${label}: root size ${root?.slice(1).join(' ')} is not the ${mediaW} × ${mediaH} mm page`);
+                }
+                if (!near(r.trimBoxMm.x, m) || !near(r.bleedBoxMm.x, m - b) || !near(r.bleedBoxMm.w, layout.trimWMm + 2 * b) || (!cropMarks && !near(r.bleedBoxMm.w, mediaW))) {
+                    failures.push(`${label}: trim / bleed boxes ${JSON.stringify(r.trimBoxMm)} ${JSON.stringify(r.bleedBoxMm)} do not match the page`);
+                }
+                // One square is exactly s × 12 px: the board's first black square.
+                const board = /<svg x="[\d.]+" y="[\d.]+" width="(\d+)" height="(\d+)" viewBox="0 0 \d+ \d+" overflow="hidden"><rect[^>]*\/><g fill="#000"><rect x="\d+" y="\d+" width="(\d+)" height="(\d+)"\/>/.exec(r.svg);
+                if (!board || Number(board[1]) !== squaresX * squareMm * PIXELS_PER_MM || Number(board[3]) !== squareMm * PIXELS_PER_MM || Number(board[4]) !== squareMm * PIXELS_PER_MM) {
+                    failures.push(`${label}: board or square is not drawn at 1:1`);
+                }
+                // Crop marks: 8 strokes on the trim edge lines, each from b to b + 6 mm outside the trim.
+                const markPath = /<path d="([^"]*)" fill="none" stroke="#000"/.exec(r.svg);
+                const outlines = (r.svg.match(/<path transform="matrix\(/g) ?? []).length;
+                if (cropMarks) {
+                    const px = (v: number) => v / PIXELS_PER_MM;
+                    const segs = [...(markPath?.[1] ?? '').matchAll(/M([-\d.]+) ([-\d.]+)([HV])([-\d.]+)/g)].map((s) => ({x: px(+s[1]!), y: px(+s[2]!), axis: s[3], to: px(+s[4]!)}));
+                    const t = r.trimBoxMm;
+                    const edgesX = [t.x, t.x + t.w];
+                    const edgesY = [t.y, t.y + t.h];
+                    const ok =
+                        segs.length === 8 &&
+                        segs.every((s) => {
+                            if (s.axis === 'H') {
+                                const [a, z] = [Math.min(s.x, s.to), Math.max(s.x, s.to)];
+                                const outside = z <= t.x ? [t.x - z, t.x - a] : [a - (t.x + t.w), z - (t.x + t.w)];
+                                return edgesY.some((e) => near(e, s.y)) && near(outside[0]!, b) && near(outside[1]!, b + SHOP_CROP_MARK_LENGTH_MM);
+                            }
+                            const [a, z] = [Math.min(s.y, s.to), Math.max(s.y, s.to)];
+                            const outside = z <= t.y ? [t.y - z, t.y - a] : [a - (t.y + t.h), z - (t.y + t.h)];
+                            return edgesX.some((e) => near(e, s.x)) && near(outside[0]!, b) && near(outside[1]!, b + SHOP_CROP_MARK_LENGTH_MM);
+                        });
+                    if (!ok) {
+                        failures.push(`${label}: crop marks are not 8 strokes from b to b + 6 mm outside the trim`);
+                    }
+                    if (outlines !== plainOutlines[0]! + 1) {
+                        failures.push(`${label}: no slug line below the marks`);
+                    }
+                } else {
+                    plainOutlines.push(outlines);
+                    if (markPath) {
+                        failures.push(`${label}: crop marks drawn although they are off`);
+                    }
+                }
+                // The QR link reopens this board, size and options.
+                const back = parseCharucoQrSearchParams(new URL(r.chartUrl).searchParams);
+                if (back.squaresX !== squaresX || back.squaresY !== squaresY || back.squareLengthMm !== squareMm || back.printMode !== 'shop' || back.shopSize?.id !== size.id || back.shopSize.unit !== unit || back.shopOptions?.cropMarks !== cropMarks || !near(bleedMmForUnit(back.shopOptions.bleed, unit), b)) {
+                    failures.push(`${label}: QR link ${r.chartUrl} does not reopen this board`);
+                }
+                sheetsRendered++;
+            }
+        }
+    }
+}
+
 if (failures.length > 0) {
     console.error(`\nShop check failed:\n  ${failures.join('\n  ')}`);
     process.exit(1);
 }
 console.log(
-    `check:shop: ${SHOP_SIZES.length} sizes, cap, bleeds, outlined text OK; ${layoutChecks} layouts; ` +
+    `check:shop: ${SHOP_SIZES.length} sizes, cap, bleeds, outlined text OK; ${layoutChecks} layouts; ${sheetsRendered} sheets; ` +
         `compact banner ${[...bannerHeights][0]} mm high, at most ${(widestBannerPx / PIXELS_PER_MM).toFixed(1)} mm wide (${bannerLayouts} charts)`,
 );

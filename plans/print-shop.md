@@ -1,6 +1,6 @@
 # Print-shop mode plan
 
-**Status:** in progress on branch `print-shop` (worktree `C:\Users\Dom\GitHub\skellychart-print-shop`), rebased onto `ui-tweaks` `509ef6f`. Done and committed: steps −1 (`593c1d9`), 0 (`b9a926e`, LF fix `033e2a6`), 0b (`524bd25`), 1 (`4dc3f73`), 2 (`7181759`), 3 (`bb3bdf6`), 4 (`5b1517f`), the rework of steps 1 and 2 for the 2026-10-28 decisions (standard sizes only, no monochrome in phase 1; `5698a35`), 5 (`93102c1`). Next: step 6. Plan file: `plans/print-shop.md`. All `file:line` references are to the `ui-tweaks` code.
+**Status:** in progress on branch `print-shop` (worktree `C:\Users\Dom\GitHub\skellychart-print-shop`), rebased onto `ui-tweaks` `509ef6f`. Done and committed: steps −1 (`593c1d9`), 0 (`b9a926e`, LF fix `033e2a6`), 0b (`524bd25`), 1 (`4dc3f73`), 2 (`7181759`), 3 (`bb3bdf6`), 4 (`5b1517f`), the rework of steps 1 and 2 for the 2026-10-28 decisions (standard sizes only, no monochrome in phase 1; `5698a35`), 5 (`93102c1`), 6. Next: step 7. Plan file: `plans/print-shop.md`. All `file:line` references are to the `ui-tweaks` code.
 
 ## Goal
 
@@ -467,7 +467,8 @@ It also asserts the writer-to-parser round trip for every size × every bleed in
 
 `check:presets` and `check:home-golden` stay unchanged.
 
-**6. Shop sheet SVG (new `src/print/shopSheet.ts`; small refactors in `svgAssemblyCore.ts`, `svgUtils.ts`).**
+**6. Shop sheet SVG (new `src/print/shopSheet.ts`; small refactors in `svgAssemblyCore.ts`, `svgUtils.ts`). Done.**
+- Built as specified. `svgCornerMarker` and `svgCharucoBoardInfoBlock` take an optional `SvgTextEmitter` with `outlineText`'s signature (home output is byte-identical, per `check:home-golden`). `renderShopPrintSvg()` builds the shop link, QR and logo and refuses without the logo; `resolveLogoForPrint` is exported from `svgDocument.ts`. The slug parts are `pdfLabels.shopSlugParts`. Content is placed on whole px from the layout (sub-0.05 mm). Load `shopSheet.ts` with `await import()`, and extend `check:dist` then to assert the `@license OFL-1.1` header in the built chunk (step 8a).
 - In `svgAssemblyCore.ts`, export `svgCornerMarker` (`106-129`) and `svgCharucoBoardInfoBlock` (`202-223`) with an optional `text` emitter. The default produces today's exact `<text>` markup.
 - `renderShopSheetSvg({X, Y, s, layout, qr, logo, version, url, bleedMm, cropMarks})` returns `{svg, mediaMm, trimBoxMm, bleedBoxMm}`:
   - a white root;
@@ -476,7 +477,7 @@ It also asserts the writer-to-parser round trip for every size × every bleed in
 - `svgRootOuterSizeAttrsUnit()` next to `svgRootOuterSizeAttrs` (`svgUtils.ts:23-28`). It writes inches only when the media is an exact multiple of ⅛ in; otherwise mm (with crop marks, usually mm).
 - Shop export refuses if the logo failed to load (`svgDocument.ts:82-83`).
 
-*Verify:* `check:shop` renders every size × every bleed in the list × {no marks, crop marks}, in Node, and asserts:
+*Verified:* `check:shop` renders every size × both units × every bleed in the list × {no marks, crop marks} (312 sheets), in Node, and asserts:
 - no `<text`, `<tspan`, `<textPath`, `<foreignObject`, `<image`, `<use`, `font-family`, `@font-face`, `rgba(` or `opacity`;
 - the root size equals the media size and the viewBox equals media × 12;
 - with crop marks, the mark endpoints are at trim ± b and ± (b + 6); with no marks, there are no mark paths and no slug;
@@ -668,7 +669,7 @@ It also asserts the writer-to-parser round trip for every size × every bleed in
 
 **Risks**
 - The approved X/Y end-stop is a new rule for shop mode: "No page cap" and "counts include guide" do not apply there. The memory notes must be updated (step 11).
-- Standard size codes become permanent with the first printed board. Freeze the list and its order before release, and only append. The Fit and custom forms built in step 1 must be removed before then.
+- Standard size codes become permanent with the first printed board. Freeze the list and its order before release, and only append.
 - Forgetting `putOnlyUsedFonts: true` on the shop path silently adds 14 fonts. `check:shop-pdf` catches it, but only when it is run.
 - The OFL notice must survive minification (`vite.config.ts` keeps legal comments); ship the licence file regardless.
 - A `VITE_APP_VERSION` containing a character missing from the glyph table makes `outlineText` throw. `check:shop` covers the override.

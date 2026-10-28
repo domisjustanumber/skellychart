@@ -24,6 +24,11 @@ export const pdfLabels = {
     /** Header right: which chart sheet this is. */
     sheetHeaderPage: 'Page {{current}} of {{total}} · row {{row}}, column {{col}}',
     sheetHeaderPaper: {a4: 'A4', a3: 'A3', letter: 'Letter', tabloid: 'Tabloid'} as Record<string, string>,
+    /**
+     * Slug below a print-shop board's crop marks (trimmed off), as parts joined by " | "; parts are dropped
+     * from the right until the line fits. Outlined text: ASCII plus ×, no `·`.
+     */
+    shopSlugParts: ['PRINT AT 100% - DO NOT SCALE', 'Trim {{trim}}', '{{squaresX}} × {{squaresY}} squares', '{{mm}} mm', 'v{{version}}'],
     originInstructionsTitle: 'Instructions',
     /**
      * Instructions column of a single-sheet chart's banner (wrapped when laid out). Its height is

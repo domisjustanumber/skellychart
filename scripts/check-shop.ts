@@ -1,8 +1,13 @@
 /**
  * Build guard for print-shop mode: the size catalogue and its frozen link codes, Fit-to-chart rounding,
- * the 36 in walk-in trim cap, the bleed choices and page sizes, and the custom-size limits.
+ * the 36 in walk-in trim cap, the bleed choices and page sizes, the custom-size limits, and outlined text.
  */
+import fs from 'node:fs';
+import {displayAppVersion} from '../src/appVersion.js';
 import {SHOP_SIZE_LINK_CODES, shopStandardBleedMm} from '../src/print/charucoDocUrl.js';
+import {GLYPH_CAP_HEIGHT_EM, GLYPH_OUTLINES, GLYPH_X_HEIGHT_EM} from '../src/print/glyphOutlines.generated.js';
+import {helveticaTextWidthPx} from '../src/print/helveticaMetrics.js';
+import {canOutlineText, outlineText} from '../src/print/outlineText.js';
 import {
     SHOP_CROP_MARK_MARGIN_MM,
     SHOP_SIZES,
@@ -173,6 +178,77 @@ for (const [w, h, unit, minW, minH, wanted] of custom) {
 for (const [region, unit] of [['US', 'in'], ['CA', 'in'], ['PR', 'in'], ['us', 'in'], ['MX', 'mm'], ['PH', 'mm'], ['GB', 'mm'], ['AU', 'mm'], [undefined, 'mm']] as const) {
     if (shopUnitForRegion(region) !== unit) {
         failures.push(`region ${region} defaults to ${shopUnitForRegion(region)}, expected ${unit}`);
+    }
+}
+
+// Outlined text: no fonts, glyphs placed with the AFM advances, and every printable version outlines.
+const OUTLINE_SAMPLES = [
+    'PRINT AT 100% - DO NOT SCALE | Trim 24.75 × 20 in (628.65 × 508 mm) | 12 × 9 squares | 50 mm | v2.0.0',
+    'FreeMoCap calibration chart – 7 × 5 squares, 32 mm “square” — 0.8 marker’s °',
+];
+/** Horizontal extent of an outlined path in its own 1000-unit frame. */
+function pathXExtent(svg: string): [number, number] {
+    const d = /\sd="([^"]*)"/.exec(svg)?.[1] ?? '';
+    const xs: number[] = [];
+    let isX = true;
+    for (const token of d.match(/[MLQZ]|-?\d+(?:\.\d+)?/g) ?? []) {
+        if (/[MLQZ]/.test(token)) {
+            isX = true;
+        } else {
+            if (isX) {
+                xs.push(Number(token));
+            }
+            isX = !isX;
+        }
+    }
+    return [Math.min(...xs), Math.max(...xs)];
+}
+for (const bold of [false, true]) {
+    for (const sample of OUTLINE_SAMPLES) {
+        const svg = outlineText(sample, {x: 10, y: 20, fontPx: 25.4, bold});
+        if (/<text|<tspan|font-family|<use|<defs/.test(svg) || !svg.startsWith('<path ')) {
+            failures.push(`outlineText("${sample}") is not a single font-free <path>`);
+        }
+    }
+    // H c H is wider than H H by exactly c's AFM advance, so each glyph is placed at the measured pen position.
+    const [hhMin, hhMax] = pathXExtent(outlineText('HH', {x: 0, y: 0, fontPx: 1000, bold}));
+    for (const ch of Object.keys(GLYPH_OUTLINES.normal)) {
+        const [min, max] = pathXExtent(outlineText(`H${ch}H`, {x: 0, y: 0, fontPx: 1000, bold}));
+        const gained = max - min - (hhMax - hhMin);
+        if (Math.abs(gained - helveticaTextWidthPx(ch, 1000, bold)) > 1e-9) {
+            failures.push(`outline of U+${ch.codePointAt(0)!.toString(16)} (${bold ? 'bold' : 'normal'}) advances ${gained}, not its AFM width`);
+        }
+    }
+}
+{
+    const fontPx = 30;
+    const width = helveticaTextWidthPx('Trim', fontPx);
+    const tx = (svg: string) => Number(/matrix\(\S+ 0 0 \S+ (\S+) (\S+)\)/.exec(svg)?.[1]);
+    const ty = (svg: string) => Number(/matrix\(\S+ 0 0 \S+ (\S+) (\S+)\)/.exec(svg)?.[2]);
+    const at = (anchor: 'start' | 'middle' | 'end', baseline: 'alphabetic' | 'hanging' | 'middle') =>
+        outlineText('Trim', {x: 100, y: 50, fontPx, anchor, baseline});
+    if (!near(tx(at('start', 'alphabetic')), 100) || !near(tx(at('middle', 'alphabetic')), 100 - width / 2) || !near(tx(at('end', 'alphabetic')), 100 - width)) {
+        failures.push('outlineText anchors do not follow the AFM width');
+    }
+    if (!near(ty(at('start', 'alphabetic')), 50) || !near(ty(at('start', 'hanging')), 50 + GLYPH_CAP_HEIGHT_EM * fontPx) || !near(ty(at('start', 'middle')), 50 + (GLYPH_X_HEIGHT_EM / 2) * fontPx)) {
+        failures.push('outlineText baselines are not at the cap height / half x-height');
+    }
+    let threw = false;
+    try {
+        outlineText('a·b', {x: 0, y: 0, fontPx});
+    } catch {
+        threw = true;
+    }
+    if (!threw) {
+        failures.push('outlineText does not throw on a character with no outline (U+00B7)');
+    }
+}
+const pkgVersion: string = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+for (const version of ['develop', pkgVersion, process.env.VITE_APP_VERSION?.trim()].filter((v): v is string => Boolean(v))) {
+    for (const printed of [version, displayAppVersion(version)]) {
+        if (!canOutlineText(`v${printed}`) || !canOutlineText(`v${printed}`, true)) {
+            failures.push(`version "${printed}" has characters with no outline`);
+        }
     }
 }
 

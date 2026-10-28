@@ -73,6 +73,13 @@ export default defineConfig(({command}) => ({
         // Bind to every interface so phones on the same Wi-Fi can open the dev server.
         host: true,
     },
+    build: {
+        rolldownOptions: {
+            // Keep `/*! @license */` notices (the Arimo OFL notice on the outlined glyphs, and the
+            // dependencies' own); Vite drops legal comments when minifying unless this is set.
+            output: {comments: {legal: true}},
+        },
+    },
     define: {
         __APP_VERSION__: JSON.stringify(resolveAppVersion(command)),
         __DEV_LAN_IP__: JSON.stringify(command === 'serve' ? resolveDevLanIpv4() : null),

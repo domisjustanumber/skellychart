@@ -1,6 +1,6 @@
 /**
  * Build guard for print-shop mode: the size catalogue and its frozen link codes, the 36 in walk-in trim
- * cap, the bleed choices and page sizes, outlined text and the compact banner.
+ * cap, the bleed choices and page sizes, outlined text, the compact banner and the board geometry.
  */
 import fs from 'node:fs';
 import {displayAppVersion} from '../src/appVersion.js';
@@ -9,7 +9,22 @@ import {GLYPH_CAP_HEIGHT_EM, GLYPH_OUTLINES, GLYPH_X_HEIGHT_EM} from '../src/pri
 import {helveticaTextWidthPx} from '../src/print/helveticaMetrics.js';
 import {canOutlineText, outlineText} from '../src/print/outlineText.js';
 import {BOARD_GRID_MAX, BOARD_GRID_MIN, boardGridAxisMax} from '../src/print/charucoLayout.js';
-import {CHARUCO_SQUARE_MM_MIN, ORIGIN_BANNER_VISUAL_SCALE, PIXELS_PER_MM, SKELLY_TOP_HEIGHT_MM} from '../src/print/constants.js';
+import {
+    CHARUCO_SQUARE_MM_MIN,
+    MM_ORIGIN_BANNER_BELOW_GAP_MM,
+    ORIGIN_BANNER_VISUAL_SCALE,
+    PIXELS_PER_MM,
+    SKELLY_TOP_HEIGHT_MM,
+} from '../src/print/constants.js';
+import {
+    SHOP_MARKER_ROOM_MM,
+    maxShopGridForSquare,
+    maxShopSquareMm,
+    shopQuietZoneMm,
+    shopSheetLayout,
+    shopValidSquaresMm,
+    smallestFittingShopSize,
+} from '../src/print/shopLayout.js';
 import {
     bannerLogoSizePx,
     compactBannerHeightMm,
@@ -271,11 +286,70 @@ if (widestBannerPx / PIXELS_PER_MM > 110) {
     }
 }
 
+// Shop geometry: content inside the trim with the quiet zone on every side, the marker inside it, and
+// exact end-stops (the largest square fits, one more does not; valid squares contiguous from 10 mm).
+if (MM_ORIGIN_BANNER_BELOW_GAP_MM < SHOP_MARKER_ROOM_MM.top) {
+    failures.push(`the banner's gap below (${MM_ORIGIN_BANNER_BELOW_GAP_MM} mm) leaves no room for the corner marker above the board`);
+}
+const SAMPLE_COUNTS = [2, 3, 5, 7, 12, 20, 40];
+let layoutChecks = 0;
+for (const size of SHOP_SIZES) {
+    for (const squaresX of SAMPLE_COUNTS) {
+        for (const squaresY of SAMPLE_COUNTS.filter((y) => y <= boardGridAxisMax(squaresX))) {
+            const label = `${size.id} ${squaresX}×${squaresY}`;
+            const valid = shopValidSquaresMm(squaresX, squaresY, size.id);
+            if (valid.length > 0 && (valid[0] !== CHARUCO_SQUARE_MM_MIN || valid.some((s, i) => i > 0 && s !== valid[i - 1]! + 1))) {
+                failures.push(`${label}: valid squares are not contiguous from ${CHARUCO_SQUARE_MM_MIN} mm`);
+            }
+            const max = maxShopSquareMm(squaresX, squaresY, size.id);
+            if (max !== null && max < SHOP_SQUARE_MM_MAX && shopSheetLayout(squaresX, squaresY, max + 1, size.id)) {
+                failures.push(`${label}: ${max + 1} mm also fits, so ${max} mm is not the largest square`);
+            }
+            for (const s of valid) {
+                const l = shopSheetLayout(squaresX, squaresY, s, size.id)!;
+                const e = shopQuietZoneMm(s);
+                const {content: c, board: b, banner: n} = l;
+                const tooClose = c.x < e - 1e-9 || c.y < e - 1e-9 || c.x + c.w > l.trimWMm - e + 1e-9 || c.y + c.h > l.trimHMm - e + 1e-9;
+                const trimOk = near(Math.min(l.trimWMm, l.trimHMm), size.wMm) && near(Math.max(l.trimWMm, l.trimHMm), size.hMm);
+                if (tooClose || !trimOk || b.x < SHOP_MARKER_ROOM_MM.left || !near(b.w, squaresX * s) || !near(b.h, squaresY * s) || !near(n.y + n.h, b.y) || b.x < c.x - 1e-9 || b.x + b.w > c.x + c.w + 1e-9) {
+                    failures.push(`${label} at ${s} mm: content, board or banner outside the trim's quiet zone`);
+                    break;
+                }
+                layoutChecks++;
+            }
+        }
+    }
+}
+const shopSquareMax = Math.max(...SHOP_SIZES.map((s) => maxShopSquareMm(3, 3, s.id) ?? 0));
+if (shopSquareMax !== SHOP_SQUARE_MM_MAX) {
+    failures.push(`the largest 3-wide square on any size is ${shopSquareMax} mm, but SHOP_SQUARE_MM_MAX is ${SHOP_SQUARE_MM_MAX}`);
+}
+// What the 36 × 48 in cap allows (valid boards only, X·Y ≤ 501).
+for (const [squareMm, area, limit] of [[101, 88, '8×11'], [50, 391, '17×23'], [45, 494, '26×19'], [44, 500, '20×25'], [22, 500, '20×25']] as const) {
+    let best = 0;
+    for (let x = BOARD_GRID_MIN; x <= BOARD_GRID_MAX; x++) {
+        const y = maxShopGridForSquare('squaresY', x, squareMm, '36x48in');
+        best = Math.max(best, y === null ? 0 : x * y);
+    }
+    if (best !== area) {
+        failures.push(`at ${squareMm} mm the largest board on 36 × 48 in has ${best} squares, expected ${area} (${limit})`);
+    }
+}
+{
+    const l = shopSheetLayout(12, 9, 50, '24x36in');
+    if (!l?.landscape || !near(l.quietZoneMm, 12.5) || smallestFittingShopSize(12, 9, 50, 'in') !== '24x36in' || smallestFittingShopSize(12, 9, 50, 'mm') !== 'a1') {
+        failures.push('worked example: 12 × 9 at 50 mm is not 24 × 36 in landscape (inch toggle) or A1 (mm toggle)');
+    }
+    if (shopQuietZoneMm(20) !== 10 || shopQuietZoneMm(60) !== 15 || shopQuietZoneMm(200) !== 25) {
+        failures.push('quiet zone is not min(25, max(10, s/4))');
+    }
+}
+
 if (failures.length > 0) {
     console.error(`\nShop check failed:\n  ${failures.join('\n  ')}`);
     process.exit(1);
 }
 console.log(
-    `check:shop: ${SHOP_SIZES.length} sizes, cap, bleeds, outlined text OK; ` +
+    `check:shop: ${SHOP_SIZES.length} sizes, cap, bleeds, outlined text OK; ${layoutChecks} layouts; ` +
         `compact banner ${[...bannerHeights][0]} mm high, at most ${(widestBannerPx / PIXELS_PER_MM).toFixed(1)} mm wide (${bannerLayouts} charts)`,
 );

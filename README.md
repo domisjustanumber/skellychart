@@ -19,10 +19,20 @@ Serve `dist/` with any static file host; Vite is configured with `base: './'` fo
 
 ## Build checks
 
-`npm run build` runs two checks first:
+`npm run build` runs these checks first:
 
 - **`npm run check:presets`** (`scripts/check-presets.ts`): every working-distance preset must print exactly its target page count, at the largest square length that does so, and at or above the distance's minimum square length. Layout feasibility itself is computed live in the browser (`src/print/feasibilityRules.ts`).
 - **`npm run check:banner`**: the committed origin-banner heights in `src/print/originBannerStrip.generated.ts` must match the banner layout. After changing banner text, type, gaps, QR or logo size, the safe printing margins, paper sizes, the square-length or grid ranges, or the version, run **`npm run generate:banner`** and commit the result (CI does this for its own version bump).
+- **`npm run check:links`** (`scripts/check-links.ts`): every chart link format ever printed (legacy params, 1.x, 2.x home `p` and print-shop `t`) opens as it should, garbled links degrade without losing the board, the writer round-trips, and the longest link stays at QR version 4.
+- **`npm run check:glyphs`**: `src/print/glyphOutlines.generated.ts` (the outlined print-shop text, from Arimo in `scripts/fonts/arimo/`) is up to date. After changing the font, the glyph set or `src/print/helveticaMetrics.ts`, run **`npm run generate:glyphs`** and commit the result.
+- **`npm run check:shop`** (`scripts/check-shop.ts`): the print-shop size catalogue and frozen size codes, page sizes for every bleed, outlined text, the compact banner, the board geometry and end-stops, the presets, and every rendered shop sheet SVG.
+- **`npm run check:home-golden`**: the home ("My printer") sheet SVGs match `scripts/home-golden.json`. Only for a deliberate change to home output, run **`npm run check:home-golden -- --update`** and commit the result.
+
+`npm run check:all` runs the build and then **`npm run check:shop-pdf`**, which builds print-shop PDFs in Chrome (via `playwright-core`; set `PLAYWRIGHT_CHANNEL=msedge` for Edge) and checks their page boxes, crop marks, that they carry no fonts, and their link. Run it before a release.
+
+## Print-shop mode
+
+"Print shop" makes one print-ready PDF for a rigid board (foam board, corflute, ACM) from a walk-in print shop: one of the standard sizes the chains sell (12 × 18 in to 36 × 48 in, A3 to A0, 450 × 600 to 900 × 1200 mm), the board at exactly 1:1 under a compact banner, with a white quiet zone. The page is the trim plus a bleed (3 mm or ⅛ in by default), with optional crop marks and a slug; the PDF sets the TrimBox and BleedBox and contains no fonts (text is outlined). Everything, including the size and print options, round-trips in the QR link (`t` field). The plan and its decisions are in `plans/print-shop.md`.
 
 ## ArUco dictionary data
 

@@ -104,11 +104,13 @@ for (const c of cases) {
         documentationSourceUrl: SOURCE_URL,
         cooperativeYield: false,
     });
+    // The logo markup keeps the file's line endings, which Git checks out as CRLF on Windows and LF elsewhere.
+    const lf = (svg: string) => svg.replace(/\r\n?/g, '\n');
     const hash = createHash('sha256');
     if (guide) {
-        hash.update(`guide ${guide.paperWMm}x${guide.paperHMm}\n${guide.svg}\n`);
+        hash.update(`guide ${guide.paperWMm}x${guide.paperHMm}\n${lf(guide.svg)}\n`);
     }
-    svgs.forEach((svg, i) => hash.update(`sheet ${i + 1}\n${svg}\n`));
+    svgs.forEach((svg, i) => hash.update(`sheet ${i + 1}\n${lf(svg)}\n`));
     actual[`${c.key} (${svgs.length} sheet${svgs.length === 1 ? '' : 's'}${guide ? ' + guide' : ''})`] =
         hash.digest('hex');
 }

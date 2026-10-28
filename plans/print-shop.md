@@ -1,88 +1,76 @@
 # Print-shop mode plan
 
-**Status:** planned, not started. Branch `print-shop`, worktree `C:\Users\Dom\GitHub\skellychart-print-shop`, based on `700d028`. Plan file: `plans/print-shop.md`.
-
-**Rebase first.** The `ui-tweaks` work in the main checkout is still uncommitted. It adds `src/print/sheetGeometry.ts` with the per-edge `MM_SAFE_*` margins, and it changes `tiling.ts`, `svgAssemblyCore.ts`, `originBannerLayout.ts`, `originBannerStrip*.ts`, `pdfExport.ts` (`PrintScaling: None`), `main.ts`, `strings.ts`, `style.css`, `index.html`, the scripts and `SKILL.md`. Commit that work, then rebase `print-shop` onto `ui-tweaks` before writing any code. The base `700d028` still has a uniform `MM_MARGIN_SHEET = 13` and no `PrintScaling` call. All `file:line` references below are to the `ui-tweaks` code.
+**Status:** in progress on branch `print-shop` (worktree `C:\Users\Dom\GitHub\skellychart-print-shop`), rebased onto `ui-tweaks` `509ef6f`. Done and committed: steps −1 (`593c1d9`), 0 (`b9a926e`, LF fix `033e2a6`), 0b (`524bd25`), 1 (`4dc3f73`), 2 (`7181759`), 3 (`bb3bdf6`), 4 (`5b1517f`), the rework of steps 1 and 2 for the 2026-10-28 decisions (standard sizes only, no monochrome in phase 1; `5698a35`), 5 (`93102c1`). Next: step 6. Plan file: `plans/print-shop.md`. All `file:line` references are to the `ui-tweaks` code.
 
 ## Goal
 
 Add a "Print shop" mode that makes one print-ready PDF for printing on **rigid boards** (foam board, corflute/coroplast, PVC, ACM) at walk-in chains (FedEx Office, Staples, Office Depot, Officeworks), over the counter or through their online ordering:
-- one sheet, trimmed to a chosen or fitted size, with a trim of at most 36 × 48 in;
+- one sheet at a standard rigid-board size, with a trim of at most 36 × 48 in;
 - the board at exactly 1:1, with a compact banner and a white quiet zone;
 - by default a page of trim + bleed with no marks; crop marks and a slug are opt-in; correct TrimBox and BleedBox;
-- colour or monochrome;
+- colour (monochrome is deferred);
 - no fonts.
 
-Pricing and specs come from rigid-board products, not paper posters or plan prints. A scanned shop board reopens the same board, in shop mode, at the same size, unit, bleed, marks and colour. Home ("My printer") output does not change, apart from the X·Y ≤ 501 marker-limit fix (step −1) and the visually identical logo flatten (step 0b).
+Pricing and specs come from rigid-board products, not paper posters or plan prints. A scanned shop board reopens the same board, in shop mode, at the same size, unit, bleed and marks. Home ("My printer") output does not change, apart from the X·Y ≤ 501 marker-limit fix (step −1) and the visually identical logo flatten (step 0b).
 
 ## Decisions (settled)
 
 **User decisions for phase 1**
 1. **It is a mode.** A segmented control, "My printer | Print shop", changes the preview, controls, summary and export.
 2. **Always one sheet.** No tiling, assembly guide, join strips, tape labels or sheet header. A board that does not fit is refused: the square, X and Y controls end-stop. It is never tiled or shrunk without telling the user.
-3. **The default size is "Fit to chart"**, rounded **up** to 5 mm or ¼ in, following the shop **mm | in toggle**. The region only sets the toggle's default: inches in US, CA and PR, and metric everywhere else, including MX and PH. (See open question 5.)
-4. **Standard sizes** are the fixed sizes the chains sell rigid boards in: 12×18, 16×20, 18×24, 24×36 and 36×48 in; A3, A2, A1, A0, B1, 450×600, 600×900 and 900×1200 mm. There is also a Custom W × H entry. Every shop trim is capped at 36 in (see the 36 in cap); the user is told why, and bigger sizes may come later.
+3. **Standard sizes only; the default is the smallest that fits.** There is no "Fit to chart" and no custom size. On entering shop mode (or when a link's size is unreadable or no longer fits), the size is the smallest standard size that holds the chart: the toggled unit's group is searched first, by area, then the other group; orientation and ties follow the deterministic paper tie-break (`tiling.ts:124-132`). The **mm | in toggle** follows the region by default: inches in US, CA and PR, metric everywhere else, including MX and PH.
+4. **Standard sizes** are the fixed sizes the chains sell rigid boards in: 12×18, 16×20, 18×24, 24×36 and 36×48 in; A3, A2, A1, A0, B1, 450×600, 600×900 and 900×1200 mm. All of them are within the 36 in walk-in cap (see the 36 in cap); the user is told why bigger sizes are missing, and they may come later.
 5. **Instructions go in two places:** a scan-landing card and a "Copy order details" note for the shop.
-6. **A scanned shop board reopens in shop mode at its size.** This uses a new `t` field, not spare `p` digits (see the next section). Every shop option (size, unit, bleed, marks, colour) round-trips in the link.
+6. **A scanned shop board reopens in shop mode at its size.** This uses a new `t` field, not spare `p` digits (see the next section). Every shop option (size, unit, bleed, marks) round-trips in the link.
 7. **Shop PDFs are pure vectors**, with no fonts: every glyph is an outlined `<path>`.
-8. **Colour | Monochrome toggle**, in phase 1, stored in the link (`g`). **Default Colour**: rigid boards cost the same either way (no chain has a cheaper B&W rigid price, see Rigid-board prices), and colour keeps the red/green X/Y arrow cue. Monochrome is for users who want a strictly black-and-white file (for example paper or greyscale routes).
-   - Phase 1 colour = today's colours: RGB arrows and logo, DeviceGray black.
-   - Phase 2 colour = CMYK.
-   - Monochrome = pure DeviceGray in both phases (step 7).
+8. **Colour only in phase 1.** Today's colours: RGB arrows and logo, DeviceGray black. Monochrome is deferred (see Deferred): no chain prices a rigid board lower in B&W (see Rigid-board prices). The link's `g` letter stays in the grammar and is parsed, but it is reserved: the UI never writes it and the app ignores it.
+9. **X/Y end-stop approved** (2026-10-28): in shop mode X and Y end-stop at the selected size, the 36 in trim cap and the 250-marker limit, and never change the square or distance.
+10. **Quiet zone capped:** E = min(25, max(10, s/4)) mm.
 
 **Accepted from the earlier analysis**
 - **Compact banner:** skelly logo, chart info with the write-in box, and the QR. There is no instructions column. Its height is computed at runtime and never read from `originBannerStrip.generated.ts`. It spans max(board width, banner minimum width).
 - **Shop sizes are never added to `PAPER_OPTIONS`.** `scripts/generate-banner-size.ts` iterates over `PAPER_OPTIONS`, and `originBannerReserveMm()` throws on any width it does not know.
-- **Orientation:**
-  - Standard sizes: orientation is never chosen by hand. It is picked by the deterministic fit and tie-break that home mode uses for paper (`tiling.ts:124-132`), and the summary shows it.
-  - Custom: W is always horizontal, with the banner along W.
-  - Fit: the trim follows the content.
-  - The board is never transposed.
+- **Orientation** is never chosen by hand. It is picked by the deterministic fit and tie-break that home mode uses for paper (`tiling.ts:124-132`), and the summary shows it. The board is never transposed.
 - **Marks and bleed** (see Page geometry):
   - Default: **no crop marks + standard bleed** (3 mm with the mm toggle, ⅛ in = 3.175 mm with the in toggle). Rigid flows want bleed and no marks.
   - Crop marks are opt-in: "Crop marks (trade printers that trim)".
   - Bleed is a select with a fixed list; there is no free-form entry.
-  - All of it is written in the link. The link always wins. `localStorage` (inside try/catch) only seeds the bleed, marks and colour choices for a fresh shop session.
+  - All of it is written in the link. The link always wins. `localStorage` (inside try/catch) only seeds the bleed and marks choices for a fresh shop session.
 - **Preview matches the PDF.** One shop SVG, including the outer media area with any marks and slug, feeds both the preview and the PDF.
-- **Home mode is protected by a golden check of the SVG output.** PDFs are never byte-identical, because CreationDate and /ID change on every export. `check:presets`, `check:banner` and a new `check:home-golden` must keep passing without `--update` (the one deliberate update is the logo flatten, step 0b).
+- **Home mode is protected by a golden check of the SVG output.** PDFs are never byte-identical, because CreationDate and /ID change on every export. `check:presets`, `check:banner` and `check:home-golden` must keep passing without `--update`.
 - **Black stays DeviceGray `0 g`/`0 G` in phase 1**, which shops print as K100. CMYK is phase 2.
 - **No ICC profile, no OutputIntent, never claim PDF/X** for now (see Phase 2, Colour profile).
 - **No version bump: shop mode ships in v2.0.0**, with `CHARUCO_PRINT_LABEL_SPEC_VERSION` staying at 2. v2 has not been published, so no printed v2 chart or link exists yet. The new layout and the `t` field are part of v2's format from the first release.
 
 ## Decision 6: can the spare paper digits do it?
 
-**Only partly, so they are not used.** The digits 4-9 could mark shop mode, but they cannot also hold the size and options. Shop mode needs:
-- 2 Fit states (5 mm rounding or ¼ in rounding);
+**No, so they are not used.** The digits 4-9 could mark shop mode, but they cannot also hold the size and options. Shop mode needs:
 - 13 standard sizes, a list that will grow;
-- custom W × H, which is two continuous values;
-- the unit, bleed, marks and colour options.
+- the toggle unit;
+- the bleed and marks options.
 
-That is at least 16 states plus a payload, against 6 free digits. A Fit-only code would reopen a 24×36 board as "Fit", which breaks the rule that controls match the printout. Using up the digits would also leave none for future home papers. `PAPER_LINK_CODES` is fixed forever and append-only (`charucoDocUrl.ts:43-47`).
+That is at least 13 states plus a payload, against 6 free digits. Using up the digits would also leave none for future home papers. `PAPER_LINK_CODES` is fixed forever and append-only (`charucoDocUrl.ts:43-47`).
 
 **Chosen grammar.** A new optional `t` (trim) field inside the existing packed `b` value, so `CHART_QR_PARAM_KEYS` and `mergeCharucoQrParamsInto` are unchanged:
 
 ```
 b = <version>w<X>h<Y>s<mm>[p<d>][t<tail>]
-tail    = <size>[<options>]
-size    = m                     Fit to chart, mm (5 mm rounding)
-        | i                     Fit to chart, inches (1/4 in rounding)
-        | <code>[m|i]           standard shop size, SHOP_SIZE_LINK_CODES (0-99); the unit letter
-                                appears only when the mm | in toggle differs from the size's own unit
-        | <W>x<H>m              custom, whole mm
-        | <W>x<H>i              custom, inches in 1/4 in steps
+tail    = <code>[m|i][<options>]
+code    = SHOP_SIZE_LINK_CODES index (0-99); the unit letter appears only when the mm | in toggle
+          differs from the size's own unit
 options = [e | b<mm>] [c] [g]   in this fixed order; the defaults write nothing
           (no e or b)           standard bleed for the unit: 3 mm (m) or 1/8 in = 3.175 mm (i)
           e                     no bleed (exact trim)
           b<mm>                 bleed in mm, shortest form: b5, b10, b6.35, b3.175 (1/8 in with the
                                 mm toggle), b3 (3 mm with the in toggle)
           c                     crop marks on (default off)
-          g                     monochrome (grey); default colour
+          g                     reserved (monochrome, deferred): parsed, never written, ignored
 ```
 
 The link is parsed in stages: core, then size, then options. A damaged size never loses the board, and damaged options never lose the size.
-- Size forms use only digits, `.`, `x`, `m` and `i`, so the tail splits at the first `b`, `c`, `e` or `g`.
-- A size code followed by `m` or `i` is unambiguous, because the custom forms always contain an `x`.
+- Size forms use only digits, `m` and `i`, so the tail splits at the first `b`, `c`, `e` or `g`.
 - The remaining letters are reserved for future options; a new option letter must also join the split class.
+- The Fit (`m`, `i`) and custom (`<W>x<H>m|i`) forms built in step 1 are removed before v2 freezes. A link carrying one parses as a bad size and opens at the default size with a notice.
 
 ```ts
 // core: replaces PACKED_CHART_RE (charucoDocUrl.ts:40-41)
@@ -90,17 +78,17 @@ The link is parsed in stages: core, then size, then options. A damaged size neve
 // split group 6 into size and options
 /^([^bceg]*)(.*)$/
 // size (group 1)
-/^(?:([mi])|(0|[1-9]\d?)([mi])?|([1-9]\d{0,3})x([1-9]\d{0,3})m|([1-9]\d{0,2}(?:\.(?:25|5|75))?)x([1-9]\d{0,2}(?:\.(?:25|5|75))?)i)$/
+/^(0|[1-9]\d?)([mi])?$/
 // options (group 2)
 /^(?:(e)|b(\d{1,2}(?:\.\d{1,3})?))?(c)?(g)?$/
 ```
 
 Options writer and parser rules:
-- The writer writes nothing for the defaults (standard bleed, no marks, colour).
-- The writer writes `e` for no bleed, never `b0`, and `b<mm>` only when the bleed differs from the unit's standard.
+- The writer writes nothing for the defaults (standard bleed, no marks).
+- The writer writes `e` for no bleed, never `b0`, and `b<mm>` only when the bleed differs from the unit's standard. It never writes `g`.
 - The parser reads `b0` as `e`.
 - The bleed range (0-25 mm) is checked in code, not the regex; any value in range is accepted, so a new select entry needs no grammar change.
-- Bad options keep the size, fall back to the defaults and show a notice. A bad size opens at Fit with a notice (see Parser rules).
+- Bad options keep the size, fall back to the defaults and show a notice. A bad size opens at the default size with a notice (see Parser rules).
 
 **Stable shop size codes.** `SHOP_SIZE_LINK_CODES` is new in v2 (no earlier meaning to keep). Codes 0-12 are assigned as below and frozen at v2's first release; new sizes are appended:
 
@@ -115,43 +103,38 @@ Options writer and parser rules:
 | 6 | 12×18 in | | |
 
 **Examples:**
-- `?b=2.0.0w12h9s50t1`: 24×36 in, ⅛ in bleed, no marks, colour
+- `?b=2.0.0w12h9s50t1`: 24×36 in, ⅛ in bleed, no marks
 - `?b=2.0.0w12h9s50t1c`: 24×36 in, ⅛ in bleed, crop marks
 - `?b=2.0.0w12h9s50t1b5`: 24×36 in, 5 mm bleed
+- `?b=2.0.0w12h9s50t1e`: 24×36 in, exact trim
+- `?b=2.0.0w12h9s50t1m`: 24×36 in with the mm toggle (3 mm bleed, mm readouts)
+- `?b=2.0.0w12h9s50t4`: A1, 3 mm bleed
 - `?b=2.0.0w12h9s50t4ib10`: A1, inch toggle (inch readouts), 10 mm bleed
-- `?b=2.0.0w12h9s50tm`: Fit, mm, 3 mm bleed
-- `?b=2.0.0w12h9s50ti`: Fit, inches, ⅛ in bleed
-- `?b=2.0.0w12h9s50tme`: Fit, mm, exact trim
-- `?b=2.0.0w12h9s50t841x594mb10cg`: custom 841 × 594 mm, 10 mm bleed, crop marks, monochrome
-- `?b=2.0.0w9h12s50t24.5x36i`: custom 24.5 × 36 in, ⅛ in bleed (needs 475 × 653.5 mm; trim 622.3 × 914.4)
-- `?b=2.0.0w20h14s50t2g`: 36×48 in, ⅛ in bleed, monochrome
 
 **Writer rules:**
 - Home mode writes only `p`, exactly as today.
 - Shop mode writes only `t`.
-- Numbers are written in their shortest form (`24.5`, not `24.50`).
+- Numbers are written in their shortest form (`6.35`, not `6.350`).
 - The parser accepts `p` and `t` together, and `t` decides the mode.
 - Switching from a shop link back to home mode uses `defaultPaperId()`.
 
 **Parser rules:**
-- Range checks belong in code, not in the regex: custom limits, the trim cap, bleed 0-25 mm, and size ≥ content + 2E.
-- An unknown code (for example a `t17` written by a newer table) or a malformed size opens the board in shop mode at Fit, with a notice like `qrSquareSnapped`.
-- If the encoded size no longer fits the board (for example after a future layout change), the board opens at Fit with a notice.
-- If the board does not fit even at the Fit cap, it opens in home mode with a notice.
+- Range checks belong in code, not in the regex: the bleed (0-25 mm) and whether the board fits the size.
+- An unknown code (for example a `t17` written by a newer table) or a malformed size opens the board in shop mode at the default size, with a notice like `qrSquareSnapped`.
+- If the encoded size no longer fits the board (for example after a future layout change), the board opens at the default size with a notice.
+- If no standard size fits the board, it opens in home mode with a notice.
 - The board itself (X, Y, s) always reopens exactly, except links with X·Y > 501, which are clamped as in step −1.
 
-**QR impact** (measured with the project's qrcode library, EC level M, 22 mm QR):
+**QR impact** (EC level M, 22 mm QR; a full link is `https://skelly.cam/c/?b=` (24 B) + version + core + tail):
 
 | Link | Length | QR version | Module size |
 |---|---|---|---|
-| Fit or standard, default options, worst valid case (`w10h8s100t12i` or `w20h25s44t12i`; no valid shop board has two-digit X and Y with a three-digit square, so the core is at most 9 characters) | 42 B | 3 (the 3-M limit) | 0.759 mm |
-| Two-digit standard code with a two-digit version part | over 42 B | 4 | 0.667 mm |
-| Custom size | up to 51 B (`w20h25s44t35.75x47.75i`) | 4 | 0.667 mm |
-| Fit or standard, longest core + options (e.g. `t12b6.35cg`, `t12ib6.35cg`) | 43-49 B | 4 | 0.667 mm |
-| Worst case: `35.75x47.75i` + `b6.35cg` (with the in toggle, ⅛ in is the standard bleed and is not written) | 58 B | 4 (62 B limit) | 0.667 mm |
-| mm custom worst case: `914x1219m` + `b3.175cg` | 56 B | 4 | 0.667 mm |
+| Default options, worst valid case (`w10h8s100t12i`; no valid shop board has two-digit X and Y with a three-digit square, so the core is at most 9 characters) | 42 B | 3 (the 3-M limit) | 0.759 mm |
+| Any written option on a two-character tail, e.g. `t12ib6.35c` | 43-48 B | 4 | 0.667 mm |
+| Grammar worst case, `w20h25s44t12ib6.35cg` (`g` is never written in phase 1) | 49 B | 4 (62 B limit) | 0.667 mm |
+| The same with a two-digit minor and patch (`2.10.10`) | 51 B | 4 | 0.667 mm |
 
-Any link of 42 B or less is version 3. All of these still scan easily. Default links (standard bleed, no marks, colour) gain nothing. `check:links` asserts that the worst case stays at or below version 4.
+Any link of 42 B or less is version 3. All of these still scan easily. Default links (standard bleed, no marks) gain nothing. `check:links` asserts that the worst case stays at or below version 4.
 
 **No version bump.** v2 is unpublished, so the `t` field joins the v2 link format before any v2 chart is printed. The version stays 2.0.0 and the spec version stays 2.
 - Home output, including its QR link, is unchanged, so the banner rows and the home goldens do not move.
@@ -180,12 +163,12 @@ Any link of 42 B or less is version 3. All of these still scan easily. Default l
 - NA rigid sizes are 12×18, 16×20, 18×24, 22×28, 24×36 and 36×48 in. Officeworks mounts A3-B0 plus the inch sizes; corflute A2/A1/A0; PVC up to A1; ACM 450×600 / 600×900 / 900×1200 mm.
 - A3 is listed although it is also a home paper, because it is a rigid size.
 
-These are left out on purpose; Fit to chart and Custom cover them:
+These are left out on purpose:
 - B0 (1000 × 1414 mm), which exceeds the 36 in cap;
 - 22×28 in, which only FedEx sells;
 - 11×17 in, which is a home paper.
 
-**Dropdown order:** "Fit to chart (W × H)" (the default), the toggled unit's group by area (inch with the in toggle, metric with the mm toggle), then the other group by area, then "Custom…".
+**Dropdown order:** the toggled unit's group by area (inch with the in toggle, metric with the mm toggle), then the other group by area. The default size is the first entry, in this order, that fits the chart.
 
 ### Rigid-board prices
 
@@ -241,65 +224,58 @@ Used by the advice copy and the order note (step 10).
 - **Template:** online designers may fit or fill artwork to their template, which scales the board. Match the file's page size to the product template exactly and never use a fit/fill option. Measuring N squares on delivery catches any scale error.
 
 **Units toggle.** Shop mode has an **mm | in** toggle. It sets:
-- the Fit rounding unit;
 - the standard bleed (3 mm or ⅛ in);
-- which size group is listed first;
-- the custom-size entry unit;
+- which size group is listed, and searched for the default size, first;
 - every shop readout.
 
-The toggled unit is written in the link (the `m`/`i` letters of the `t` tail), so a scanned board reopens in the unit it was printed in. Otherwise the region only sets the default: `shopUnitForRegion()` uses a new `SHOP_INCH_REGIONS` set of US, CA and PR. Every other region defaults to metric, including MX and PH.
+The toggled unit is written in the link (the optional `m`/`i` letter after the size code), so a scanned board reopens in the unit it was printed in. Otherwise the region only sets the default: `shopUnitForRegion()` uses a new `SHOP_INCH_REGIONS` set of US, CA and PR. Every other region defaults to metric, including MX and PH.
 - `shouldUseImperialWorkingDistanceUnits()` is not suitable: it is US-only, and Canadian shops sell in inches.
 - `LETTER_DEFAULT_REGIONS` is not suitable either: it includes CL, CO, EC, VE and PH, where shops may sell ISO sizes.
 
-**Fit-to-chart rounding.** Count in whole steps and convert to mm once. Labels come from the integer count.
-- Metric: `n = ceil(x/5 − 1e-9)`, then trim = 5n mm.
-- Inch: `q = ceil(x/6.35 − 1e-9)`, then trim = q × 25.4 / 4 mm, labelled q/4 in.
-
-**The 36 in walk-in cap (every shop trim: Fit, standard and Custom).** The cap applies to the **trim**, not the page:
+**The 36 in walk-in cap.** The cap applies to the **trim**, not the page:
 - **trim short side ≤ 914.4 mm (36 in);**
 - **trim long side ≤ 1219.2 mm (48 in).**
 - Bleed and crop marks may extend the page beyond it.
-- Metric Fit cap: 910 × 1215 mm. Inch Fit cap: 36 × 48 in.
+- Every standard size is within it; 36×48 in is exactly the cap.
 
 Why trim-based: shops print 36×48 with bleed (FedEx Poster + Foam Board 36×48 with ⅛ in bleed; Officeworks 36×48 with 5 mm bleed = 924.4 mm wide; ACM 900×1200 + 10 mm), and direct-print rigid boards go through flatbeds, not rolls.
 
 Consequences:
-- A board that needs more is refused. The square, X and Y controls end-stop at the largest that fits.
-- Bleed, marks and colour never change what fits; every standard size, 36×48 included, takes every option.
+- A board that needs more than 36×48 in is refused. The square, X and Y controls end-stop at the largest that fits the selected size.
+- Bleed and marks never change what fits; every standard size, 36×48 included, takes every option.
 - **Tell the user why.** The size help and the end-stop hint say:
 
   > "Print-shop boards are limited to 36 in (914 mm) wide, the largest size most walk-in print shops (FedEx Office, Staples, Office Depot, Officeworks) print on rigid board. Larger boards need a sign shop; support for them may come later."
 
   The same sentence goes in the order note when the chart is within 25 mm of the cap.
-- **Keep the cap as a named constant, `SHOP_TRIM_MAX_MM = [914.4, 1219.2]`**, so larger sizes can be added later. Raising the cap later is backward-compatible, because Fit links store the rounding rule, not the trim. Lowering it would push printed boards back to home mode, so never lower it.
+- **Keep the cap as a named constant, `SHOP_TRIM_MAX_MM = [914.4, 1219.2]`**, which every standard size must satisfy. Raising it later (new, larger sizes appended with new codes) is backward-compatible. Never lower it, or printed boards stop reopening.
 
-**What the cap allows** (valid boards only, X·Y ≤ 501; see step −1):
+**What the cap allows** (on 36×48 in, valid boards only, X·Y ≤ 501; see step −1):
 
 | Square | Largest grid | Limited by |
 |---|---|---|
-| 101 mm (far band minimum) | 8×11 | the cap |
-| 50 mm | 17×23 | the cap |
+| 101 mm (far band minimum) | 8×11 or 11×8 | the cap |
+| 50 mm | 17×23 or 23×17 | the cap |
 | 45 mm | 26×19 (494 squares) | the cap |
 | 44 mm or less | 20×25 (500 squares, 250 markers) | the 250-marker limit |
 
-- Under the cap, the marker limit binds for every square ≤ 44 mm: the whole close band and the near band up to 44 mm. The trim cap alone would allow, for example, 26×35 or 36×26 at 33 mm and 40×40 at 22 mm or less. From 45 mm up, the trim cap is the limit.
+- Under the cap, the marker limit binds for every square ≤ 44 mm: the whole close band and the near band up to 44 mm. The trim cap alone would allow, for example, 27×35 or 36×26 at 33 mm and 40×40 at 22 mm or less. From 45 mm up, the trim cap is the limit. The 25 mm quiet-zone cap only changes squares over 100 mm, so it changes no row here.
 - 975 of the 1521 grids in 2-40 × 2-40 are valid.
 - A larger dictionary would lift the limit, but FreeMoCap's detector must use the same dictionary, so it is out of scope (see Deferred).
 
-**Shop square maximum: 260 mm** (home mode stays 225 mm), as a per-profile constant `SHOP_SQUARE_MM_MAX`.
-- **Only small grids gain.** Largest square, metric Fit (910 × 1215 mm); inch Fit (914.4 × 1219.2) is 0-2 mm higher, e.g. 4×3 253, 3×5 216, 7×5 161:
+**Shop square maximum: 288 mm** (home mode stays 225 mm), as a per-profile constant `SHOP_SQUARE_MM_MAX`. It is the largest square any grid at least 3 squares on each side fits on a standard size: 3×3 on 36×48 in, (914.4 − 2·25) / 3 = 288.1.
+- **Only small grids gain.** Largest square on 36×48 in (E = 25 mm, banner 28.5 mm, either orientation):
 
-  | Grid | Largest square, metric Fit |
+  | Grid | Largest square |
   |---|---|
-  | 3×3 | 260 mm |
-  | 3×4 / 4×3 | 260 / 251 mm |
-  | 5×3 | 220 mm |
-  | 3×5 | 215 mm |
-  | 4×4 | 202 mm |
-  | 7×5 | 160 mm |
+  | 3×3 | 288 mm |
+  | 3×4 / 4×3 | 285 / 278 mm |
+  | 5×3 | 233 mm |
+  | 3×5 | 228 mm |
+  | 4×4 | 216 mm |
+  | 7×5 | 167 mm |
 
-  So 225 mm only limits 3×3, 3×4 and 4×3.
-- **2-wide grids would reach 339-364 mm**, but they have only 1-2 inner ChArUco corners and are no use for calibration. They don't set the maximum.
+- **2-wide grids would reach 380-432 mm** (2×3 380, 3×2 389, 2×2 432), but they have only 1-2 inner ChArUco corners and are no use for calibration. They don't set the maximum.
 - **What changes in code:**
   - the square slider range and the band-edge fractions (`squareLengthTierBandEdgeFractions`, `charucoLayout.ts:204`);
   - `workingDistanceTierFromSquareLengthMm` (`charucoLayout.ts:194`);
@@ -307,17 +283,7 @@ Consequences:
   - `snapSquareMm`.
 
   Each of these takes the profile.
-- **Lever, if more is wanted:** the quiet zone E = max(10, s/4) costs a lot at large squares (65 mm per side at 260 mm). Capping it at 25 mm would raise 3×3 to about 280-286 mm and 5×3 to 233 mm. That needs a calibration-accuracy call, so it is an open question, not adopted.
-
-**Custom W × H.** Enter it in the toggled unit and store it in mm.
-
-| Rule | Limit |
-|---|---|
-| Step | whole mm, or ¼ in (matches the link regex) |
-| Minimum | content + 2E in the orientation as typed. The width is always more than 100 mm (banner minimum width + 2E); the height can be as small as 68.5 mm (2 rows at 10 mm). The error message names it: "This chart needs at least W × H". |
-| Maximum | the trim cap above: short side ≤ 914.4 mm and long side ≤ 1219.2 mm. The error message shows the cap note. |
-
-Invalid input keeps the last valid size and never shrinks the board. jsPDF clamps pages above 14400 pt (5080 mm), far beyond these limits. Shop export still asserts against that clamp instead of letting jsPDF clamp with only a warning (`jspdf.es.js:3132-3135`).
+- **Quiet-zone cap (adopted):** E = max(10, s/4) would cost 72 mm per side at 288 mm. Capping it at 25 mm is what lets 3×3 reach 288 mm (it stopped at 260 mm before) and 5×3 233 mm.
 
 ## Page geometry
 
@@ -325,11 +291,11 @@ All sizes in mm. s is the square length; PIXELS_PER_MM is 12.
 
 | Item | Value |
 |---|---|
-| Quiet zone E (white, all four sides, inside the trim) | max(10, 0.25·s). That is 10 mm at s ≤ 40 and 56.25 mm at s = 225. The corner marker (needs 4 mm) fits inside E. |
+| Quiet zone E (white, all four sides, inside the trim) | min(25, max(10, 0.25·s)). That is 10 mm at s ≤ 40, s/4 between, and 25 mm at s ≥ 100. The corner marker (needs 4 mm) fits inside E. |
 | Compact banner height Hb | 28.5 mm at full type scale. It is limited by the QR: 22 mm QR plus the 6.5 mm gap below. It is computed at runtime. |
-| Banner minimum width Wb | about 100 mm: logo 16.6 + 4 + widest chart-info line about 52 + 2.5 + QR 22. Measured with `helveticaTextWidthPx`. |
+| Banner minimum width Wb | 95.2 mm at most: logo + 4 + widest chart-info line + 2.5 + QR 22. Measured with `helveticaTextWidthPx`. |
 | Content block | W = max(X·s, Wb), H = Hb + Y·s. Centred in the trim, with the slack split evenly. The board is centred under the banner. |
-| Trim | Fit: round_up(content + 2E). Standard or custom: the fixed size. |
+| Trim | The selected standard size, in the orientation the fit picks. The content + 2E must fit inside it. |
 | Bleed b (white) | From the bleed select. Default Standard: 3 mm with the mm toggle, 3.175 mm (⅛ in) with the in toggle. The bleed is blank white, so its only job is the page size. |
 | Crop marks (opt-in) | 8 lines (2 per corner, on the trim edge lines), stroke 0.25 pt = 0.0882 mm (1.058 px), #000. Each runs from b to b + 6 mm outside the trim. |
 | Media margin M | No marks: b (0 for exact trim). Crop marks: b + 7 mm. |
@@ -358,13 +324,13 @@ No free-form entry is needed: every rigid flow found uses one of these, and the 
 
 **Slug text.** ASCII plus `×`, with no `·`:
 
-`PRINT AT 100% - DO NOT SCALE | Trim 24.75 × 20 in (628.65 × 508 mm) | 12 × 9 squares | 50 mm | v2.0.0`
+`PRINT AT 100% - DO NOT SCALE | Trim 36 × 24 in (914.4 × 609.6 mm) | 12 × 9 squares | 50 mm | v2.0.0`
 
 **Worked example:** 12 × 9 at 50 mm.
 - Board 600 × 450, E = 12.5, content 600 × 478.5, content + 2E = 625 × 503.5.
-- Fit, metric: trim 625 × 505 mm; page with 3 mm bleed 631 × 511; with crop marks (M = 10) 645 × 525.
-- Fit, inch: trim 24.75 × 20 in (628.65 × 508 mm); page with ⅛ in bleed 25 × 20.25 in.
-- 24×36 in is chosen landscape (914.4 × 609.6), because portrait is too narrow.
+- mm toggle: the metric group is searched first. A2 and 450×600 are too small either way; A1 fits landscape (841 × 594). Page with 3 mm bleed 847 × 600; with crop marks (M = 10) 861 × 614.
+- in toggle: the inch group is searched first. 18×24 is too narrow (609.6 < 625); 24×36 fits landscape (36 × 24 in = 914.4 × 609.6). Page with ⅛ in bleed 36.25 × 24.25 in.
+- Portrait is too narrow on both, so both are chosen landscape.
 
 ```
  media = trim + 2M          (M = b with no marks, the default; M = b + 7 mm with crop marks)
@@ -375,7 +341,7 @@ No free-form entry is needed: every rigid flow found uses one of these, and the 
  |            . +-------------------------+ .            |
  |            . | TRIM        E           | .            |
  |            . |   +--------------------+| .            |
- |            . | E | [logo][info][QR]   || .   E = max(10, s/4)
+ |            . | E | [logo][info][QR]   || .   E = min(25, max(10, s/4))
  |            . |   | board X*s x Y*s    || .            |
  |            . |   | (origin marker     || .            |
  |            . |   |  inside E)         || .            |
@@ -394,21 +360,21 @@ No free-form entry is needed: every rigid flow found uses one of these, and the 
 
 ## Pure-vector text approach
 
-- **Font source:** Arimo Regular and Bold v1.33 (googlefonts/Arimo `fonts/ttf`, pinned commit). Licence is OFL-1.1 with no Reserved Font Name. The TTFs and `OFL.txt` go in `scripts/fonts/arimo/`, which is dev-only and never bundled. Its outlines and advances match Liberation Sans 2.1.5. Its advances match the Helvetica AFM within 0.5/1000 em for all 95 ASCII characters.
-- **Generator:** `scripts/generate-glyph-outlines.ts`, using opentype.js 1.3.4 as a devDependency. Run it with `npm run generate:glyphs`; `npm run check:glyphs` fails when the generated file is stale, like `check:banner`. It writes `src/print/glyphOutlines.generated.ts`:
+- **Font source:** Arimo Regular and Bold v1.33 from googlefonts/Arimo `fonts/ttf`, pinned at commit `4a6255f` (its repo `OFL.txt`: OFL-1.1, no Reserved Font Name). The 2020 v1.33 commit `77fdf7e` has identical outlines, but its repo `LICENSE.txt` is Apache-2.0, so it is not used. The TTFs, `OFL.txt` and a README go in `scripts/fonts/arimo/`, which is dev-only and never bundled. Its outlines and advances match Liberation Sans 2.1.5. Its advances match the Helvetica AFM within 0.5/1000 em for every glyph used.
+- **Generator:** `scripts/generate-glyph-outlines.ts`, using opentype.js 1.3.4 (pinned) as a devDependency. Run it with `npm run generate:glyphs`; `npm run check:glyphs` fails when the generated file is stale, like `check:banner`. It writes `src/print/glyphOutlines.generated.ts`:
   - `GLYPH_OUTLINES {normal, bold}`: integer absolute M/L/Q/Z commands at 1000 units/em, y flipped.
   - `GLYPH_CAP_HEIGHT_EM = 0.688` and `GLYPH_X_HEIGHT_EM = 0.528`, measured from 'H' and 'x'.
-  - A `/*! @license OFL-1.1 … */` header. Also ship `public/licenses/Arimo-OFL.txt`, and confirm the header survives the Rolldown minifier.
+  - A `/*! @license OFL-1.1 … */` header. `public/licenses/Arimo-OFL.txt` also ships. Vite drops legal comments when minifying, so `vite.config.ts` sets `build.rolldownOptions.output.comments.legal = true` (this keeps the dependencies' notices too, about 6 KB gz).
 - **Glyph set:** U+0020-007E plus U+00A0, U+00B0, U+00D7 ×, U+2013 –, U+2014 —, U+2019, U+201C, U+201D.
   - Each advance must equal the `helveticaMetrics.ts` value within 0.5/1000 em, or the generator fails.
   - U+00B7 `·` is excluded (Arimo 333 against the AFM's 278), as are ¯ ± µ ÷. Shop strings use " - " and " | " instead.
-- **Runtime:** `src/print/outlineText.ts` exports `outlineText(text, {x, y, fontPx, bold, anchor, baseline, fill})`.
-  - It returns one `<path transform="matrix(s 0 0 s tx ty)" d=…>` per line, with s = fontPx/1000.
+- **Runtime:** `src/print/outlineText.ts` exports `outlineText(text, {x, y, fontPx, bold, anchor, baseline, fill})` and `canOutlineText()`.
+  - It returns one `<path transform="matrix(s 0 0 s tx ty)" d=…>` per line, with s = fontPx/1000 (kept at full precision).
   - Glyphs are placed with the unkerned AFM advances (`helveticaTextWidthPx`), so the measured layout is exactly what is drawn.
   - Baseline offsets: `hanging` puts the baseline at y + 0.688·fontPx; `middle` at y + 0.264·fontPx.
   - It does not apply the 0.35 mm `ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM` again; that offset is already in `bannerTextTop` (`originBannerLayout.ts:132`).
   - It throws on any character missing from the table, never uses `<defs>` or `<use>`, and needs no canvas.
-  - It is loaded with `await import()` from the shop renderer only, so the roughly 17.6 KB gzipped table stays out of the home bundle.
+  - It is loaded with `await import()` from the shop renderer only, so the 21.8 KB gzipped table stays out of the home bundle.
 - **The PDF has no fonts:**
   - The shop jsPDF document is built with `putOnlyUsedFonts: true`. The default (false) writes all 14 standard fonts (`jspdf.es.js:1082, 2916-2917`).
   - An empty `/Font << >>` still appears in the resource dictionaries (`2794-2803`), so checks must not grep for `/Font`.
@@ -419,107 +385,83 @@ No free-form entry is needed: every rigid flow found uses one of these, and the 
 
 Each step leaves the app shippable. The UI first appears at step 8a.
 
-**−1. Fix the marker dictionary limit (an existing bug, also in home mode; best fixed on `ui-tweaks`).**
+**−1. Fix the marker dictionary limit (an existing bug, also in home mode). Done (`593c1d9`).**
 - The board uses DICT_4X4_250, so it can hold at most 250 markers. A board has floor(X·Y/2) markers, so X·Y must be ≤ 501.
-- Nothing enforces this:
-  - `setGridSize` clamps X and Y only to 2-40 (`main.ts:372`), and so does the URL parse (`main.ts:1259-1262`).
-  - `arucoMarkerSvgPath` reads `DICT_4X4_250_ROT0_BYTES[id*2]` with no bounds check (`board.ts:251`). Only `aruco.ts:40` checks the range.
-  - So a 40×40 board (800 markers) prints invalid markers today.
-- **Fix:** make X·Y ≤ 501 an end-stop for X and Y (each stops at floor(501/other)), and clamp links the same way with the snapped notice.
-- **Checks:** `check:presets` asserts every preset obeys it; add a range assert in `arucoMarkerSvgPath`.
+- Nothing enforced this: `setGridSize` and the URL parse clamped X and Y only to 2-40, and `arucoMarkerSvgPath` read the dictionary with no bounds check, so a 40×40 board printed invalid markers.
+- **Fix:** X·Y ≤ 501 is an end-stop for X and Y (each stops at floor(501/other), `boardGridAxisMax`); links keep X and clamp Y with a notice (`qrGridClamped`).
+- **Checks:** `check:presets` asserts every preset obeys it and that the end-stop is exact, and sweeps only reachable grids; `arucoMarkerSvgPath` range-checks the id.
 
 Only 975 of the 1521 grids in 2-40 × 2-40 are valid boards. Every grid count in this plan uses the valid set.
 
-**0. Rebase and set up the home golden check.** Commit `ui-tweaks`, then `git rebase ui-tweaks` in the worktree, then run `npm install` (the new worktree has no `node_modules`). Add `scripts/check-home-golden.ts` (`npm run check:home-golden`, with `--update`):
-- It renders `renderCharucoPrintSvgCore` (`svgAssemblyCore.ts:527`) under tsx.
-- It uses a deterministic canvas stub for tape labels (`svgAssemblyCore.ts:61-68, 456-458, 492-494`), a fixed QR fragment, the logo from `public/freemocap-logo.svg`, and `cooperativeYield: false`.
-- It covers every paper × the 3 distance presets, plus several multi-sheet grids including the guide.
-- It writes the SHA-256 of each SVG to `scripts/home-golden.json`.
+**0. Home golden check. Done (`b9a926e`, `033e2a6`).** `scripts/check-home-golden.ts` (`npm run check:home-golden`, with `--update`), already wired into `build`:
+- It runs the real home pipeline (`renderCharucoPrintSvg`: board, banner, QR, logo from `public/freemocap-logo.svg`, guide) under tsx, with `cooperativeYield: false`.
+- Only the tape labels' canvas measure is stubbed, with fixed Helvetica metrics.
+- It covers 18 charts: every paper × the 3 distance presets, plus six multi-sheet grids with the guide.
+- It writes the SHA-256 of each chart's SVGs, LF-normalised (Git checks the logo out as CRLF on Windows), to `scripts/home-golden.json`.
 
-*Verify:* `npm run check:presets && npm run check:banner && npx tsc -b && npm run check:home-golden && npm run build`.
+**0b. Logo flatten (needed for a font-free, ExtGState-free shop PDF). Done (`524bd25`).**
+- In `public/freemocap-logo.svg`, path988 (`.st3`, #365D5F at opacity 0.15) had exactly the same geometry as path968 (`.st2`), with nothing painted between them.
+- path988 and the `.st3` rule are deleted, and `.st2` is **#94C4C7** (0.85·#A4D6D9 + 0.15·#365D5F). It looks the same on screen.
+- The Inkscape `sodipodi:namedview` (editor window state, whose `borderopacity`/`pageopacity` attributes would trip step 6's `opacity` check) is dropped too.
+- Applied globally. It removes the logo's ExtGState from home PDFs too; multi-sheet home PDFs keep one, from the assembly guide's colour blocks (`fill-opacity="0.3"`, `svgAssemblyCore.ts:364`); shop mode has no guide. The golden was updated once, on purpose; every sheet is identical outside the logo markup. Banner geometry is unchanged (`check:banner` up to date).
 
-**0b. Logo flatten (moved from phase 2; needed for monochrome, which allows no ExtGState).**
-- In `public/freemocap-logo.svg`, path988 (`.st3`, #365D5F at opacity 0.15) has exactly the same geometry as path968 (`.st2`), and nothing is painted between them.
-- Delete path988 and the `.st3` rule, and set `.st2` to **#94C4C7** (0.85·#A4D6D9 + 0.15·#365D5F). It looks the same on screen.
-- Apply it globally. It removes the logo's ExtGState from home PDFs too (multi-sheet home PDFs keep one: the assembly guide's colour blocks use `fill-opacity="0.3"`, `svgAssemblyCore.ts:364`; shop mode has no guide). Also drop the logo's `sodipodi:namedview` (Inkscape window state, whose `borderopacity`/`pageopacity` attributes would trip step 6's `opacity` check). Run `check:home-golden --update` once, on purpose (the only intended home golden change), and the update-banner-size skill; the geometry does not change. It is not a label or layout change, so it needs no major bump.
+**1. Link grammar (`src/print/charucoDocUrl.ts`). Done (`4dc3f73`), reworked (`5698a35`).**
+- Built: the staged parse (core, size, options), `SHOP_SIZE_LINK_CODES` 0-12 (with the fixed-forever comment), `printMode`, `shopSize`, `shopOptions`, `shopSizeError` and `shopOptionsError` on `ParsedCharucoQrQuery`, and the `LinkTarget` writer with the positional `paperId` overload, so home callers (`main.ts:495, 601-607`, `svgDocument.ts:94-100`) emit identical URLs.
+- **Reworked (`5698a35`):** dropped the Fit and custom forms from `SHOP_SIZE_RE`, `ShopSizeChoice` (now just a standard size and the toggle unit) and the writer; the size regex becomes `^(0|[1-9]\d?)([mi])?$`. The writer never writes `g`; the parser still reads it into `shopOptions` (reserved, ignored by the app).
 
-*Verify:* `check:banner` reports up to date; the golden diff is limited to the logo; the logo has no `opacity`.
-
-**1. Link grammar (`src/print/charucoDocUrl.ts`).**
-- Add the staged parse (core, size, options) and `SHOP_SIZE_LINK_CODES` 0-12 (with the fixed-forever comment).
-- Add `printMode: 'home'|'shop'`, `shopSize: ShopSizeChoice | null` and `shopOptions: {bleed: 'std' | {mm}, cropMarks: boolean, colour: 'colour'|'mono'}` to `ParsedCharucoQrQuery`, plus `shopSizeError` and `shopOptionsError` flags.
-- The writer takes `LinkTarget = {kind:'home', paperId} | {kind:'shop', size, options}`. Keep the positional `paperId` overload, so the home callers (`main.ts:495, 601-607`, `svgDocument.ts:94-100`) emit identical URLs.
-
-New `scripts/check-links.ts` (`check:links`, added to `build`) holds a golden table covering:
+`scripts/check-links.ts` (`check:links`, in `build`) holds a golden table covering:
 - legacy `v/w/h/s/cv2` links;
 - 1.x links without `p`;
 - 2.0.0 `p0`-`p3`, `develop`, `0.0.0-dev` and prerelease links;
 - `p4`-`p9`, which must parse as paper null in home mode;
-- `tm`, `ti`, every size code 0-12 with and without a unit letter, ¼ in and mm custom extremes, and `p`+`t` together;
-- every option combination on every size form: (none), `e`, `b5`, `b10`, `b6.35`, `b3.175` (mm toggle), `b3` (in toggle), each with and without `c` and `g`; `b0` must read as `e`;
-- garbled sizes (`tx`, `t24x36`, `t24.1x36i`), which must keep w/h/s, open in shop mode at Fit and set the size flag;
-- garbled options (`t1bx`, `t1b99`, `t1b30`, `t1gc`, `t1eb5`), which must keep the size, fall back to the defaults (standard bleed, no marks, colour) and set the options flag.
+- every size code 0-12 with and without a unit letter, and `p`+`t` together;
+- every option combination on several size forms: (none), `e`, `b5`, `b10`, `b6.35`, `b3.175` (mm toggle), `b3` (in toggle), each with and without `c` and `g`; `b0` must read as `e`;
+- garbled sizes (`tx`, `t24x36`, `t13`, `t17`), and the removed Fit and custom forms (`tm`, `ti`, `t841x594m`, `t24.5x36i`), which must keep w/h/s, open in shop mode with no size (the app picks the default) and set the size flag;
+- garbled options (`t1bx`, `t1b99`, `t1b30`, `t1gc`, `t1eb5`), which must keep the size, fall back to the defaults (standard bleed, no marks) and set the options flag.
 
-It also asserts the writer-to-parser round trip for every size form × every bleed in the select × marks × colour × unit, that the writer never emits `b0` or a bare default, that `w10h8s100t12i` (42 B) is QR version 3, and that the worst case (longest inch custom + `b6.35cg`, `w20h25s44t35.75x47.75ib6.35cg`, 58 B) is at most version 4.
+It also asserts the writer-to-parser round trip for every size × every bleed in the select × marks × unit, that the writer never emits `b0`, `g` or a bare default, that `w10h8s100t12i` (42 B) is QR version 3, and that the worst case (`w20h25s44t12ib6.35cg`, 49 B, and the same with version `2.10.10`) is at most version 4.
 
 *Verify:* `check:links`, `check:home-golden`, `tsc`.
 
-**2. Size catalogue (new `src/print/shopSizes.ts`, pure, no DOM).**
-- `ShopSize`, `SHOP_SIZES` (codes 0-12, each group sorted by area for the dropdown), `ShopSizeChoice = {kind:'fit', unit} | {kind:'std', code, unit} | {kind:'custom', wMm, hMm, unit}`; every variant carries the toggle unit, so `t4i` and `t4` parse differently and round-trip.
-- `roundUpTrim()` using integer steps.
-- `SHOP_TRIM_MAX_MM = [914.4, 1219.2]` (the 36 in walk-in trim cap) and `SHOP_SQUARE_MM_MAX = 260`.
-- `SHOP_BLEED_CHOICES` (the fixed select list) and `bleedMmForUnit()`; `pageSizeMm(trim, bleedMm, cropMarks)` = trim + 2M.
-- `shopUnit` is the mm | in toggle; the standard bleed and the rounding take it, not the region.
-- `SHOP_INCH_REGIONS` and `shopUnitForRegion()`.
-- `validateCustomTrim(w, h, unit, minW, minH)`.
-- Labels in both units (the `strings.ts:18-27` pattern), including the page-size readout.
+**2. Size catalogue (`src/print/shopSizes.ts`, pure, no DOM). Done (`7181759`), reworked (`5698a35`).**
+- Built: `ShopSize`, `SHOP_SIZES` (codes 0-12), `shopSizeGroups()` (toggled unit first, each by area), `SHOP_TRIM_MAX_MM = [914.4, 1219.2]`, `fitsShopTrimCap()`, `shopBleedChoices()` (the fixed select list), `bleedMmForUnit()`, `pageSizeMm(trim, bleedMm, cropMarks)` = trim + 2M, `SHOP_INCH_REGIONS` and `shopUnitForRegion()`, and labels in both units (`formatShopTrim`, `shopSizeOptionLabel`, `formatShopBleed`).
+- **Reworked (`5698a35`):** deleted the Fit rounding (`roundUpTrimSteps`, `roundUpTrimMm`, `shopTrimStepMm`), `shopFitCapMm`, `validateCustomTrim` and their `check:shop` cases; set `SHOP_SQUARE_MM_MAX = 288`.
 
-New `scripts/check-shop.ts` (`check:shop`, added to `build`) asserts:
-- every rounded value is an exact multiple of the step, at least the input and less than input + step;
-- every Fit, standard and custom trim has a short side ≤ 914.4 mm and a long side ≤ 1219.2 mm, and every standard size takes every bleed × marks option;
-- page = trim + 2b with no marks and trim + 2(b + 7) with crop marks, for every bleed in the list;
+`scripts/check-shop.ts` (`check:shop`, in `build`) asserts:
 - codes 0-12 match the frozen table, and each group is sorted by area;
-- the custom limits hold.
+- every standard size has a short side ≤ 914.4 mm and a long side ≤ 1219.2 mm, and takes every bleed × marks option;
+- page = trim + 2b with no marks and trim + 2(b + 7) with crop marks, for every bleed in the list;
+- the region defaults.
 
-**3. Glyph outlines.**
-- Files: `scripts/generate-glyph-outlines.ts`, `scripts/fonts/arimo/*`, `src/print/glyphOutlines.generated.ts`, `src/print/outlineText.ts`, `public/licenses/Arimo-OFL.txt`.
-- npm scripts `generate:glyphs` and `check:glyphs`, added to `build`.
+**3. Glyph outlines. Done (`bb3bdf6`).**
+- Files: `scripts/generate-glyph-outlines.ts`, `scripts/fonts/arimo/*`, `src/print/glyphOutlines.generated.ts`, `src/print/outlineText.ts`, `public/licenses/Arimo-OFL.txt`; `vite.config.ts` keeps legal comments.
+- npm scripts `generate:glyphs` and `check:glyphs` (in `build`).
 
-*Verify:*
+*Verified:*
 - `check:glyphs`.
-- `check:shop` renders sample strings and asserts: no `<text`; the path bounding-box advance equals `helveticaTextWidthPx`; every character of every version string (dev, package, `VITE_APP_VERSION`, as in `generate-banner-size.ts:62-70`) is in the table.
+- `check:shop` renders sample strings and asserts: no `<text`; every glyph advances by exactly its `helveticaTextWidthPx` width (H c H against H H); the anchors and baselines; every character of every version string (dev, package, `VITE_APP_VERSION`) is in the table; `outlineText` throws on `·`.
+- The OFL header is present in the minified `outlineText` chunk. Once step 6 imports it, extend `check:dist` to assert that.
 
-**4. Compact banner (`src/print/originBannerLayout.ts`).**
-- Add optional `variant: 'full'|'compact'` and `box: {leftPx, rightPx, topPx}`. The defaults keep today's `sheetSafeMarginsMm` path unchanged.
-- In compact:
-  - drop the instructions (`189-200`);
-  - return null if any chart-info line would wrap;
-  - bottom = max(info, QR, logo) + the gap below;
-  - centre the write-in label with `GLYPH_CAP_HEIGHT_EM` instead of the 0.718 at line 172.
-- Add `compactBannerMinWidthPx()` and `compactBannerHeightMm()`.
+**4. Compact banner (`src/print/originBannerLayout.ts`). Done (`5b1517f`).**
+- Optional `variant: 'full'|'compact'` and `box: {leftPx, rightPx, topPx}`. The defaults keep today's `sheetSafeMarginsMm` path unchanged.
+- In compact: no instructions; `null` if any chart-info line would wrap; bottom = max(info, QR, logo) + the gap below.
+- The write-in label is centred with a `capHeightEm` param (default 0.718; the shop renderer passes `GLYPH_CAP_HEIGHT_EM`), instead of importing the generated table, so it stays out of the home bundle.
+- `compactBannerMinWidthPx()` and `compactBannerHeightMm()`; the layout also returns `infoLeft`.
 
-*Verify:*
-- `check:banner` reports the generated file is up to date;
-- `check:home-golden` passes;
-- `check:shop` asserts the height is constant (28.5 mm) for s = 10-260, grids 2-40 and all versions, and that the minimum width is ≤ 110 mm.
+*Verified:* `check:banner` and `check:home-golden` unchanged; `check:shop` asserts the height is 28.5 mm for every square length up to `SHOP_SQUARE_MM_MAX`, every grid and version (one value per distinct printed width), that the minimum width is ≤ 110 mm (95.2 mm today) and exact.
 
-**5. Shop geometry and feasibility (new `src/print/shopLayout.ts`; `feasibilityRules.ts`, `tiling.ts`, `charucoLayout.ts`).**
-- `SheetProfile = {kind:'home'} | {kind:'shop', size}`; `HOME_PROFILE`; `profileKey()` returns `''` for home.
-- Feasibility depends only on the trim (against `SHOP_TRIM_MAX_MM`), so bleed, marks and colour are not in the profile or the cache key.
-- `shopSheetLayout(X, Y, s, size, banner)` returns `ShopLayout | null`:
-  - fields: trim, E, banner box, board origin, orientation (the page is added from the options at render time);
-  - standard sizes try both orientations and use the `tiling.ts:124-132` tie-break.
-- `printedLayout(..., profile = HOME_PROFILE)`:
-  - home mode delegates exactly as now (line 21);
-  - shop mode returns a `TilingInfo` with `pageCount: 1`, `npx = npy = 1`, `bannerReserveMm: Hb` and a new optional `shop?` field.
-- `gridFeasibility` cache key `${profileKey}|…` (line 38).
-- A trailing optional `profile` on `maxSquareMmForGridAndPages`, `snapSquareMm`, `enumerateValidSquareSizes` and `computeEffectivePrintLayout`.
-- New `maxGridForSquare(axis, s, profile)`, which also applies X·Y ≤ 501.
+**5. Shop geometry and feasibility (new `src/print/shopLayout.ts`). Done (`93102c1`).**
+- With standard sizes only, shop geometry lives in its own pure module instead of threading a `SheetProfile` through the home functions (`feasibilityRules.ts`, `tiling.ts`, `charucoLayout.ts` are unchanged). Step 8 calls the shop functions in shop mode.
+- Feasibility depends only on the trim, so bleed and marks are not inputs.
+- `shopQuietZoneMm(s)` = min(25, max(10, s/4)); `shopBannerSizeMm()` (memoised by printed text widths).
+- `shopSheetLayout(X, Y, s, sizeId)` returns `ShopLayout | null` with trim, E, banner, board and content boxes and the orientation (the page is added from the options at render time). It tries both orientations: more squares held first, then `paperOrientationPreferenceTieBreak` (`tiling.ts`), as home paper does.
+- `shopValidSquaresMm`, `maxShopSquareMm`, `snapShopSquareMm` (cached per size and grid); `maxShopGridForSquare(axis, other, s, sizeId)`, which also applies X·Y ≤ 501; `smallestFittingShopSize(X, Y, s, unit)` (the default size): the first size in dropdown order whose layout is non-null, or null.
+- `squareLengthTierBandEdgeFractions` and the square slider range take the shop maximum in step 8b.
 
-*Verify:* `check:shop` checks, for every size, a sampled set of grids and every square, that:
+*Verified:* `check:shop` checks, for every size, a sampled set of grids and every square, that:
 - the content sits inside the trim with E on every side and the marker inside E;
 - the reported maximum square fits and max + 1 does not (and matches the square-maximum table);
-- the Fit trim minus one step does not fit;
+- the default size fits and no earlier size in dropdown order does;
 - the valid squares are contiguous from 10 mm;
 - the largest grids match the "What the cap allows" table.
 
@@ -527,22 +469,17 @@ New `scripts/check-shop.ts` (`check:shop`, added to `build`) asserts:
 
 **6. Shop sheet SVG (new `src/print/shopSheet.ts`; small refactors in `svgAssemblyCore.ts`, `svgUtils.ts`).**
 - In `svgAssemblyCore.ts`, export `svgCornerMarker` (`106-129`) and `svgCharucoBoardInfoBlock` (`202-223`) with an optional `text` emitter. The default produces today's exact `<text>` markup.
-- `renderShopSheetSvg({X, Y, s, layout, qr, logo, version, url, bleedMm, cropMarks, colour})` returns `{svg, mediaMm, trimBoxMm, bleedBoxMm}`:
+- `renderShopSheetSvg({X, Y, s, layout, qr, logo, version, url, bleedMm, cropMarks})` returns `{svg, mediaMm, trimBoxMm, bleedBoxMm}`:
   - a white root;
   - a `<g translate(M)>` holding the banner (logo as at `636-640`, info, QR as at `644`), the board `<svg viewBox>` (`719-724`, uncropped) and the corner marker;
   - with crop marks, the marks and slug outside that group.
-- **Monochrome variant** (`colour: 'mono'`), so the preview shows what prints:
-  - squares, markers, text, QR, write-in box, crop marks and the X/Y arrows are #000 (the arrows are told apart by their x/y labels);
-  - logo: outline #000, coral #D95157 → #808080 (0.5 grey), teal #94C4C7 → #BFBFBF (0.75 grey);
-  - fallback if the greys print poorly: an outline-only logo (path966).
 - `svgRootOuterSizeAttrsUnit()` next to `svgRootOuterSizeAttrs` (`svgUtils.ts:23-28`). It writes inches only when the media is an exact multiple of ⅛ in; otherwise mm (with crop marks, usually mm).
 - Shop export refuses if the logo failed to load (`svgDocument.ts:82-83`).
 
-*Verify:* `check:shop` renders every size × every bleed in the list × {no marks, crop marks} × {colour, mono}, in Node, and asserts:
+*Verify:* `check:shop` renders every size × every bleed in the list × {no marks, crop marks}, in Node, and asserts:
 - no `<text`, `<tspan`, `<textPath`, `<foreignObject`, `<image`, `<use`, `font-family`, `@font-face`, `rgba(` or `opacity`;
 - the root size equals the media size and the viewBox equals media × 12;
 - with crop marks, the mark endpoints are at trim ± b and ± (b + 6); with no marks, there are no mark paths and no slug;
-- in mono, every fill and stroke is `none`, #000, #808080, #BFBFBF or #FFF;
 - a square is s × 12 px (1:1);
 - the QR input URL parses back to X, Y, s, the size and the options.
 
@@ -551,44 +488,38 @@ New `scripts/check-shop.ts` (`check:shop`, added to `build`) asserts:
 - With `options.shop`:
   - `putOnlyUsedFonts: true`;
   - keep `PrintScaling: None`;
-  - assert exactly one page and media ≤ 5080 mm;
+  - assert exactly one page and media ≤ 5080 mm (jsPDF clamps larger pages with only a warning, `jspdf.es.js:3132-3135`);
   - before `svg2pdf`, throw if `text, tspan, textPath, foreignObject, image, use` is found;
   - set the TrimBox and BleedBox after `svg2pdf`;
-  - `setDocumentProperties`: title; subject `Trim 36 x 24 in (914.4 x 609.6 mm) - print at 100%, do not scale - square 50 mm` (plus ` - black & white` in mono); trim is W × H as placed, toggled unit first, same order as the slug; keywords; creator `skellychart v…`.
-- **Grey setter wrapper** (pulled forward from phase 2, which adds the CMYK map to the same wrapper). In mono, on the shop jsPDF instance only, wrap `setFillColor`, `setDrawColor` and `setTextColor` (own properties: `jspdf.es.js:5232`, `5166`, `5296`; every svg2pdf colour call goes through them).
-  - Map the rounded `r,g,b` key to a grey: `0,0,0` → 0; `0,0,1` (the phase-2 rich-black sentinel) → 0; `128,128,128` → 0.5; `191,191,191` → 0.75; `255,255,255` → 1.
-  - Throw on any other key, so a missed coloured element fails the export.
-  - **Gotcha:** jsPDF divides a single numeric grey by 255 (`2280-2293`). Pass 0-255 numbers (0, 127.5, 191.25, 255) or the exact strings `'0'`, `'0.5'`, `'0.75'`, `'1'`.
-- New `scripts/check-shop-pdf.ts` (`check:shop-pdf`) uses Playwright (devDependency) against a small Vite harness page from the start; svg2pdf under jsdom is unproven. It builds 3 sizes (one of them Fit at the cap, one 36×48) × {standard bleed (default), exact trim, 10 mm bleed, standard bleed + crop marks} × {colour, mono}, inflates the streams with node:zlib and asserts:
+  - `setDocumentProperties`: title; subject `Trim 36 x 24 in (914.4 x 609.6 mm) - print at 100%, do not scale - square 50 mm`; trim is W × H as placed, toggled unit first, same order as the slug; keywords; creator `skellychart v…`.
+- New `scripts/check-shop-pdf.ts` (`check:shop-pdf`) uses Playwright (devDependency) against a small Vite harness page from the start; svg2pdf under jsdom is unproven. It builds 3 sizes (A3, 24×36 in and 36×48 in) × {standard bleed (default), exact trim, 10 mm bleed, standard bleed + crop marks}, inflates the streams with node:zlib and asserts:
   - exactly one `/Type /Page`;
   - MediaBox, TrimBox and BleedBox are as computed (± 0.01 pt): MediaBox = BleedBox with no marks, all three equal at exact trim, MediaBox = BleedBox + 2 × 7 mm with crop marks;
   - no `/Type /Font`, `/FontFile`, `BT`, `Tf`, `Tj`/`TJ` or `/Subtype /Image`;
   - `/PrintScaling /None`;
   - with crop marks, the mark endpoints, mapped through a small `q`/`Q`/`cm`/`m`/`l` interpreter, sit b outside the TrimBox (proves 1:1);
-  - **mono is pure DeviceGray:** no `rg`/`RG`/`k`/`K`/`sc`/`cs` operators; no `/DeviceRGB`, `/DeviceCMYK`, `/ICCBased`, `/OutputIntents` or `/ExtGState`; no images; every `g`/`G` value is in {0, 0.5, 0.75, 1};
-  - colour: black is `0 g`/`0 G`, and there is no `/ExtGState` (after step 0b);
+  - black is `0 g`/`0 G`, and there is no `/ExtGState`;
   - the URL round-trips.
 
   It runs in `check:all` and before release, not in every `build`.
 
-*Manual:* Acrobat Preflight > Page boxes and "List fonts"; `pdffonts board.pdf` prints an empty table; Acrobat Output Preview shows only the Black plate for a mono PDF.
+*Manual:* Acrobat Preflight > Page boxes and "List fonts"; `pdffonts board.pdf` prints an empty table.
 
-**8a. Mode, Fit to chart, URL, preview, summary, export (`main.ts`, `index.html`, `strings.ts`, `style.css`).**
+**8a. Mode, default size, URL, preview, summary, export (`main.ts`, `index.html`, `strings.ts`, `style.css`).**
 - **State:** `AppState` (`main.ts:96-103`) gains:
   - `mode`;
-  - `shopUnit` (the mm | in toggle), defaulting to `shopUnitForRegion()` and overridden by the link's `m`/`i`; `shopUnit` is read from `shopSize.unit`, and changing the toggle rewrites `shopSize.unit`;
-  - `shopSize`, defaulting to `{kind:'fit', unit: shopUnit}`;
+  - `shopUnit` (the mm | in toggle), defaulting to `shopUnitForRegion()` (wire the region the way `defaultPaperId()` resolves it) and overridden by the link's unit; `shopUnit` is read from `shopSize.unit`, and changing the toggle rewrites `shopSize.unit`;
+  - `shopSize`, defaulting to `smallestFittingShopSize()` for the board;
   - `shopBleed` (`'std'` follows the toggle, or a fixed mm value), default `'std'`;
   - `shopCropMarks`, default false;
-  - `shopColour`, default `'colour'`;
   - `homePaperId`.
 
-  The bleed, marks and colour are set by the link's options, and seeded from `localStorage` only for a fresh shop session. `currentProfile()` feeds `effectiveTiling()` (`183-186`).
+  The bleed and marks are set by the link's options, and seeded from `localStorage` only for a fresh shop session. `currentProfile()` feeds `effectiveTiling()` (`183-186`).
 - **Control:** a `role=radiogroup` segmented control above `#distance` (`index.html:83`), styled as `.mode-toggle` after `.theme-toggle` (`style.css:101-142`).
 - **Switching home → shop:**
-  - If the board fits at its current square, switch.
-  - If it fits only at a smaller square in the same distance band, switch and snap the square down, with a visible notice.
-  - If it does not fit even at the band minimum, refuse: the control stays on "My printer" and a message names the limit and suggests fewer squares.
+  - If some standard size fits the board at its current square, switch, at the default size.
+  - If one fits only at a smaller square in the same distance band, switch and snap the square down, with a visible notice.
+  - If none fits even at the band minimum, refuse: the control stays on "My printer" and a message names the limit and suggests fewer squares.
   - X, Y and distance never change without telling the user.
 - **Switching shop → home:** keep X, Y and s, and restore `homePaperId`.
 - **URL:**
@@ -597,37 +528,30 @@ New `scripts/check-shop.ts` (`check:shop`, added to `build`) asserts:
   - Add shop variants of the `qrSquareSnapped` copy (`strings.ts:78-79`), one for a bad size and one for bad options.
 - **QR:** the shop renderer passes the shop link into the printed QR (`svgDocument.ts:94-100`).
 - **Preview:** `runPreview` (`831-1004`) shows one `thumb-grid--single` thumbnail of the shop SVG and hides `#fullPreviewBlock`.
-- **Summary** (`724-739`): "1 sheet, trimmed to 24.75 × 20 in (628.65 × 508 mm), landscape | 12 × 9 squares | 50 mm".
+- **Summary** (`724-739`): "1 sheet, 24 × 36 in board (914.4 × 609.6 mm), landscape | 12 × 9 squares | 50 mm".
 - **Export:** `savePdfFile` (`1034-1098`) branches to the shop path.
 
-*Verify:* all checks pass. Manual (run skill): switch modes, open `tm`, `ti`, `t1`, `t1cg` and garbled links, then check the PDF boxes in Acrobat.
+*Verify:* all checks pass. Manual (run skill): switch modes, open `t1`, `t1c`, `t4i` and garbled links, then check the PDF boxes in Acrobat.
 
 **8b. Size controls and end-stops.**
-- **Size select:** `#shopSize` replaces `#paper` (`index.html:88-91`) in shop mode, filled like the paper select (`main.ts:707-722`), with the two groups sorted by area. Choosing Custom shows two number inputs, a unit select and an inline error.
+- **Size select:** `#shopSize` replaces `#paper` (`index.html:88-91`) in shop mode, filled like the paper select (`main.ts:707-722`), with the two groups sorted by area. There is no Fit or Custom entry.
 - **Sheets stepper:** `#pagesGroup` (`105-120`) is hidden; its readout shows "Trim W × H | chart w × h".
-- **Square slider:** the existing snap (`1378-1388`) end-stops at the largest fitting square (up to 260 mm).
-- **X/Y:** `setGridSize` (`371-373`) clamps to `maxGridForSquare`. This is a new rule that needs sign-off: X/Y end-stop at the size limit and never change the square or distance.
-- **Size too small for the band:** when a fixed size is too small for the distance band's minimum square, show a hint like `pagesFewestHint`: "Too small for 4m+: choose a larger size or Fit to chart".
-- **Shop distance presets:** `resolveShopDistancePlan()`. Proposed:
+- **Square slider:** the existing snap (`1378-1388`) end-stops at the largest square that fits the selected size (up to 288 mm).
+- **X/Y:** `setGridSize` (`371-373`) clamps to `maxGridForSquare` for the selected size (approved: X/Y end-stop at the size limit and never change the square or distance).
+- **Size too small for the band:** when the selected size is too small for the distance band's minimum square, show a hint like `pagesFewestHint`: "Too small for 4m+: choose a larger size".
+- **Shop distance presets:** `resolveShopDistancePlan()`. Each preset names a grid and the standard size it lands on (the default size for that grid). **Needs re-derivation for standard sizes only** (the earlier Fit-based proposal was Close 7×5 at 32 mm, Near 5×3 at 100 mm, Far 3×5 at 101 mm, about A2 / 18×24); see open question 1.
 
-  | Band | Grid | Square | Fit trim (metric) | Fit trim (inch) |
-  |---|---|---|---|---|
-  | Close | 7×5 | 32 mm | 245×210 mm | 9.75×8.25 in |
-  | Near | 5×3 | 100 mm | 550×380 mm | 21.75×15 in |
-  | Far | 3×5 | 101 mm | 355×585 mm (fits A2 and 18×24) | 14×23 in |
-
-*Verify:* `check:shop` asserts that every shop preset is 1 sheet with a square ≥ the band minimum (10, 33 and 101 mm), and that every grid has a valid square at Fit.
+*Verify:* `check:shop` asserts that every shop preset is 1 sheet on its default size with a square ≥ the band minimum (10, 33 and 101 mm), and that every valid grid has a valid square on some standard size.
 
 **8c. Print-file options, buttons, filename, guards.**
 - **Options**, in `#advancedSettings`:
   - **Bleed** select with the fixed list (Page geometry): Standard (3 mm or ⅛ in), None (exact trim), 5 mm (Officeworks mounted), 10 mm (Officeworks corflute/PVC/ACM), ¼ in (6.35 mm), and the other unit's standard. The page size is shown beside it, e.g. "File 24.25 × 36.25 in = 24 × 36 trim + ⅛ in bleed".
   - **Crop marks** checkbox, off by default: "Crop marks (trade printers that trim)". It adds the marks, the slug and the 7 mm mark margin.
-  - **Colour | Monochrome** segmented control, default Colour. Monochrome shows "Black & white file (greyscale only)".
   - Nothing is greyed out for the cap, which applies to the trim only.
 - **Buttons:**
   - Hide `#btnPdf` (Print) in shop mode; `openPrintDialog` (`1152`) returns early.
   - `#btnSavePdf` becomes `btn-primary` with the label "Download print-ready PDF".
-- **Filename** (`exportBasenamePrefix`, `1024-1032`): `skellychart-printshop-24x36in-12x9-50mm`, `-841x594mm-` or `-fit-625x505mm-`, then the bleed in its own unit (`-bleed3mm`, `-bleed0.125in`, `-bleed5mm`, `-bleed10mm`, `-bleed0.25in`) or `-trim` for no bleed, then `-crop` with crop marks and `-mono` for monochrome. Example: `skellychart-printshop-24x36in-12x9-50mm-bleed0.125in-crop-mono`.
+- **Filename** (`exportBasenamePrefix`, `1024-1032`): `skellychart-printshop-24x36in-12x9-50mm` or `-a1-`, then the bleed in its own unit (`-bleed3mm`, `-bleed0.125in`, `-bleed5mm`, `-bleed10mm`, `-bleed0.25in`) or `-trim` for no bleed, then `-crop` with crop marks. Example: `skellychart-printshop-24x36in-12x9-50mm-bleed0.125in-crop`.
 - **Release guard:** block shop export when the version is `develop` or a prerelease, or when the QR target is not `https://skelly.cam/c/` (`qrLinkTarget.ts`). In dev builds, a confirm() allows "Export anyway (test only)".
 
 *Verify manually:*
@@ -635,7 +559,7 @@ New `scripts/check-shop.ts` (`check:shop`, added to `build`) asserts:
 - the default (standard bleed, no marks) gives MediaBox = BleedBox;
 - no bleed and no marks gives MediaBox = TrimBox = BleedBox;
 - crop marks give MediaBox = BleedBox + 2 × 7 mm;
-- each option (size, unit, bleed, marks, colour) round-trips through the link;
+- each option (size, unit, bleed, marks) round-trips through the link;
 - Print is absent in shop mode.
 
 **9. Scan-landing card.** Add `<section id="scanCard" class="banner scan-card hidden">` after `#qrVersionBanner` (`index.html:77`).
@@ -657,24 +581,24 @@ New `scripts/check-shop.ts` (`check:shop`, added to `build`) asserts:
   - Page size: "File is W′ × H′ = W × H trim + b bleed. Match the product template's page size exactly; never use a fit/fill option", or "No bleed; final size W × H".
   - With crop marks: "Trim to W × H at the crop marks (b bleed included)."
   - Board: matte, no lamination. 5 mm (3/16 in) foam board up to A1 / 24×36; 10 mm honeycomb or 3 mm ACM for A0 / 36×48. Coroplast is acceptable, not ideal.
-  - Colour: "Black is pure K; print as supplied and do not convert colours." Mono: "Black & white file (greyscale only)."
+  - Colour: "Black is pure K; print as supplied and do not convert colours."
   - Check on delivery: measure N squares edge to same edge; each should be s mm.
   - The 36 in cap note, when the chart is within 25 mm of the cap.
 - The slug, the PDF Subject and the note must carry the same facts: 100%, trim and square size. The slug is trimmed off, and it exists only with crop marks.
 - **Advice copy** (`S.printAdviceShop`, `strings.ts:65-67`, now points to the new mode; shop mode shows shop copy via `setPrintAdviceElement`, `477-489`): the Rigid-board advice above (finish, substrate, which product at each chain and its lead time, match the template), plus, with no marks: "If your shop trims by hand to crop marks, turn on Crop marks."
 
-*Verify:* copy works in Chrome and Firefox, and the text follows size, bleed, marks and colour changes.
+*Verify:* copy works in Chrome and Firefox, and the text follows size, bleed and marks changes.
 
 **11. Version, docs, wiring.**
 - No version bump (v2 is unpublished). Run `check:banner` to confirm the home banner rows did not change.
 - `.claude/skills/update-banner-size/SKILL.md`: shop banners are sized at runtime, and glyphs must be regenerated (`generate:glyphs`) when the font, the glyph set or `helveticaMetrics.ts` change.
 - Add a README section.
-- `build` runs `check:links`, `check:shop`, `check:glyphs` and `check:home-golden`.
-- Ask the user to approve shop exceptions in the "Control priority rules" and "Multi-sheet print layout" memory notes: always 1 sheet, no guide, and X/Y end-stop at the size limit.
+- `build` runs `check:links`, `check:glyphs`, `check:shop` and `check:home-golden` (already wired).
+- Update the "Control priority rules" and "Multi-sheet print layout" memory notes with the approved shop exceptions: always 1 sheet, no guide, and X/Y end-stop at the size limit.
 
 ## Phase 2
 
-**CMYK, with cyan added to the large black areas.** Shop colour mode only; monochrome stays DeviceGray, and home stays DeviceGray/RGB. (The logo flatten and the grey setter wrapper moved to phase 1, steps 0b and 7.)
+**CMYK, with cyan added to the large black areas.** Shop only; home stays DeviceGray/RGB.
 - **The build (kept as asked):** C60 M0 Y0 K100 is the standard cyan-only "cool" black, 160% total ink. It is well under the 220-250% limits for paper, wide format and RIPs. K stays 100 in every black, because carbon K gives the IR density, and CMY-only black is never used. The neutral alternative is 60/40/40/100.
 - **Caveat:** on UV flatbeds, an RGB #000 converted by the RIP becomes about 300% rich black, with raised edges; DeviceCMYK C60K100 (160%) avoids that. Confirm the result on a physical proof before shipping.
 
@@ -701,7 +625,7 @@ New `scripts/check-shop.ts` (`check:shop`, added to `build`) asserts:
 - Walk-in RIPs apply their own CMYK simulation (Canon) or honour output intents only when the operator enables it (Fiery), so an intent buys little.
 - **If a shop or preflight ever asks:** embed `GRACoL2013_CRPC6.icc` as a DestOutputProfile (registry reference name CGATS21-2-CRPC6).
   - Licence: it may be used, embedded, exchanged and shared without restriction, but not altered or sold. FOGRA51 (PSOcoated_v3) forbids redistribution without ECI permission, so it is not used.
-  - Fetch it lazily from `public/icc/`, only for colour shop export.
+  - Fetch it lazily from `public/icc/`, only for shop export.
   - Add it with jsPDF hooks: create the objects in `postPutResources` (`jspdf.es.js:2879`) and write only `/OutputIntents [n 0 R]` in `putCatalog` (`3299`). Root and Info must remain the last two objects (`3307-3309`). Follow the jsPDF XMP plugin pattern (`21767-21823`). `setPdfVersion('1.4')`.
 
 **Misregistration and ink.**
@@ -716,17 +640,23 @@ New `scripts/check-shop.ts` (`check:shop`, added to `build`) asserts:
 - Get one physical proof from a FedEx or Staples shop before shipping.
 
 **How the colour calls are intercepted.**
-- **Mark the rich black.** Only shop SVG gives the squares and markers a sentinel `fill="rgb(0,0,1)"`, in both places: each marker path (`src/charuco/board.ts:277`) and the board `<g>` (`board.ts:300`). Without the wrapper, the sentinel would write `0 0 0.004 rg`, so it must never appear in home or phase-1 output. In mono it maps to `0 g`.
-- **Extend the phase-1 setter wrapper** (step 7) with a CMYK map for colour mode. Every svg2pdf colour call goes through the wrapped setters: `1770`, `1777`, `1808`, `1854-1889`, and the initial fill at `4132`.
+- **Mark the rich black.** Only shop SVG gives the squares and markers a sentinel `fill="rgb(0,0,1)"`, in both places: each marker path (`src/charuco/board.ts:277`) and the board `<g>` (`board.ts:300`). Without the wrapper, the sentinel would write `0 0 0.004 rg`, so it must never appear in home or phase-1 output.
+- **Add a setter wrapper** on the shop jsPDF instance only (phase 1 has none; the grey wrapper was deferred with monochrome): wrap `setFillColor`, `setDrawColor` and `setTextColor` (own properties: `jspdf.es.js:5232`, `5166`, `5296`). Every svg2pdf colour call goes through them: `1770`, `1777`, `1808`, `1854-1889`, and the initial fill at `4132`.
   - Map the rounded `r,g,b` key to four 0..1 channels, which takes jsPDF's CMYK branch (`2317-2331`).
   - Keys: `0,0,1` → `[.6,0,0,1]`, `0,0,0` → `[0,0,0,1]`, `255,255,255` → `[0,0,0,0]`, plus the arrow and logo keys.
-  - Throw on any key that is not in the map.
-- **Defaults.** Construct the colour document with `strokeColor: '0 0 0 1 K'` and `fillColor: '0 0 0 1 k'`. Otherwise jsPDF writes `0 G` at the start of each page (`5113`, `5179`).
+  - Throw on any key that is not in the map, so a missed coloured element fails the export.
+- **Defaults.** Construct the document with `strokeColor: '0 0 0 1 K'` and `fillColor: '0 0 0 1 k'`. Otherwise jsPDF writes `0 G` at the start of each page (`5113`, `5179`).
 - **Paths that bypass the setters** must stay out of shop SVG: gradients (svg2pdf `1263`, DeviceRGB hard-coded at jsPDF `2651`), patterns (`1425-1447`), images (`3124`) and opacity below 1 or `<use>` (ExtGState, `1714-1762`).
-- **Check.** For colour mode, `check:shop-pdf` asserts no `rg`/`RG`/`g`/`G` colour operators, no `/Shading`, `/Pattern` or `/Subtype /Image`, and no ExtGState. Mono keeps the phase-1 DeviceGray assertions.
-- **Order note and slug** add, in colour mode: "Squares are C60 K100; text, QR and marks are K100 only; print CMYK as supplied; do not convert K100 to rich black."
+- **Check.** `check:shop-pdf` asserts no `rg`/`RG`/`g`/`G` colour operators, no `/Shading`, `/Pattern` or `/Subtype /Image`, and no ExtGState.
+- **Order note and slug** add: "Squares are C60 K100; text, QR and marks are K100 only; print CMYK as supplied; do not convert K100 to rich black."
 
 **Deferred**
+- **Monochrome** (dropped from phase 1 on 2026-10-28; no rigid cost saving). To revive:
+  - a Colour | Monochrome segmented control in `#advancedSettings` ("Black & white file (greyscale only)"), stored in the link as `g` (already parsed), `-mono` filename suffix, PDF subject ` - black & white`, order-note line "Black & white file (greyscale only)";
+  - a mono shop SVG: squares, markers, text, QR, write-in box, crop marks and the X/Y arrows #000 (arrows told apart by their x/y labels); logo outline #000, coral #D95157 → #808080, teal #94C4C7 → #BFBFBF (fallback: outline-only logo, path966); `check:shop` asserts every fill and stroke is `none`, #000, #808080, #BFBFBF or #FFF;
+  - a grey setter wrapper on the shop jsPDF instance mapping `0,0,0` and `0,0,1` → 0, `128,128,128` → 0.5, `191,191,191` → 0.75, `255,255,255` → 1, throwing on any other key. Gotcha: jsPDF divides a single numeric grey by 255 (`2280-2293`); pass 0-255 numbers or the exact strings `'0'`, `'0.5'`, `'0.75'`, `'1'`;
+  - `check:shop-pdf` mono assertions: no `rg`/`RG`/`k`/`K`/`sc`/`cs`; no `/DeviceRGB`, `/DeviceCMYK`, `/ICCBased`, `/OutputIntents` or `/ExtGState`; every `g`/`G` in {0, 0.5, 0.75, 1}; Acrobat Output Preview shows only the Black plate.
+- **Fit to chart and custom W × H sizes** (dropped before v2 froze; standard sizes only). Adding them later means new size forms in the frozen grammar, which a v2 parser reads as a bad size (opens at the default size), so they need a major bump or a careful append.
 - Two-axis (X and Y) write-in boxes.
 - Sizes beyond the 36 in walk-in cap, for sign shops: a 4×8 ft sheet (48×96 in, for plywood, drywall or ACM). The earlier analysis showed that 48×96 lifts the largest grid at 101 mm from 8×11 to 11×23. Add it as a new size code with its own end-stops, a sign-shop warning and order-note copy about flatness, weight and freight.
 - A larger QR on big shop boards. The banner is computed at runtime, but the QR must not go below 22 mm.
@@ -737,25 +667,26 @@ New `scripts/check-shop.ts` (`check:shop`, added to `build`) asserts:
 ## Risks and open questions
 
 **Risks**
-- Starting on `700d028` instead of the rebased branch means redoing nearly every touched file.
-- New rule: X/Y end-stop in shop mode. "No page cap" and "counts include guide" do not apply there. This needs sign-off and memory-note updates.
-- Standard size codes become permanent with the first printed board. Freeze the list and its order before release, and only append.
+- The approved X/Y end-stop is a new rule for shop mode: "No page cap" and "counts include guide" do not apply there. The memory notes must be updated (step 11).
+- Standard size codes become permanent with the first printed board. Freeze the list and its order before release, and only append. The Fit and custom forms built in step 1 must be removed before then.
 - Forgetting `putOnlyUsedFonts: true` on the shop path silently adds 14 fonts. `check:shop-pdf` catches it, but only when it is run.
-- The OFL notice must survive minification; ship the licence file regardless.
+- The OFL notice must survive minification (`vite.config.ts` keeps legal comments); ship the licence file regardless.
 - A `VITE_APP_VERSION` containing a character missing from the glyph table makes `outlineText` throw. `check:shop` covers the override.
-- A Fit link reproduces the rounding rule, not a stored trim. A future layout change can alter a reopened Fit trim slightly; the board stays exact.
+- The default size comes from the layout. A future layout change can make a link's size no longer fit; it then opens at the default size with a notice, and the board stays exact.
 - Online designers may fit or fill the file to their template and scale the board. The order note's "match the template page size" line and the measure-N-squares check are the defence.
 - The cheapest good direct-print foam board (Staples, Office Depot) is delivery only; same-day walk-in options are the FedEx and Office Depot mounted products, and some force gloss lamination.
 - Phase-1 colour output carries RGB arrows and logo, which each RIP converts its own way. They sit in the margin, so only their hue is at stake.
 - Phase 2 relies on jsPDF 4.2.1 and svg2pdf 2.8.1 internals. Pin both versions and keep the checks.
 
 **Open questions**
-1. Shop distance presets: is far 3×5 at 101 mm (Fit 355×585, about A2) right, or should the far square be larger, with a larger trim and price?
-2. Should `check:home-golden` and its JSON stay committed for good? Recommended: yes.
-3. Sign-off: in shop mode, X/Y end-stop at the selected size, the 36 in trim cap and the 250-marker limit.
-4. Quiet zone: keep E = max(10, s/4), or cap it at 25 mm (which would raise 3×3 to about 280-286 mm)? This needs a calibration-accuracy call.
-5. Default size: Fit to chart produces sizes rigid products don't sell (they come in fixed sizes). Should the default be the smallest stocked standard size that fits, with Fit kept for custom sign shops?
-6. Is the mono toggle still wanted, given no rigid cost saving?
+1. Shop distance presets: which grid and square per band, now that each must land on a standard size? (The Fit-based proposal put far 3×5 at 101 mm on about A2.)
+
+**Resolved (2026-10-28)**
+- `check:home-golden` and its JSON stay committed for good, and run in `build`.
+- X/Y end-stop at the selected size, the 36 in trim cap and the 250-marker limit: approved.
+- Quiet zone: capped, E = min(25, max(10, s/4)).
+- Default size: standard sizes only, no Fit or custom; the default is the smallest standard size that fits.
+- Monochrome: dropped for now (see Deferred).
 
 ## Sources
 

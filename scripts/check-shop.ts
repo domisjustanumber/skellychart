@@ -320,6 +320,21 @@ for (const size of SHOP_SIZES) {
         }
     }
 }
+// The default size is the first in dropdown order (toggled unit's group first, by area) the board fits.
+for (const unit of UNITS) {
+    const order = shopSizeGroups(unit).flatMap((g) => g.sizes);
+    for (const squaresX of SAMPLE_COUNTS) {
+        for (const squaresY of SAMPLE_COUNTS.filter((y) => y <= boardGridAxisMax(squaresX))) {
+            for (const squareMm of [10, 25, 33, 50, 101, 150, 225, 288]) {
+                const chosen = smallestFittingShopSize(squaresX, squaresY, squareMm, unit);
+                const first = order.find((s) => shopSheetLayout(squaresX, squaresY, squareMm, s.id));
+                if (chosen !== (first?.id ?? null)) {
+                    failures.push(`${unit} ${squaresX}×${squaresY} at ${squareMm} mm: default ${chosen}, expected ${first?.id ?? 'none'}`);
+                }
+            }
+        }
+    }
+}
 const shopSquareMax = Math.max(...SHOP_SIZES.map((s) => maxShopSquareMm(3, 3, s.id) ?? 0));
 if (shopSquareMax !== SHOP_SQUARE_MM_MAX) {
     failures.push(`the largest 3-wide square on any size is ${shopSquareMax} mm, but SHOP_SQUARE_MM_MAX is ${SHOP_SQUARE_MM_MAX}`);

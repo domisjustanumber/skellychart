@@ -13,8 +13,9 @@
     "check:banner": "tsx scripts/generate-banner-size.ts --check",
     "check:dist": "tsx scripts/check-dist-version.ts",
     "check:home-golden": "tsx scripts/check-home-golden.ts",
+    "check:links": "tsx scripts/check-links.ts",
     "prebuild": "npm run check:version",
-    "build": "npm run check:presets && npm run check:banner && npm run check:home-golden && tsc -b && vite build",
+    "build": "npm run check:presets && npm run check:banner && npm run check:links && npm run check:home-golden && tsc -b && vite build",
     "postbuild": "npm run check:dist",
     "preview": "vite preview"
   },

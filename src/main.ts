@@ -1648,7 +1648,7 @@ async function saveShopPdf(): Promise<void> {
     const prefix = exportBasenamePrefix();
     await yieldToMain();
     try {
-        const {renderShopPrintSvg, shopPdfProperties} = await import('./print/shopSheet.js');
+        const {renderShopPrintSvg, SHOP_CMYK_BY_RGB, shopPdfProperties} = await import('./print/shopSheet.js');
         const sheet = await renderShopPrintSvg({...board, layout, size, options});
         const blob = await buildPdfBlobFromSvgPages(
             [{svg: sheet.svg, widthMm: sheet.mediaMm.w, heightMm: sheet.mediaMm.h}],
@@ -1657,6 +1657,7 @@ async function saveShopPdf(): Promise<void> {
                 shop: {
                     trimBoxMm: sheet.trimBoxMm,
                     bleedBoxMm: sheet.bleedBoxMm,
+                    cmykByRgb: SHOP_CMYK_BY_RGB,
                     ...shopPdfProperties({...board, layout, size, chartUrl: sheet.chartUrl}),
                 },
             },

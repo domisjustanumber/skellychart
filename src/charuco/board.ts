@@ -245,7 +245,7 @@ export function putGrayOnCanvas(canvas: HTMLCanvasElement, gray: Uint8Array): vo
  * keeps PDF viewers that anti-alias each fill separately from showing hairline seams between
  * abutting cells. Every subpath winds the same way, so the nonzero fill is the exact union.
  */
-function arucoMarkerSvgPath(id: number, sidePx: number, borderBits: number): string {
+function arucoMarkerSvgPath(id: number, sidePx: number, borderBits: number, fill: string): string {
     const markerSize = ARUCO_MARKER_SIZE_4X4;
     if (id < 0 || id >= 250) {
         throw new RangeError(`ArUco id ${id} out of range for DICT_4X4_250`);
@@ -277,7 +277,7 @@ function arucoMarkerSvgPath(id: number, sidePx: number, borderBits: number): str
             }
         }
     }
-    return d.length > 0 ? `<path d="${d.join('')}" fill="#000"/>` : '';
+    return d.length > 0 ? `<path d="${d.join('')}" fill="${fill}"/>` : '';
 }
 
 /** Square-index range [gx0, gx1) × [gy0, gy1) of a board. */
@@ -291,16 +291,18 @@ export interface CharucoSquareRange {
 /**
  * Inner `<g>` for a ChArUco board in pixel coordinates (same layout as `renderCharucoBoardGray`).
  * With `squares`, only the checker squares and markers inside that square range are emitted (same
- * positions), so a printed sheet that shows one crop does not carry the whole board.
+ * positions), so a printed sheet that shows one crop does not carry the whole board. `fill` colours the
+ * squares and marker cells (print-shop sheets mark them for the rich-black CMYK build).
  */
 export function renderCharucoBoardSvgFragment(
     widthPx: number,
     heightPx: number,
     geom: CharucoGeometry,
     squares?: CharucoSquareRange,
+    fill = '#000',
 ): string {
     const {squaresX: w, squaresY: h, squareLength, markerLength} = geom;
-    const parts: string[] = ['<g fill="#000">'];
+    const parts: string[] = [`<g fill="${fill}">`];
     const {startX, startY, pixInSquare, pixBoardW, pixBoardH} = charucoBoardPixelLayout(widthPx, heightPx, w, h);
 
     const pixInMarker = (markerLength / squareLength) * pixInSquare;
@@ -373,7 +375,7 @@ export function renderCharucoBoardSvgFragment(
         const dx = zoneOffX + Math.round(p0.x);
         const dy = zoneOffY + Math.round(p0.y);
         parts.push(
-            `<g transform="translate(${dx} ${dy})" shape-rendering="crispEdges">${arucoMarkerSvgPath(m.id, side, 1)}</g>`,
+            `<g transform="translate(${dx} ${dy})" shape-rendering="crispEdges">${arucoMarkerSvgPath(m.id, side, 1, fill)}</g>`,
         );
     }
     parts.push('</g>');

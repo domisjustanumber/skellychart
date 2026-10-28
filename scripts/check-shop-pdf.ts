@@ -5,7 +5,8 @@
  *
  * For A3, 24 × 36 in and 36 × 48 in, each with standard bleed, exact trim, 10 mm bleed and standard bleed
  * with crop marks, it asserts: one page; MediaBox, TrimBox and BleedBox as computed; no fonts, text or
- * images; PrintScaling None; black as DeviceGray 0 and no ExtGState; crop-mark endpoints exactly b and
+ * images; PrintScaling None; colour as DeviceCMYK only (squares C60 K100, detail K100, nothing off the
+ * shop table) and no ExtGState, shading or pattern; crop-mark endpoints exactly b and
  * b + 6 mm outside the TrimBox in page space (so the board is 1:1); and the chart link in the keywords
  * reopens the board.
  */
@@ -16,6 +17,7 @@ import {chromium} from 'playwright-core';
 import {createServer} from 'vite';
 import {parseCharucoQrSearchParams, type ShopPrintOptions, type ShopSizeChoice} from '../src/print/charucoDocUrl.js';
 import {maxShopSquareMm} from '../src/print/shopLayout.js';
+import {SHOP_CMYK_BY_RGB} from '../src/print/shopSheet.js';
 import {bleedMmForUnit, SHOP_CROP_MARK_LENGTH_MM} from '../src/print/shopSizes.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -199,10 +201,22 @@ try {
             if (!/\/PrintScaling \/None/.test(text)) {
                 failures.push(`${label}: no /PrintScaling /None`);
             }
-            // jsPDF writes zero as `0` or `0.`.
-            const zero = String.raw`0(?:\.0*)?`;
-            if (new RegExp(String.raw`(^|\s)${zero} ${zero} ${zero} (rg|RG)(\s|$)`, 'm').test(content) || !new RegExp(String.raw`(^|\s)${zero} g(\s|$)`, 'm').test(content)) {
-                failures.push(`${label}: black is not DeviceGray 0 g`);
+            // Colour is DeviceCMYK only, every value from the shop's table: rich-black squares, K100 detail.
+            // jsPDF writes numbers as `0.`, `1.`, `0.6`.
+            const num = String.raw`-?(?:\d+\.?\d*|\.\d+)`;
+            const otherColour = new RegExp(String.raw`(^|\s)(?:${num} ){1,3}(g|G|rg|RG|sc|SC|scn|SCN)(?=\s|$)|(^|\s)/\S+ (cs|CS)(?=\s|$)`, 'm');
+            if (otherColour.test(content)) {
+                failures.push(`${label}: PDF has grey, RGB or other non-CMYK colour operators`);
+            }
+            if (/\/DeviceRGB|\/Shading|\/Pattern/.test(text)) {
+                failures.push(`${label}: PDF has an RGB colour space, shading or pattern`);
+            }
+            const allowed = Object.values(SHOP_CMYK_BY_RGB).map((c) => c.join(','));
+            const cmykOp = new RegExp(String.raw`(?:^|\s)(${num}) (${num}) (${num}) (${num}) [kK](?=\s|$)`, 'gm');
+            const used = new Set([...content.matchAll(cmykOp)].map((m) => m.slice(1, 5).map(Number).join(',')));
+            const stray = [...used].filter((c) => !allowed.includes(c));
+            if (stray.length || !used.has('0.6,0,0,1') || !used.has('0,0,0,1')) {
+                failures.push(`${label}: CMYK values ${[...used].join(' / ')} are not the shop table's (stray: ${stray.join(' / ')})`);
             }
 
             // Crop marks: stroked segments outside the trim, each on a trim edge line, b to b + 6 mm out.

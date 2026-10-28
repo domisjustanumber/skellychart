@@ -32,7 +32,7 @@ Serve `dist/` with any static file host; Vite is configured with `base: './'` fo
 
 ## Print-shop mode
 
-"Print shop" makes one print-ready PDF for a rigid board (foam board, corflute, ACM) from a walk-in print shop: one of the standard sizes the chains sell (12 × 18 in to 36 × 48 in, A3 to A0, 450 × 600 to 900 × 1200 mm), the board at exactly 1:1 under a compact banner, with a white quiet zone. The page is the trim plus a bleed (3 mm or ⅛ in by default), with optional crop marks and a slug; the PDF sets the TrimBox and BleedBox and contains no fonts (text is outlined). Everything, including the size and print options, round-trips in the QR link (`t` field). The plan and its decisions are in `plans/print-shop.md`.
+"Print shop" makes one print-ready PDF for a rigid board (foam board, corflute, ACM) from a walk-in print shop: one of the standard sizes the chains sell (12 × 18 in to 36 × 48 in, A3 to A0, 450 × 600 to 900 × 1200 mm), the board at exactly 1:1 under a compact banner, with a white quiet zone. The page is the trim plus a bleed (3 mm or ⅛ in by default), with optional crop marks and a slug; the PDF sets the TrimBox and BleedBox, contains no fonts (text is outlined) and is DeviceCMYK only: squares C60 K100, text, QR and marks K100, accents converted to GRACoL2013 (`SHOP_CMYK_BY_RGB` in `src/print/shopSheet.ts`). Everything, including the size and print options, round-trips in the QR link (`t` field). The plan and its decisions are in `plans/print-shop.md`.
 
 ## ArUco dictionary data
 

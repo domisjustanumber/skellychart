@@ -28,7 +28,7 @@ export const pdfLabels = {
      * Slug below a print-shop board's crop marks (trimmed off), as parts joined by " | "; parts are dropped
      * from the right until the line fits. Outlined text: ASCII plus ×, no `·`.
      */
-    shopSlugParts: ['PRINT AT 100% - DO NOT SCALE', 'Trim {{trim}}', '{{squaresX}} × {{squaresY}} squares', '{{mm}} mm', 'v{{version}}'],
+    shopSlugParts: ['PRINT AT 100% - DO NOT SCALE', 'Trim {{trim}}', '{{squaresX}} × {{squaresY}} squares', '{{mm}} mm', 'v{{version}}', 'CMYK - PRINT AS SUPPLIED'],
     originInstructionsTitle: 'Instructions',
     /**
      * Instructions column of a single-sheet chart's banner (wrapped when laid out). Its height is

@@ -4,7 +4,7 @@
  */
 import type {ShopPrintOptions, ShopSizeChoice} from '../../src/print/charucoDocUrl.js';
 import {shopSheetLayout} from '../../src/print/shopLayout.js';
-import {renderShopPrintSvg, shopPdfProperties} from '../../src/print/shopSheet.js';
+import {renderShopPrintSvg, SHOP_CMYK_BY_RGB, shopPdfProperties} from '../../src/print/shopSheet.js';
 import {buildPdfBlobFromSvgPages} from '../../src/ui/pdfExport.js';
 
 interface Request {
@@ -28,6 +28,7 @@ async function buildShopPdf(r: Request) {
             shop: {
                 trimBoxMm: sheet.trimBoxMm,
                 bleedBoxMm: sheet.bleedBoxMm,
+                cmykByRgb: SHOP_CMYK_BY_RGB,
                 ...shopPdfProperties({...r, layout, chartUrl: sheet.chartUrl}),
             },
         },

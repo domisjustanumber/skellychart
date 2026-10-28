@@ -388,7 +388,36 @@ for (const [squareMm, area, limit] of [[101, 88, '8×11'], [50, 391, '17×23'], 
 
 // Shop sheet SVG: every size × bleed × crop marks, font-free, sized to the page, 1:1, marks where they belong.
 process.env.CHARUCO_LOGO_FILE = new URL('../public/freemocap-logo.svg', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
-const {renderShopPrintSvg} = await import('../src/print/shopSheet.js');
+const {renderShopPrintSvg, SHOP_CMYK_BY_RGB, SHOP_RICH_BLACK_FILL} = await import('../src/print/shopSheet.js');
+
+/** Every colour an SVG paints (fill / stroke attributes and visible style rules), as `r,g,b`. */
+function paintedColours(svg: string): Set<string> {
+    const toRgb = (c: string): string | null => {
+        const v = c.trim().toLowerCase();
+        if (v === 'none' || v === 'transparent') {
+            return null;
+        }
+        const rgb = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(v);
+        if (rgb) {
+            return rgb.slice(1).join(',');
+        }
+        const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/.exec(v)?.[1];
+        if (hex) {
+            const full = hex.length === 3 ? [...hex].map((h) => h + h).join('') : hex;
+            return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16)).join(',');
+        }
+        return `unparsed ${c}`;
+    };
+    const colours = [...svg.matchAll(/\s(?:fill|stroke)="([^"]+)"/g)].map((m) => m[1]!);
+    for (const rule of svg.matchAll(/\{([^}]*)\}/g)) {
+        if (!/display:\s*none/.test(rule[1]!)) {
+            colours.push(...[...rule[1]!.matchAll(/(?:fill|stroke):\s*([^;]+)/g)].map((m) => m[1]!));
+        }
+    }
+    // Paths with no fill paint black.
+    colours.push('#000');
+    return new Set(colours.map(toRgb).filter((c): c is string => c !== null));
+}
 const FORBIDDEN = ['<text', '<tspan', '<textPath', '<foreignObject', '<image', '<use', 'font-family', '@font-face', 'rgba(', 'opacity'];
 const toMm = (attr: string) => (attr.endsWith('in') ? Number.parseFloat(attr) * 25.4 : Number.parseFloat(attr));
 let sheetsRendered = 0;
@@ -420,7 +449,7 @@ for (const size of SHOP_SIZES) {
                     failures.push(`${label}: trim / bleed boxes ${JSON.stringify(r.trimBoxMm)} ${JSON.stringify(r.bleedBoxMm)} do not match the page`);
                 }
                 // One square is exactly s × 12 px: the board's first black square.
-                const board = /<svg x="[\d.]+" y="[\d.]+" width="(\d+)" height="(\d+)" viewBox="0 0 \d+ \d+" overflow="hidden"><rect[^>]*\/><g fill="#000"><rect x="\d+" y="\d+" width="(\d+)" height="(\d+)"\/>/.exec(r.svg);
+                const board = /<svg x="[\d.]+" y="[\d.]+" width="(\d+)" height="(\d+)" viewBox="0 0 \d+ \d+" overflow="hidden"><rect[^>]*\/><g fill="[^"]+"><rect x="\d+" y="\d+" width="(\d+)" height="(\d+)"\/>/.exec(r.svg);
                 if (!board || Number(board[1]) !== squaresX * squareMm * PIXELS_PER_MM || Number(board[3]) !== squareMm * PIXELS_PER_MM || Number(board[4]) !== squareMm * PIXELS_PER_MM) {
                     failures.push(`${label}: board or square is not drawn at 1:1`);
                 }
@@ -456,6 +485,12 @@ for (const size of SHOP_SIZES) {
                     if (markPath) {
                         failures.push(`${label}: crop marks drawn although they are off`);
                     }
+                }
+                // Every colour has a CMYK value (else the PDF export throws), and the squares are rich black.
+                const painted = paintedColours(r.svg);
+                const unmapped = [...painted].filter((c) => !(c in SHOP_CMYK_BY_RGB));
+                if (unmapped.length || !r.svg.includes(`fill="${SHOP_RICH_BLACK_FILL}"`)) {
+                    failures.push(`${label}: colours ${unmapped.join(' / ')} have no CMYK value, or the squares are not rich black`);
                 }
                 // The QR link reopens this board, size and options.
                 const back = parseCharucoQrSearchParams(new URL(r.chartUrl).searchParams);

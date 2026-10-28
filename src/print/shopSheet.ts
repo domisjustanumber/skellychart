@@ -33,6 +33,28 @@ import {resolveLogoForPrint} from './svgDocument.js';
 import {SKELLY_LOGO_VIEWBOX_H, SKELLY_LOGO_VIEWBOX_W} from './skellyLogo.js';
 import {svgRootOpen, svgRootOuterSizeAttrsUnit, SVG_ROOT_CLOSE} from './svgUtils.js';
 
+/**
+ * Fill marking the board's squares and marker cells, which print as rich black (C60 K100). Only print-shop
+ * sheets use it; the PDF export maps it through {@link SHOP_CMYK_BY_RGB}, and it never reaches home output.
+ */
+export const SHOP_RICH_BLACK_FILL = 'rgb(0,0,1)';
+
+/**
+ * CMYK (0..1) for every colour a print-shop sheet draws, keyed by rounded `r,g,b`. Large black areas (squares,
+ * marker cells) get cyan under K100 for a deeper black (160% ink); fine features (text, QR, crop marks, the
+ * logo outline) are K100 only, so misregistration cannot fringe them. The arrows and logo colours are sRGB →
+ * GRACoL2013_CRPC6, relative colorimetric with black-point compensation, rounded to 5%.
+ */
+export const SHOP_CMYK_BY_RGB: Readonly<Record<string, readonly [number, number, number, number]>> = {
+    '0,0,1': [0.6, 0, 0, 1],
+    '0,0,0': [0, 0, 0, 1],
+    '255,255,255': [0, 0, 0, 0],
+    '165,40,37': [0, 0.95, 0.8, 0.35],
+    '51,108,52': [0.7, 0.1, 0.85, 0.45],
+    '148,196,199': [0.45, 0.1, 0.2, 0],
+    '217,81,87': [0, 0.8, 0.55, 0.1],
+};
+
 /** Crop-mark stroke: 0.25 pt. */
 const CROP_MARK_STROKE_MM = (0.25 * 25.4) / 72;
 /** Slug type: 6 pt. */
@@ -144,7 +166,7 @@ export function renderShopSheetSvg(p: ShopSheetParams): ShopSheetSvg {
         `<svg x="${banner.qrX}" y="${banner.bannerTitleTop}" width="${banner.qrSizePx}" height="${banner.qrSizePx}" overflow="hidden">${p.qrSvgFragment}</svg>`,
         `<svg x="${boardX}" y="${boardY}" width="${boardW}" height="${boardH}" viewBox="0 0 ${boardW} ${boardH}" overflow="hidden">` +
             `<rect width="${boardW}" height="${boardH}" fill="#fff"/>` +
-            renderCharucoBoardSvgFragment(boardW, boardH, geom) +
+            renderCharucoBoardSvgFragment(boardW, boardH, geom, undefined, SHOP_RICH_BLACK_FILL) +
             `</svg>`,
         svgCornerMarker(ppm, boardX, boardY, outlineText),
     ];
@@ -256,7 +278,7 @@ export function shopPdfProperties(p: {
     const trim = formatShopTrim(p.layout.trimWMm, p.layout.trimHMm, p.size.unit).replace(/ × /g, ' x ');
     return {
         title: `FreeMoCap ChArUco calibration board ${p.squaresX} x ${p.squaresY}, ${p.squareMm} mm squares`,
-        subject: `Trim ${trim} - print at 100%, do not scale - square ${p.squareMm} mm`,
+        subject: `Trim ${trim} - print at 100%, do not scale - square ${p.squareMm} mm - CMYK, print as supplied`,
         keywords: `FreeMoCap, ChArUco, calibration, print shop, ${p.chartUrl}`,
         creator: `skellychart v${version}`,
     };

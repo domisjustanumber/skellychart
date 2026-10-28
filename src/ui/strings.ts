@@ -87,7 +87,8 @@ export const S = {
     shopOrderNoBleed: 'no bleed',
     shopOrderBoardSmall: 'Board: 5 mm (3/16 in) foam board, matte, no lamination. Coroplast is acceptable, not ideal.',
     shopOrderBoardLarge: 'Board: 10 mm honeycomb board or 3 mm ACM (5 mm foam flexes at this size), matte, no lamination.',
-    shopOrderColour: 'Black is pure K; print as supplied and do not convert colours.',
+    shopOrderColour:
+        'Colour: CMYK. Squares are C60 K100; text, QR and marks are K100 only. Print as supplied; do not convert colours or turn K100 into rich black.',
     shopOrderCheck: 'On delivery, measure {{n}} squares from an edge to the same edge {{n}} squares along: it should be {{total}} mm ({{mm}} mm each).',
     scanCardTitle: 'You scanned a FreeMoCap calibration chart: {{squaresX}} × {{squaresY}} squares, {{mm}} mm.',
     scanCardMeasure:

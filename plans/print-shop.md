@@ -602,6 +602,8 @@ It also asserts the writer-to-parser round trip for every size × every bleed in
 
 ## Phase 2
 
+**Status: built on branch `print-shop-cmyk` (cut from `print-shop`), without a physical proof first, at the user's request (2026-10-28).** As built: `SHOP_RICH_BLACK_FILL` and `SHOP_CMYK_BY_RGB` in `shopSheet.ts`; `renderCharucoBoardSvgFragment` takes a `fill` (home keeps `#000`); `pdfExport.ts` wraps the three colour setters (`useShopCmyk`) and starts each page with `0 0 0 1 K` / `0 0 0 1 k`. `check:shop` asserts every colour a shop sheet paints is in the table and the squares carry the sentinel; `check:home-golden` asserts the sentinel never reaches home output; `check:shop-pdf` asserts DeviceCMYK only, every value from the table, with C60 K100 and K100 present. The slug ends with "CMYK - PRINT AS SUPPLIED" (dropped first when space runs out) and the PDF subject with " - CMYK, print as supplied". **Still to do: a physical proof from a FedEx or Staples shop.**
+
 **CMYK, with cyan added to the large black areas.** Shop only; home stays DeviceGray/RGB.
 - **The build (kept as asked):** C60 M0 Y0 K100 is the standard cyan-only "cool" black, 160% total ink. It is well under the 220-250% limits for paper, wide format and RIPs. K stays 100 in every black, because carbon K gives the IR density, and CMY-only black is never used. The neutral alternative is 60/40/40/100.
 - **Caveat:** on UV flatbeds, an RGB #000 converted by the RIP becomes about 300% rich black, with raised edges; DeviceCMYK C60K100 (160%) avoids that. Confirm the result on a physical proof before shipping.
@@ -614,15 +616,15 @@ It also asserts the writer-to-parser round trip for every size × every bleed in
 | Crop marks (not Registration) | C0 M0 Y0 K100 |
 | Logo outline (path966) | C0 M0 Y0 K100 |
 | White fills | 0 0 0 0 |
-| X arrow #A52825 | re-derive (FOGRA51 placeholder C10 M90 Y80 K30) |
-| Y arrow #336C34 | re-derive (FOGRA51 placeholder C70 M20 Y80 K40) |
-| Logo teal #94C4C7 | re-derive (FOGRA51 placeholder C45 M8 Y20 K0) |
-| Logo coral #D95157 | re-derive (FOGRA51 placeholder C5 M80 Y55 K5) |
+| X arrow #A52825 | C0 M95 Y80 K35 |
+| Y arrow #336C34 | C70 M10 Y85 K45 |
+| Logo teal #94C4C7 | C45 M10 Y20 K0 |
+| Logo coral #D95157 | C0 M80 Y55 K10 |
 
 **Why the values differ by element.**
 - Fine features (text, QR, thin rules, marks) stay K-only, so misregistration cannot fringe them. Shops ask for QR codes in 100% K.
 - The cyan boost goes only on large areas, where it deepens the black.
-- The arrows and logo are ICC conversions (Ghostscript/lcms2), rounded to 5% steps. Re-derive them with sRGB → GRACoL2013_CRPC6 instead of PSOcoated_v3. They sit in the margin and are not detected features.
+- The arrows and logo are ICC conversions (Ghostscript/lcms2), rounded to 5% steps. Derived with Ghostscript 10.03 (lcms2): sRGB (`iccprofiles/srgb.icc`) → GRACoL2013_CRPC6 (from the ICC registry), relative colorimetric with black-point compensation (`-dRenderIntent=1 -dBlackPtComp=1`, `bitcmyk` device), then rounded to 5%. Raw: X C1.2 M93.3 Y78.8 K34.1; Y C68.6 M9.4 Y86.3 K47.5; teal C45.1 M8.2 Y20.0 K0.4; coral C2.0 M78.4 Y52.5 K7.8. Ghostscript's default CMYK gives different values, which confirms the profile was used. They sit in the margin and are not detected features.
 
 **Colour profile.**
 - **For now, do not embed an ICC profile, do not write an OutputIntent, and never claim PDF/X.** jsPDF cannot write `/Trapped` or `GTS_PDFXVersion` into Info without a post-pass, and its default `/OpenAction` may be flagged.

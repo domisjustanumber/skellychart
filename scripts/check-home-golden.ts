@@ -111,6 +111,11 @@ for (const c of cases) {
         hash.update(`guide ${guide.paperWMm}x${guide.paperHMm}\n${lf(guide.svg)}\n`);
     }
     svgs.forEach((svg, i) => hash.update(`sheet ${i + 1}\n${lf(svg)}\n`));
+    // The print-shop rich-black marker must never reach home output (it would print as 0 0 0.004 rg).
+    if ([guide?.svg ?? '', ...svgs].some((svg) => svg.includes('rgb(0,0,1)'))) {
+        console.error(`${c.key}: home output contains the print-shop rich-black fill rgb(0,0,1)`);
+        process.exit(1);
+    }
     actual[`${c.key} (${svgs.length} sheet${svgs.length === 1 ? '' : 's'}${guide ? ' + guide' : ''})`] =
         hash.digest('hex');
 }

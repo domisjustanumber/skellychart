@@ -19,6 +19,7 @@
  *   leaves nested sizes unset (see `qrSvg.ts`).
  */
 
+import type {jsPDFOptions} from 'jspdf';
 import {yieldToMain} from './yieldToMain.js';
 
 /** Canvas font size used to measure baseline offsets as fractions of an em. */
@@ -119,10 +120,14 @@ export interface PdfBoxMm {
     h: number;
 }
 
-/** Print-shop file: one font-free page with its trim and bleed boxes, and document properties for the shop. */
+/**
+ * Print-shop file: one font-free CMYK page with its trim and bleed boxes, and document properties for the
+ * shop. Every colour the sheet draws must be in `cmykByRgb` (keyed by rounded `r,g,b`), or the export fails.
+ */
 export interface PdfShopOptions {
     trimBoxMm: PdfBoxMm;
     bleedBoxMm: PdfBoxMm;
+    cmykByRgb: Readonly<Record<string, readonly [number, number, number, number]>>;
     title: string;
     subject: string;
     keywords: string;
@@ -134,6 +139,25 @@ const PDF_PAGE_MAX_MM = (14400 * 25.4) / 72;
 
 /** Elements that would put fonts or images in a print-shop PDF; its SVG draws text as paths. */
 const SHOP_FORBIDDEN_ELEMENTS = 'text, tspan, textPath, foreignObject, image, use';
+
+/**
+ * Writes every colour svg2pdf sets as DeviceCMYK from the shop's table: all its colour calls go through
+ * these three setters (gradients, patterns, images and opacity would bypass them, and the shop sheet has
+ * none). A colour missing from the table throws, so nothing reaches the PDF as RGB or grey.
+ */
+function useShopCmyk(doc: Record<string, unknown>, cmykByRgb: PdfShopOptions['cmykByRgb']): void {
+    for (const name of ['setFillColor', 'setDrawColor', 'setTextColor']) {
+        const original = (doc[name] as (...channels: number[]) => unknown).bind(doc);
+        doc[name] = (r: number, g: number, b: number) => {
+            const key = [r, g, b].map((v) => Math.round(Number(v))).join(',');
+            const cmyk = cmykByRgb[key];
+            if (!cmyk) {
+                throw new Error(`The print-shop sheet uses rgb(${key}), which has no CMYK value.`);
+            }
+            return original(...cmyk);
+        };
+    }
+}
 
 /** A box (mm, top-left origin) as PDF points with a bottom-left origin, on a page `pageHMm` tall. */
 function pdfBoxPt(box: PdfBoxMm, pageHMm: number) {
@@ -170,9 +194,13 @@ export async function buildPdfBlobFromSvgPages(
         format: [first.widthMm, first.heightMm],
         orientation: pageOrientation(first.widthMm, first.heightMm),
         compress: true,
-        // Otherwise jsPDF writes all 14 standard fonts into every file, used or not.
-        ...(shop ? {putOnlyUsedFonts: true} : {}),
-    });
+        // Otherwise jsPDF writes all 14 standard fonts into every file, used or not; and each page would
+        // start with grey (`0 G`, `0 g`) colours.
+        ...(shop ? {putOnlyUsedFonts: true, strokeColor: '0 0 0 1 K', fillColor: '0 0 0 1 k'} : {}),
+    } as jsPDFOptions);
+    if (shop) {
+        useShopCmyk(doc as unknown as Record<string, unknown>, shop.cmykByRgb);
+    }
     // Ask PDF viewers to print at actual size rather than fit to the page (Acrobat and Chrome honour it).
     doc.viewerPreferences({PrintScaling: 'None'});
 

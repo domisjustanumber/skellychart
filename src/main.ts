@@ -51,6 +51,7 @@ import {
     formatShopTrim,
     pageSizeMm,
     SHOP_SQUARE_MM_MAX,
+    SHOP_TRIM_MAX_MM,
     shopBleedChoices,
     shopSizeById,
     shopSizeGroups,
@@ -61,6 +62,7 @@ import {
     maxShopGridForSquare,
     maxShopSquareMm,
     resolveShopDistancePlan,
+    shopQuietZoneMm,
     shopSheetLayout,
     smallestFittingShopSize,
     snapShopSquareMm,
@@ -661,6 +663,25 @@ function setIntroElement(el: HTMLElement): void {
 }
 
 function setPrintAdviceElement(el: HTMLElement): void {
+    if (state.mode === 'shop') {
+        const finish = document.createElement('p');
+        const lead = document.createElement('strong');
+        lead.textContent = S.shopAdviceLead;
+        finish.append(lead, document.createTextNode(S.shopAdviceFinish));
+        const paragraphs: string[] = [S.shopAdviceSubstrate, S.shopAdviceProducts, S.shopAdviceTemplate];
+        if (!state.shopCropMarks) {
+            paragraphs.push(S.shopAdviceCropMarks);
+        }
+        el.replaceChildren(
+            finish,
+            ...paragraphs.map((text) => {
+                const p = document.createElement('p');
+                p.textContent = text;
+                return p;
+            }),
+        );
+        return;
+    }
     const shop = document.createElement('p');
     const shopLead = document.createElement('strong');
     shopLead.textContent = S.printAdviceShopLead;
@@ -972,7 +993,7 @@ function syncModeControls(): void {
 
     byId('paperField').classList.toggle('hidden', shop);
     byId('pagesGroup').classList.toggle('hidden', shop);
-    for (const id of ['shopSizeField', 'shopBleedField', 'shopCropField']) {
+    for (const id of ['shopSizeField', 'shopBleedField', 'shopCropField', 'shopOrder']) {
         byId(id).classList.toggle('hidden', !shop);
     }
     if (!shop) {
@@ -1065,6 +1086,138 @@ function syncModeControls(): void {
     }
     byId('lbl-shopCropMarks').textContent = S.shopCropMarks;
     (byId('shopCropMarks') as HTMLInputElement).checked = state.shopCropMarks;
+
+    byId('shopOrderTitle').textContent = S.shopOrderTitle;
+    byId('btnCopyOrder').textContent = S.shopOrderCopy;
+    const orderText = layout ? shopOrderText(layout) : '';
+    const orderEl = byId('shopOrderText');
+    if (orderEl.textContent !== orderText) {
+        orderEl.textContent = orderText;
+        byId('copyOrderStatus').textContent = '';
+    }
+}
+
+/**
+ * The note for the shop: print at 100%, the file and trim size, the board, colour handling and how to check
+ * the squares on delivery. It carries the same facts as the slug and the PDF subject.
+ */
+function shopOrderText(layout: NonNullable<ReturnType<typeof shopLayoutNow>>): string {
+    const unit = state.shopUnit;
+    const bleedMm = bleedMmForUnit(state.shopBleed, unit);
+    const trim = formatShopTrim(layout.trimWMm, layout.trimHMm, unit);
+    const page = pageSizeMm({wMm: layout.trimWMm, hMm: layout.trimHMm}, bleedMm, state.shopCropMarks);
+    const pageDims = formatShopDims(page.wMm, page.hMm, unit);
+    const bleed = formatShopBleed(bleedMm);
+    let pageLine: string;
+    if (state.shopCropMarks) {
+        const included = bleedMm > 0 ? interpolate(S.shopOrderBleedIncluded, {bleed}) : S.shopOrderNoBleed;
+        pageLine = interpolate(S.shopOrderPageMarks, {page: pageDims, trim, bleed: included});
+    } else {
+        pageLine = bleedMm > 0 ? interpolate(S.shopOrderPage, {page: pageDims, trim, bleed}) : interpolate(S.shopOrderPageExact, {trim});
+    }
+    // 5 mm foam flexes past 24 × 36 in, so bigger boards need a stiffer substrate.
+    const large = Math.max(layout.trimWMm, layout.trimHMm) > 914.4 + 1e-6;
+    const n = Math.max(2, Math.min(state.squaresX, Math.floor(300 / state.squareMm)));
+    const lines = [
+        interpolate(S.shopOrderChart, {squaresX: state.squaresX, squaresY: state.squaresY, mm: state.squareMm}),
+        S.shopOrderScale,
+        pageLine,
+        large ? S.shopOrderBoardLarge : S.shopOrderBoardSmall,
+        S.shopOrderColour,
+        interpolate(S.shopOrderCheck, {n, total: n * state.squareMm, mm: state.squareMm}),
+    ];
+    // Near the walk-in cap, say why the board cannot be bigger.
+    const e = shopQuietZoneMm(state.squareMm);
+    const needW = layout.content.w + 2 * e;
+    const needH = layout.content.h + 2 * e;
+    if (Math.min(needW, needH) >= SHOP_TRIM_MAX_MM[0] - 25 || Math.max(needW, needH) >= SHOP_TRIM_MAX_MM[1] - 25) {
+        lines.push(S.shopCapNote);
+    }
+    return lines.join('\n');
+}
+
+async function copyShopOrder(): Promise<void> {
+    const text = byId('shopOrderText').textContent ?? '';
+    const status = byId('copyOrderStatus');
+    try {
+        await navigator.clipboard.writeText(text);
+        status.textContent = S.shopOrderCopied;
+    } catch {
+        // No clipboard access (permissions, insecure context): select the note so it can be copied by hand.
+        const range = document.createRange();
+        range.selectNodeContents(byId('shopOrderText'));
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        status.textContent = S.shopOrderCopyManual;
+    }
+}
+
+/** The chart a scanned QR code described; the scan card shows once per tab. */
+let scannedChart: {squaresX: number; squaresY: number; squareMm: number; shop: boolean} | null = null;
+
+function renderScanCard(): void {
+    const card = byId('scanCard');
+    if (!scannedChart) {
+        card.classList.add('hidden');
+        card.replaceChildren();
+        return;
+    }
+    const p = (text: string, className?: string): HTMLParagraphElement => {
+        const el = document.createElement('p');
+        el.textContent = text;
+        if (className) {
+            el.className = className;
+        }
+        return el;
+    };
+    const title = p(
+        interpolate(S.scanCardTitle, {squaresX: scannedChart.squaresX, squaresY: scannedChart.squaresY, mm: scannedChart.squareMm}),
+        'scan-card-title',
+    );
+    title.id = 'scanCardTitle';
+    const docs = document.createElement('p');
+    const a = document.createElement('a');
+    a.href = FREEMOCAP_CALIBRATION_DOCS_MULTI_CAM_URL;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = S.scanCardDocs;
+    docs.appendChild(a);
+    const button = (label: string, className: string, onClick: () => void): HTMLButtonElement => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = className;
+        b.textContent = label;
+        b.addEventListener('click', onClick);
+        return b;
+    };
+    const close = (): void => {
+        scannedChart = null;
+        renderScanCard();
+    };
+    const actions = document.createElement('div');
+    actions.className = 'scan-card-actions';
+    actions.append(
+        button(S.scanCardPrintAnother, 'btn btn-secondary', () => {
+            close();
+            setMode('home');
+        }),
+        button(S.scanCardOrder, 'btn btn-secondary', () => {
+            close();
+            setMode('shop');
+        }),
+    );
+    const dismiss = button('×', 'scan-card-dismiss', close);
+    dismiss.setAttribute('aria-label', S.scanCardDismiss);
+    card.replaceChildren(
+        title,
+        p(S.scanCardMeasure),
+        ...(scannedChart.shop ? [p(S.scanCardFlat)] : []),
+        docs,
+        actions,
+        dismiss,
+    );
+    card.classList.remove('hidden');
 }
 
 /** Print-shop summary: one board, its trim (toggled unit first), orientation, grid and square length. */
@@ -1718,6 +1871,16 @@ function applyQrQueryFromLocation(): void {
     }
 
     if (parsed.squaresX !== null || parsed.squaresY !== null || parsed.squareLengthMm !== null) {
+        const seen = (history.state as {skScanSeen?: boolean} | null)?.skScanSeen === true;
+        if (!seen && parsed.squaresX !== null && parsed.squaresY !== null && parsed.squareLengthMm !== null) {
+            scannedChart = {
+                squaresX: parsed.squaresX,
+                squaresY: parsed.squaresY,
+                squareMm: parsed.squareLengthMm,
+                shop: parsed.printMode === 'shop',
+            };
+            history.replaceState({...(history.state as object | null), skScanSeen: true}, '');
+        }
         state.autoGrid = false;
         if (parsed.squaresX !== null) {
             state.squaresX = clampInt(parsed.squaresX, BOARD_GRID_MIN, BOARD_GRID_MAX);
@@ -1999,6 +2162,7 @@ function wireUi(): void {
         syncUi();
     });
 
+    byId('btnCopyOrder').addEventListener('click', () => void copyShopOrder());
     byId('btnPdf').addEventListener('click', () => void openPrintDialog());
     byId('btnSavePdf').addEventListener('click', () => void savePdfFile());
 
@@ -2023,6 +2187,7 @@ function boot(): void {
     applyQrQueryFromLocation();
     syncQrVersionBanner();
     syncUi();
+    renderScanCard();
 }
 
 boot();

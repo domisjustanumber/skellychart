@@ -193,6 +193,75 @@ body {
   margin-top: 0.4rem;
 }
 
+/* Print-shop order note: plain text for the shop, copied with one button. */
+.shop-order {
+  margin: 0.75rem 0 1rem;
+}
+
+.shop-order-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.shop-order-text {
+  margin: 0 0 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--divider);
+  border-radius: 6px;
+  background: var(--panel);
+  font: inherit;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.shop-order-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.shop-order-actions .caption {
+  margin: 0;
+}
+
+/* Shown once after scanning a chart QR code. */
+.scan-card {
+  position: relative;
+  padding-right: 2.5rem;
+  background: color-mix(in srgb, var(--primary) 9%, transparent);
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--primary) 35%, transparent);
+}
+
+.scan-card p {
+  margin: 0 0 0.5rem;
+}
+
+.scan-card-title {
+  font-weight: 600;
+}
+
+.scan-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.scan-card-dismiss {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  padding: 0.2rem 0.5rem;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
 .field .checkbox-row {
   display: flex;
   align-items: center;

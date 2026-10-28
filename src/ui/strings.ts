@@ -64,7 +64,39 @@ export const S = {
     savePdfFiles: 'Save as PDF',
     printAdviceShopLead: 'For best results',
     printAdviceShop:
-        ', ask your local print shop to print this onto foam core or other rigid material. Their printers are (generally!) calibrated to do 100% accurate scaling and a rigid board that doesn’t bend will give best results.',
+        ', choose Print shop above to make a print-ready file, and have a local print shop print it onto foam board or other rigid material. Their printers are (generally!) calibrated to do 100% accurate scaling and a rigid board that doesn’t bend will give best results.',
+    shopAdviceLead: 'Order it on rigid board, matte with no lamination:',
+    shopAdviceFinish: ' gloss lamination causes glare that can hide squares from the cameras.',
+    shopAdviceSubstrate:
+        'Use 5 mm (3/16 in) foam board up to A1 or 24 × 36 in, and 10 mm honeycomb board or 3 mm ACM for bigger boards, where foam flexes. Coroplast is cheaper and works, but is less flat.',
+    shopAdviceProducts:
+        'FedEx Office: Poster + Foam Board, matte, no lamination (same day). Staples or Office Depot (US): direct-print foam board (delivered). Staples (Canada): foam-core-mounted matte poster. Officeworks: board-mounted poster on 160 gsm coated paper. Avoid mounted posters that force gloss lamination.',
+    shopAdviceTemplate:
+        'Ordering online? Match the product template’s page size to this file exactly and never use a fit or fill option, or the squares will be scaled.',
+    shopAdviceCropMarks: 'If your shop trims by hand to crop marks, turn on Crop marks.',
+    shopOrderTitle: 'Order details for the shop',
+    shopOrderCopy: 'Copy order details',
+    shopOrderCopied: 'Copied.',
+    shopOrderCopyManual: 'Selected: press Ctrl+C (⌘C on a Mac) to copy.',
+    shopOrderChart: 'FreeMoCap ChArUco calibration board: {{squaresX}} × {{squaresY}} squares, {{mm}} mm each.',
+    shopOrderScale: 'Print at 100% (actual size). No scaling, fit or fill.',
+    shopOrderPage: 'File is {{page}} = {{trim}} trim + {{bleed}} bleed. Match the product template’s page size exactly; never use a fit or fill option.',
+    shopOrderPageExact: 'No bleed; final size {{trim}}. Match the product template’s page size exactly; never use a fit or fill option.',
+    shopOrderPageMarks: 'File is {{page}}, with crop marks. Trim to {{trim}} at the crop marks ({{bleed}}).',
+    shopOrderBleedIncluded: '{{bleed}} bleed included',
+    shopOrderNoBleed: 'no bleed',
+    shopOrderBoardSmall: 'Board: 5 mm (3/16 in) foam board, matte, no lamination. Coroplast is acceptable, not ideal.',
+    shopOrderBoardLarge: 'Board: 10 mm honeycomb board or 3 mm ACM (5 mm foam flexes at this size), matte, no lamination.',
+    shopOrderColour: 'Black is pure K; print as supplied and do not convert colours.',
+    shopOrderCheck: 'On delivery, measure {{n}} squares from an edge to the same edge {{n}} squares along: it should be {{total}} mm ({{mm}} mm each).',
+    scanCardTitle: 'You scanned a FreeMoCap calibration chart: {{squaresX}} × {{squaresY}} squares, {{mm}} mm.',
+    scanCardMeasure:
+        'Measure across as many squares as your ruler spans (at least 2), from an edge to the same edge, divide by the count, and write the result in the box on the chart.',
+    scanCardFlat: 'Keep the board flat and out of direct sun.',
+    scanCardDocs: 'How to calibrate your cameras with it',
+    scanCardPrintAnother: 'Print another',
+    scanCardOrder: 'Order from a print shop',
+    scanCardDismiss: 'Dismiss',
     printAdviceHomeBody:
         'Home printers often are not accurate even at 1:1 / 100% scale settings, so measure the black box size after printing and write the actual size on the chart for you to remember later.',
     printAdviceHomeEmphasis:

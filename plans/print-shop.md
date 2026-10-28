@@ -1,6 +1,6 @@
 # Print-shop mode plan
 
-**Status:** in progress on branch `print-shop` (worktree `C:\Users\Dom\GitHub\skellychart-print-shop`), rebased onto `ui-tweaks` `509ef6f`. Done and committed: steps −1 (`593c1d9`), 0 (`b9a926e`, LF fix `033e2a6`), 0b (`524bd25`), 1 (`4dc3f73`), 2 (`7181759`), 3 (`bb3bdf6`), 4 (`5b1517f`), the rework of steps 1 and 2 for the 2026-10-28 decisions (standard sizes only, no monochrome in phase 1; `5698a35`), 5 (`93102c1`), 6 (`e5ff234`), 7 (`fb39a31`), 8a-8c. Next: step 9. Plan file: `plans/print-shop.md`. All `file:line` references are to the `ui-tweaks` code.
+**Status:** in progress on branch `print-shop` (worktree `C:\Users\Dom\GitHub\skellychart-print-shop`), rebased onto `ui-tweaks` `509ef6f`. Done and committed: steps −1 (`593c1d9`), 0 (`b9a926e`, LF fix `033e2a6`), 0b (`524bd25`), 1 (`4dc3f73`), 2 (`7181759`), 3 (`bb3bdf6`), 4 (`5b1517f`), the rework of steps 1 and 2 for the 2026-10-28 decisions (standard sizes only, no monochrome in phase 1; `5698a35`), 5 (`93102c1`), 6 (`e5ff234`), 7 (`fb39a31`), 8a-8c (`781a0e5`), 9-10. Next: step 11. Plan file: `plans/print-shop.md`. All `file:line` references are to the `ui-tweaks` code.
 
 ## Goal
 
@@ -566,7 +566,7 @@ It also asserts the writer-to-parser round trip for every size × every bleed in
 - each option (size, unit, bleed, marks) round-trips through the link;
 - Print is absent in shop mode.
 
-**9. Scan-landing card.** Add `<section id="scanCard" class="banner scan-card hidden">` after `#qrVersionBanner` (`index.html:77`).
+**9. Scan-landing card. Done.** The card shows the scanned link's own board (before any snapping). Add `<section id="scanCard" class="banner scan-card hidden">` after `#qrVersionBanner` (`index.html:77`).
 - **When it shows:** when `applyQrQueryFromLocation` finds chart params and `history.state?.skScanSeen` is unset. Then call `history.replaceState({...history.state, skScanSeen: true}, '')`.
 - **Content** (`S.scanCard*`):
   - "You scanned a FreeMoCap calibration chart: X × Y squares, s mm".
@@ -579,7 +579,7 @@ It also asserts the writer-to-parser round trip for every size × every bleed in
 
 *Verify manually:* a fresh tab opened on a `t` link shows the card in shop mode, a reload does not, and the card can be dismissed with the keyboard.
 
-**10. Order-details note and advice copy.**
+**10. Order-details note and advice copy. Done.** The note opens with the board (grid and square), measures N = max(2, min(X, ⌊300 mm / s⌋)) squares, and switches to the honeycomb/ACM board line above 24 × 36 in. Verified in Chrome (clipboard and select-all fallback paths); Firefox not yet checked.
 - In shop mode, the Print & Save panel shows a read-only block and a "Copy order details" button (`navigator.clipboard`, with a select-all fallback). The text, `S.shopOrder*`:
   - Print at 100% / actual size, no scaling, fit or fill.
   - Page size: "File is W′ × H′ = W × H trim + b bleed. Match the product template's page size exactly; never use a fit/fill option", or "No bleed; final size W × H".

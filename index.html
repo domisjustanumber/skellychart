@@ -75,6 +75,7 @@
 
       <div id="errBanner" class="banner banner-error hidden" role="alert"></div>
       <div id="qrVersionBanner" class="banner banner-warning hidden" role="status"></div>
+      <section id="scanCard" class="banner scan-card hidden" aria-labelledby="scanCardTitle"></section>
 
       <div class="layout">
         <section class="panel panel-controls" aria-labelledby="controls-heading">
@@ -169,6 +170,15 @@
             <h2 id="print-save-heading" class="panel-heading"></h2>
             <div id="printAdvice" class="print-advice"></div>
             <p id="layoutSummary" class="layout-summary"></p>
+
+            <div id="shopOrder" class="shop-order hidden">
+              <h3 id="shopOrderTitle" class="shop-order-title"></h3>
+              <pre id="shopOrderText" class="shop-order-text" tabindex="0" aria-labelledby="shopOrderTitle"></pre>
+              <div class="shop-order-actions">
+                <button type="button" id="btnCopyOrder" class="btn btn-secondary"></button>
+                <span id="copyOrderStatus" class="caption" role="status"></span>
+              </div>
+            </div>
 
             <div class="actions">
               <button type="button" id="btnPdf" class="btn btn-primary"></button>

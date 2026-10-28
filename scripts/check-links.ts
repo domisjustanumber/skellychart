@@ -2,7 +2,7 @@
  * Build guard for the chart link grammar (`src/print/charucoDocUrl.ts`): a golden table of links every
  * generator has printed (legacy params, 1.x, 2.x home `p` and print-shop `t`) with what they must open
  * as, garbled links that must degrade without losing the board, the writer → parser round trip for
- * every shop size form × bleed × marks × colour × unit, and the QR version of the longest links.
+ * every standard size × unit × bleed × marks × colour, and the QR version of the longest links.
  */
 import QRCode from 'qrcode';
 import {
@@ -78,24 +78,18 @@ for (const code of [4, 5, 6, 7, 8, 9]) {
 }
 expect('b=2.0.0w12h9s50.5p0', {squareLengthMm: 50.5, paperId: 'a4'});
 
-// Print-shop sizes: Fit, every standard code with and without a toggle unit, custom extremes.
-expect('b=2.0.0w12h9s50tm', shop({kind: 'fit', unit: 'mm'}));
-expect('b=2.0.0w12h9s50ti', shop({kind: 'fit', unit: 'in'}));
+// Print-shop sizes: every standard code, with and without a toggle unit.
 SHOP_SIZE_LINK_CODES.forEach((id, code) => {
     const native = shopSizeNativeUnit(id);
-    expect(`b=2.0.0w12h9s50t${code}`, shop({kind: 'std', id, unit: native}));
-    expect(`b=2.0.0w12h9s50t${code}m`, shop({kind: 'std', id, unit: 'mm'}));
-    expect(`b=2.0.0w12h9s50t${code}i`, shop({kind: 'std', id, unit: 'in'}));
+    expect(`b=2.0.0w12h9s50t${code}`, shop({id, unit: native}));
+    expect(`b=2.0.0w12h9s50t${code}m`, shop({id, unit: 'mm'}));
+    expect(`b=2.0.0w12h9s50t${code}i`, shop({id, unit: 'in'}));
 });
-expect('b=2.0.0w12h9s50t1', shop({kind: 'std', id: '24x36in', unit: 'in'}));
-expect('b=2.0.0w12h9s50t4', shop({kind: 'std', id: 'a1', unit: 'mm'}));
-expect('b=2.0.0w12h9s50t841x594m', shop({kind: 'custom', wMm: 841, hMm: 594, unit: 'mm'}));
-expect('b=2.0.0w12h9s50t1x9999m', shop({kind: 'custom', wMm: 1, hMm: 9999, unit: 'mm'}));
-expect('b=2.0.0w9h12s50t24.5x36i', {...shop({kind: 'custom', wMm: 622.3, hMm: 914.4, unit: 'in'}), squaresX: 9, squaresY: 12});
-expect('b=2.0.0w12h9s50t0.25x999.75i', {shopSizeError: true});
-expect('b=2.0.0w12h9s50t1.25x999.75i', shop({kind: 'custom', wMm: 31.75, hMm: 25393.65, unit: 'in'}));
+expect('b=2.0.0w12h9s50t1', shop({id: '24x36in', unit: 'in'}));
+expect('b=2.0.0w12h9s50t4', shop({id: 'a1', unit: 'mm'}));
+expect('b=2.0.0w9h12s50t2i', {...shop({id: '36x48in', unit: 'in'}), squaresX: 9, squaresY: 12});
 // `p` and `t` together: `t` decides the mode, `p` still parses.
-expect('b=2.0.0w12h9s50p2t1', {...shop({kind: 'std', id: '24x36in', unit: 'in'}), paperId: 'letter'});
+expect('b=2.0.0w12h9s50p2t1', {...shop({id: '24x36in', unit: 'in'}), paperId: 'letter'});
 
 // Options on every size form.
 const BLEEDS: [string, ShopPrintOptions['bleed']][] = [
@@ -110,13 +104,11 @@ const BLEEDS: [string, ShopPrintOptions['bleed']][] = [
     ['b25', {mm: 25}],
 ];
 const SIZE_FORMS: [string, ShopSizeChoice][] = [
-    ['m', {kind: 'fit', unit: 'mm'}],
-    ['i', {kind: 'fit', unit: 'in'}],
-    ['1', {kind: 'std', id: '24x36in', unit: 'in'}],
-    ['4i', {kind: 'std', id: 'a1', unit: 'in'}],
-    ['12', {kind: 'std', id: '900x1200mm', unit: 'mm'}],
-    ['841x594m', {kind: 'custom', wMm: 841, hMm: 594, unit: 'mm'}],
-    ['24.5x36i', {kind: 'custom', wMm: 622.3, hMm: 914.4, unit: 'in'}],
+    ['0', {id: '18x24in', unit: 'in'}],
+    ['0m', {id: '18x24in', unit: 'mm'}],
+    ['1', {id: '24x36in', unit: 'in'}],
+    ['4i', {id: 'a1', unit: 'in'}],
+    ['12', {id: '900x1200mm', unit: 'mm'}],
 ];
 for (const [sizeRaw, size] of SIZE_FORMS) {
     for (const [bleedRaw, bleed] of BLEEDS) {
@@ -129,36 +121,28 @@ for (const [sizeRaw, size] of SIZE_FORMS) {
     }
 }
 
-// Garbled sizes keep the board and open in shop mode at Fit (size null + flag).
-for (const tail of ['', 'x', 'tx', '24x36', '24.1x36i', '13', '17', '99i', '01', '0x10m', '24x36mi', 'mi', '1.5', 'c', 'eg']) {
+// Garbled sizes keep the board and open in shop mode at the default size (size null + flag).
+// Fit and custom trims were dropped before v2 froze, so their forms are garbled sizes too.
+for (const tail of ['', 'm', 'i', 'me', '841x594m', '24.5x36i', 'x', 'tx', '24x36', '13', '17', '99i', '01', '1mi', '1.5', 'c', 'eg']) {
     expect(`b=2.0.0w12h9s50t${tail}`, {...board, printMode: 'shop', shopSize: null, shopSizeError: true});
 }
 // Garbled options keep the size and fall back to the defaults.
-for (const tail of ['1bx', '1b99', '1b30', '1b25.001', '1gc', '1eb5', '1cc', '1e5', '1b', '1b5.1234', '1ce', 'mbz']) {
-    const size = tail.startsWith('m') ? {kind: 'fit', unit: 'mm'} : {kind: 'std', id: '24x36in', unit: 'in'};
+for (const tail of ['1bx', '1b99', '1b30', '1b25.001', '1gc', '1eb5', '1cc', '1e5', '1b', '1b5.1234', '1ce', '4mbz']) {
+    const size = tail.startsWith('4') ? {id: 'a1', unit: 'mm'} : {id: '24x36in', unit: 'in'};
     expect(`b=2.0.0w12h9s50t${tail}`, {...board, printMode: 'shop', shopSize: size, shopOptions: DEFAULTS, shopOptionsError: true, shopSizeError: false});
 }
 
-// Writer → parser round trip for every size form × bleed in the select × marks × colour × unit.
+// Writer → parser round trip for every standard size × unit × bleed in the select × marks × colour.
 function effectiveBleedMm(bleed: ShopPrintOptions['bleed'], unit: ShopUnit): number {
     return bleed === 'std' ? shopStandardBleedMm(unit) : bleed.mm;
 }
 const SELECT_BLEEDS: ShopPrintOptions['bleed'][] = ['std', {mm: 0}, {mm: 5}, {mm: 10}, {mm: 6.35}, {mm: 3}, {mm: 3.175}];
 const roundTripSizes: ShopSizeChoice[] = [];
 for (const unit of ['mm', 'in'] as const) {
-    roundTripSizes.push({kind: 'fit', unit});
     for (const id of SHOP_SIZE_LINK_CODES) {
-        roundTripSizes.push({kind: 'std', id, unit});
+        roundTripSizes.push({id, unit});
     }
 }
-roundTripSizes.push(
-    {kind: 'custom', wMm: 841, hMm: 594, unit: 'mm'},
-    {kind: 'custom', wMm: 914, hMm: 1219, unit: 'mm'},
-    {kind: 'custom', wMm: 101, hMm: 69, unit: 'mm'},
-    {kind: 'custom', wMm: 24.5 * 25.4, hMm: 36 * 25.4, unit: 'in'},
-    {kind: 'custom', wMm: 35.75 * 25.4, hMm: 47.75 * 25.4, unit: 'in'},
-    {kind: 'custom', wMm: 4.25 * 25.4, hMm: 2.75 * 25.4, unit: 'in'},
-);
 for (const size of roundTripSizes) {
     for (const bleed of SELECT_BLEEDS) {
         for (const cropMarks of [false, true]) {
@@ -219,14 +203,14 @@ function qrVersion(url: string): number {
 }
 const shopUrl = (version: string, x: number, y: number, s: number, size: ShopSizeChoice, options: ShopPrintOptions = DEFAULTS) =>
     buildCharucoDocumentationUrl(SOURCE_URL, x, y, s, {kind: 'shop', size, options}, version);
-const defaultWorst = shopUrl('2.0.0', 10, 8, 100, {kind: 'std', id: '900x1200mm', unit: 'in'});
+const defaultWorst = shopUrl('2.0.0', 10, 8, 100, {id: '900x1200mm', unit: 'in'});
 if (defaultWorst.length !== 42 || qrVersion(defaultWorst) !== 3) {
     failures.push(`${defaultWorst}: ${defaultWorst.length} B, QR version ${qrVersion(defaultWorst)}; expected 42 B at version 3`);
 }
 const worst = [
-    shopUrl('2.0.0', 20, 25, 44, {kind: 'custom', wMm: 35.75 * 25.4, hMm: 47.75 * 25.4, unit: 'in'}, {bleed: {mm: 6.35}, cropMarks: true, colour: 'mono'}),
-    shopUrl('2.0.0', 20, 25, 44, {kind: 'custom', wMm: 914, hMm: 1219, unit: 'mm'}, {bleed: {mm: 3.175}, cropMarks: true, colour: 'mono'}),
-    shopUrl('2.10.10', 20, 25, 44, {kind: 'custom', wMm: 35.75 * 25.4, hMm: 47.75 * 25.4, unit: 'in'}, {bleed: {mm: 6.35}, cropMarks: true, colour: 'mono'}),
+    shopUrl('2.0.0', 20, 25, 44, {id: '900x1200mm', unit: 'in'}, {bleed: {mm: 6.35}, cropMarks: true, colour: 'mono'}),
+    shopUrl('2.0.0', 20, 25, 44, {id: '36x48in', unit: 'mm'}, {bleed: {mm: 3.175}, cropMarks: true, colour: 'mono'}),
+    shopUrl('2.10.10', 20, 25, 44, {id: '900x1200mm', unit: 'in'}, {bleed: {mm: 6.35}, cropMarks: true, colour: 'mono'}),
 ];
 for (const url of worst) {
     if (qrVersion(url) > 4) {

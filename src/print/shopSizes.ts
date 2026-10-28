@@ -1,6 +1,6 @@
 /**
- * Print-shop size catalogue: the fixed sizes walk-in chains sell rigid boards in, Fit-to-chart rounding,
- * the 36 in walk-in trim cap, the bleed choices and the page size they give. Pure: no DOM.
+ * Print-shop size catalogue: the fixed sizes walk-in chains sell rigid boards in (the only trims shop mode
+ * offers), the 36 in walk-in trim cap, the bleed choices and the page size they give. Pure: no DOM.
  *
  * Shop sizes are never added to `PAPER_OPTIONS`: the banner generator iterates over those papers, and
  * `originBannerReserveMm()` throws on any width it does not know.
@@ -10,7 +10,6 @@ import {
     shopSizeNativeUnit,
     shopStandardBleedMm,
     type ShopPrintOptions,
-    type ShopSizeChoice,
     type ShopSizeId,
     type ShopUnit,
 } from './charucoDocUrl.js';
@@ -71,13 +70,16 @@ export function shopSizeGroups(unit: ShopUnit): {unit: ShopUnit; sizes: ShopSize
 
 /**
  * The 36 in walk-in cap, on the trim (short side, long side), mm: the largest rigid board most walk-in
- * shops print. Bleed and crop marks may extend the page beyond it. Raising it later is backward-compatible
- * (Fit links store the rounding rule, not the trim); never lower it, or printed boards stop reopening.
+ * shops print, and the largest standard size (36 × 48 in). Bleed and crop marks may extend the page beyond it.
  */
 export const SHOP_TRIM_MAX_MM: readonly [number, number] = [36 * IN, 48 * IN];
 
-/** Largest square length in shop mode (home mode stops at `CHARUCO_SQUARE_MM_MAX`). */
-export const SHOP_SQUARE_MM_MAX = 260;
+/**
+ * Largest square length in shop mode (home mode stops at `CHARUCO_SQUARE_MM_MAX`): the largest square any
+ * grid at least 3 wide fits on a standard size (3 × 3 on 36 × 48 in). 2-wide grids could go larger, but
+ * their 1-2 inner corners are no use for calibration.
+ */
+export const SHOP_SQUARE_MM_MAX = 288;
 
 /** Space outside the bleed for crop marks and the slug, mm. */
 export const SHOP_CROP_MARK_MARGIN_MM = 7;
@@ -92,33 +94,10 @@ export function shopUnitForRegion(region: string | undefined): ShopUnit {
     return region && SHOP_INCH_REGIONS.has(region.trim().toUpperCase()) ? 'in' : 'mm';
 }
 
-/** Fit-to-chart and custom-size step: 5 mm, or ¼ in. */
-export function shopTrimStepMm(unit: ShopUnit): number {
-    return unit === 'in' ? IN / 4 : 5;
-}
-
-/** Whole Fit steps (5 mm or ¼ in) covering `mm`; labels come from this count, not the converted mm. */
-export function roundUpTrimSteps(mm: number, unit: ShopUnit): number {
-    return Math.ceil(mm / shopTrimStepMm(unit) - 1e-9);
-}
-
-/** `mm` rounded up to the next 5 mm or ¼ in. */
-export function roundUpTrimMm(mm: number, unit: ShopUnit): number {
-    const steps = roundUpTrimSteps(mm, unit);
-    return unit === 'in' ? (steps * IN) / 4 : steps * 5;
-}
-
 /** Whether a trim fits the walk-in cap in either orientation. */
 export function fitsShopTrimCap(wMm: number, hMm: number): boolean {
     const [shortMax, longMax] = SHOP_TRIM_MAX_MM;
     return Math.min(wMm, hMm) <= shortMax + 1e-9 && Math.max(wMm, hMm) <= longMax + 1e-9;
-}
-
-/** Largest Fit trim (short side, long side): the cap rounded down to whole steps (910 × 1215 mm, 36 × 48 in). */
-export function shopFitCapMm(unit: ShopUnit): [number, number] {
-    const step = shopTrimStepMm(unit);
-    const down = (mm: number) => Math.floor(mm / step + 1e-9) * step;
-    return [down(SHOP_TRIM_MAX_MM[0]), down(SHOP_TRIM_MAX_MM[1])];
 }
 
 /** The bleed select, in order: Standard, None, 5 mm, 10 mm, ¼ in, and the other unit's standard. */
@@ -142,37 +121,12 @@ export function pageSizeMm(trim: {wMm: number; hMm: number}, bleedMm: number, cr
     return {wMm: trim.wMm + 2 * m, hMm: trim.hMm + 2 * m};
 }
 
-export type CustomTrimResult =
-    | {ok: true; size: Extract<ShopSizeChoice, {kind: 'custom'}>}
-    | {ok: false; error: 'step' | 'min' | 'max'};
-
-/**
- * Checks a typed custom trim (in the toggled unit; W is horizontal, as typed): whole mm or ¼ in, at least
- * the chart's content plus quiet zone (`minWMm` × `minHMm`), and within the walk-in cap.
- */
-export function validateCustomTrim(w: number, h: number, unit: ShopUnit, minWMm: number, minHMm: number): CustomTrimResult {
-    const perUnit = unit === 'in' ? 4 : 1;
-    if (![w, h].every((v) => Number.isFinite(v) && v > 0 && Math.abs(v * perUnit - Math.round(v * perUnit)) < 1e-9)) {
-        return {ok: false, error: 'step'};
-    }
-    const toMm = (v: number) => (unit === 'in' ? (Math.round(v * 4) * IN) / 4 : Math.round(v));
-    const wMm = toMm(w);
-    const hMm = toMm(h);
-    if (wMm < minWMm - 1e-9 || hMm < minHMm - 1e-9) {
-        return {ok: false, error: 'min'};
-    }
-    if (!fitsShopTrimCap(wMm, hMm)) {
-        return {ok: false, error: 'max'};
-    }
-    return {ok: true, size: {kind: 'custom', wMm, hMm, unit}};
-}
-
 /** A length in the unit: mm to two decimals, inches to two decimals (¼ in steps print exactly). */
 export function formatShopLength(mm: number, unit: ShopUnit): string {
     return String(Number((unit === 'in' ? mm / IN : mm).toFixed(2)));
 }
 
-/** `24 × 36 in`, `625 × 505 mm`. */
+/** `24 × 36 in`, `594 × 841 mm`. */
 export function formatShopDims(wMm: number, hMm: number, unit: ShopUnit): string {
     return `${formatShopLength(wMm, unit)} × ${formatShopLength(hMm, unit)} ${unit}`;
 }

@@ -1,6 +1,6 @@
 /**
- * Build guard for print-shop mode: the size catalogue and its frozen link codes, Fit-to-chart rounding,
- * the 36 in walk-in trim cap, the bleed choices and page sizes, the custom-size limits, and outlined text.
+ * Build guard for print-shop mode: the size catalogue and its frozen link codes, the 36 in walk-in trim
+ * cap, the bleed choices and page sizes, outlined text and the compact banner.
  */
 import fs from 'node:fs';
 import {displayAppVersion} from '../src/appVersion.js';
@@ -27,15 +27,10 @@ import {
     formatShopBleed,
     formatShopTrim,
     pageSizeMm,
-    roundUpTrimMm,
-    roundUpTrimSteps,
     shopBleedChoices,
-    shopFitCapMm,
     shopSizeGroups,
     shopSizeOptionLabel,
-    shopTrimStepMm,
     shopUnitForRegion,
-    validateCustomTrim,
 } from '../src/print/shopSizes.js';
 
 const failures: string[] = [];
@@ -88,39 +83,12 @@ for (const unit of UNITS) {
     }
 }
 
-// Fit rounding: an exact multiple of the step, at least the input and less than one step more.
-for (const unit of UNITS) {
-    const step = shopTrimStepMm(unit);
-    for (let i = 0; i <= 26000; i++) {
-        const x = 50 + i * 0.0473;
-        const r = roundUpTrimMm(x, unit);
-        const steps = roundUpTrimSteps(x, unit);
-        if (!near(r, steps * step) || r < x - 1e-9 || r >= x + step - 1e-9) {
-            failures.push(`${unit}: ${x} mm rounds to ${r} mm`);
-            break;
-        }
-    }
-    for (let n = 10; n <= 250; n++) {
-        if (roundUpTrimSteps(n * step, unit) !== n) {
-            failures.push(`${unit}: exact ${n} steps (${n * step} mm) rounds to ${roundUpTrimSteps(n * step, unit)} steps`);
-        }
-    }
-}
-if (roundUpTrimMm(625, 'mm') !== 625 || roundUpTrimMm(503.5, 'mm') !== 505 || !near(roundUpTrimMm(625, 'in'), 628.65) || !near(roundUpTrimMm(503.5, 'in'), 508)) {
-    failures.push('worked example (12 × 9 at 50 mm) does not round to 625 × 505 mm and 24.75 × 20 in');
-}
-
-// The walk-in cap holds for every standard size and both Fit caps.
+// The walk-in cap holds for every standard size.
 const [shortMax, longMax] = SHOP_TRIM_MAX_MM;
 for (const s of SHOP_SIZES) {
     if (!fitsShopTrimCap(s.wMm, s.hMm) || Math.min(s.wMm, s.hMm) > shortMax || Math.max(s.wMm, s.hMm) > longMax) {
         failures.push(`${s.id} exceeds the walk-in cap`);
     }
-}
-const metricCap = shopFitCapMm('mm');
-const inchCap = shopFitCapMm('in');
-if (!near(metricCap[0], 910) || !near(metricCap[1], 1215) || !near(inchCap[0], 914.4) || !near(inchCap[1], 1219.2)) {
-    failures.push(`Fit caps are ${metricCap} mm and ${inchCap} mm, expected 910 × 1215 and 914.4 × 1219.2`);
 }
 if (fitsShopTrimCap(915, 915) || fitsShopTrimCap(900, 1220) || !fitsShopTrimCap(1219.2, 914.4) || !fitsShopTrimCap(915, 900)) {
     failures.push('fitsShopTrimCap does not apply the cap to short and long sides in either orientation');
@@ -157,32 +125,6 @@ for (const [mm, label] of [[3.175, '⅛ in'], [6.35, '¼ in'], [3, '3 mm'], [5, 
 }
 if (formatShopTrim(628.65, 508, 'in') !== '24.75 × 20 in (628.65 × 508 mm)') {
     failures.push(`trim label is "${formatShopTrim(628.65, 508, 'in')}"`);
-}
-
-// Custom trims: whole mm or ¼ in, at least the content, within the cap.
-const custom: [number, number, 'mm' | 'in', number, number, string][] = [
-    [841, 594, 'mm', 625, 503.5, 'ok'],
-    [624, 594, 'mm', 625, 503.5, 'min'],
-    [841, 503, 'mm', 625, 503.5, 'min'],
-    [841.5, 594, 'mm', 625, 503.5, 'step'],
-    [914, 1219, 'mm', 100, 70, 'ok'],
-    [915, 1219, 'mm', 100, 70, 'max'],
-    [1219, 914, 'mm', 100, 70, 'ok'],
-    [1220, 914, 'mm', 100, 70, 'max'],
-    [24.5, 36, 'in', 475, 653.5, 'ok'],
-    [24.25, 36, 'in', 615.95, 653.5, 'ok'],
-    [24.25, 36, 'in', 622.3, 653.5, 'min'],
-    [24.1, 36, 'in', 475, 653.5, 'step'],
-    [36, 48, 'in', 100, 70, 'ok'],
-    [36.25, 48, 'in', 100, 70, 'max'],
-    [0, 48, 'in', 0, 0, 'step'],
-];
-for (const [w, h, unit, minW, minH, wanted] of custom) {
-    const r = validateCustomTrim(w, h, unit, minW, minH);
-    const got = r.ok ? 'ok' : r.error;
-    if (got !== wanted) {
-        failures.push(`custom ${w} × ${h} ${unit} (needs ${minW} × ${minH} mm): ${got}, expected ${wanted}`);
-    }
 }
 
 for (const [region, unit] of [['US', 'in'], ['CA', 'in'], ['PR', 'in'], ['us', 'in'], ['MX', 'mm'], ['PH', 'mm'], ['GB', 'mm'], ['AU', 'mm'], [undefined, 'mm']] as const) {
@@ -334,6 +276,6 @@ if (failures.length > 0) {
     process.exit(1);
 }
 console.log(
-    `check:shop: ${SHOP_SIZES.length} sizes, rounding, cap, bleeds, custom limits, outlined text OK; ` +
+    `check:shop: ${SHOP_SIZES.length} sizes, cap, bleeds, outlined text OK; ` +
         `compact banner ${[...bannerHeights][0]} mm high, at most ${(widestBannerPx / PIXELS_PER_MM).toFixed(1)} mm wide (${bannerLayouts} charts)`,
 );

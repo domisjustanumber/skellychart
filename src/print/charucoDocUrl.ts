@@ -49,17 +49,17 @@ export function shopSizeNativeUnit(id: ShopSizeId): ShopUnit {
     return id.endsWith('in') ? 'in' : 'mm';
 }
 
-/** A print-shop trim choice. Every variant carries the toggle's unit, so it round-trips in the link. */
-export type ShopSizeChoice =
-    | {kind: 'fit'; unit: ShopUnit}
-    | {kind: 'std'; id: ShopSizeId; unit: ShopUnit}
-    /** Custom trim in mm: whole mm with the mm toggle, ¼ in steps with the in toggle. */
-    | {kind: 'custom'; wMm: number; hMm: number; unit: ShopUnit};
+/** A print-shop trim: a standard size, with the mm | in toggle's unit so it round-trips in the link. */
+export interface ShopSizeChoice {
+    id: ShopSizeId;
+    unit: ShopUnit;
+}
 
 export interface ShopPrintOptions {
     /** `'std'` follows the unit (3 mm or ⅛ in); otherwise a fixed bleed in mm (0 = exact trim). */
     bleed: 'std' | {mm: number};
     cropMarks: boolean;
+    /** `mono` (link letter `g`) is reserved for a deferred monochrome file: parsed, never offered, printed in colour. */
     colour: 'colour' | 'mono';
 }
 
@@ -92,7 +92,7 @@ export interface ParsedCharucoQrQuery {
     paperId: string | null;
     /** `shop` when the packed value has a `t` field; it wins over `p`. */
     printMode: PrintMode;
-    /** The shop trim; null in home mode, or when the size was unreadable (open at Fit). */
+    /** The shop trim; null in home mode, or when the size was unreadable (open at the default size). */
     shopSize: ShopSizeChoice | null;
     /** The shop print-file options; null in home mode, the defaults when they were unreadable. */
     shopOptions: ShopPrintOptions | null;
@@ -114,14 +114,13 @@ const PACKED_CHART_RE =
 
 /**
  * The `t` tail is parsed in stages so a damaged size never loses the board and damaged options never
- * lose the size. Size forms use only digits, `.`, `x`, `m` and `i`, so the tail splits at the first
- * option letter; a new option letter must also join this class.
+ * lose the size. The size uses only digits, `m` and `i`, so the tail splits at the first option letter;
+ * a new option letter must also join this class.
  */
 const SHOP_TAIL_SPLIT_RE = /^([^bceg]*)(.*)$/;
 
-/** Fit (`m` | `i`), a standard size code with an optional toggle unit, or a custom mm / ¼ in trim. */
-const SHOP_SIZE_RE =
-    /^(?:([mi])|(0|[1-9]\d?)([mi])?|([1-9]\d{0,3})x([1-9]\d{0,3})m|([1-9]\d{0,2}(?:\.(?:25|5|75))?)x([1-9]\d{0,2}(?:\.(?:25|5|75))?)i)$/;
+/** A standard size code, then the toggle's unit when it differs from the size's own. */
+const SHOP_SIZE_RE = /^(0|[1-9]\d?)([mi])?$/;
 
 /** No bleed (`e`) or a bleed in mm, then crop marks, then monochrome; the defaults write nothing. */
 const SHOP_OPTIONS_RE = /^(?:(e)|b(\d{1,2}(?:\.\d{1,3})?))?(c)?(g)?$/;
@@ -136,23 +135,11 @@ function shortNumber(n: number): string {
 
 function parseShopSize(raw: string): ShopSizeChoice | null {
     const m = SHOP_SIZE_RE.exec(raw);
-    if (!m) {
+    const id = m ? SHOP_SIZE_LINK_CODES[Number(m[1])] : undefined;
+    if (id === undefined) {
         return null;
     }
-    if (m[1] !== undefined) {
-        return {kind: 'fit', unit: unitFromLetter(m[1])};
-    }
-    if (m[2] !== undefined) {
-        const id = SHOP_SIZE_LINK_CODES[Number(m[2])];
-        if (id === undefined) {
-            return null;
-        }
-        return {kind: 'std', id, unit: m[3] === undefined ? shopSizeNativeUnit(id) : unitFromLetter(m[3])};
-    }
-    if (m[4] !== undefined) {
-        return {kind: 'custom', wMm: Number(m[4]), hMm: Number(m[5]), unit: 'mm'};
-    }
-    return {kind: 'custom', wMm: Number(m[6]) * 25.4, hMm: Number(m[7]) * 25.4, unit: 'in'};
+    return {id, unit: m![2] === undefined ? shopSizeNativeUnit(id) : unitFromLetter(m![2])};
 }
 
 function parseShopOptions(raw: string): ShopPrintOptions | null {
@@ -203,18 +190,8 @@ function parseShopTail(tail: string | undefined): ShopLinkValues {
 }
 
 function shopSizeLinkValue(size: ShopSizeChoice): string {
-    if (size.kind === 'fit') {
-        return unitLetter(size.unit);
-    }
-    if (size.kind === 'std') {
-        const code = SHOP_SIZE_LINK_CODES.indexOf(size.id);
-        return `${code}${size.unit === shopSizeNativeUnit(size.id) ? '' : unitLetter(size.unit)}`;
-    }
-    if (size.unit === 'in') {
-        const quarterIn = (mm: number) => shortNumber(Math.round((mm / 25.4) * 4) / 4);
-        return `${quarterIn(size.wMm)}x${quarterIn(size.hMm)}i`;
-    }
-    return `${Math.round(size.wMm)}x${Math.round(size.hMm)}m`;
+    const code = SHOP_SIZE_LINK_CODES.indexOf(size.id);
+    return `${code}${size.unit === shopSizeNativeUnit(size.id) ? '' : unitLetter(size.unit)}`;
 }
 
 function shopOptionsLinkValue(options: ShopPrintOptions, unit: ShopUnit): string {

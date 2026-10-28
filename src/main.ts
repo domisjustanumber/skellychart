@@ -332,16 +332,37 @@ function shopFitForBoard(): {squareMm: number; sizeId: ShopSizeId} | null {
 }
 
 /**
+ * The print-shop board left for home paper, when the square had to shrink to print there. Switching back
+ * with the board untouched restores its square and size.
+ */
+let shopBoardBeforeHome: {squaresX: number; squaresY: number; homeSquareMm: number; squareMm: number; sizeId: ShopSizeId} | null =
+    null;
+
+/**
  * Switches between "My printer" and "Print shop". X, Y and the distance never change without telling the
  * user: entering print-shop mode keeps the board on the smallest size that fits it, shrinks the square
- * within its band if it must (with a notice), or refuses (with a message).
+ * within its band if it must (with a notice), or refuses (with a message). Leaving it keeps the square if
+ * the home paper prints it, else the nearest that does (with a notice).
  */
 function setMode(mode: PrintMode): void {
     if (mode === state.mode) {
         return;
     }
     clearTransientNotices();
-    if (mode === 'shop' && !state.autoGrid) {
+    const back = shopBoardBeforeHome;
+    shopBoardBeforeHome = null;
+    if (
+        mode === 'shop' &&
+        !state.autoGrid &&
+        back &&
+        back.squaresX === state.squaresX &&
+        back.squaresY === state.squaresY &&
+        back.homeSquareMm === state.squareMm &&
+        shopSheetLayout(state.squaresX, state.squaresY, back.squareMm, back.sizeId)
+    ) {
+        setSquareFollowingBand(back.squareMm);
+        state.shopSizeId = back.sizeId;
+    } else if (mode === 'shop' && !state.autoGrid) {
         const fit = shopFitForBoard();
         if (!fit) {
             modeNotice = S.shopModeNoFit;
@@ -354,11 +375,22 @@ function setMode(mode: PrintMode): void {
         state.squareMm = fit.squareMm;
         state.shopSizeId = fit.sizeId;
     }
+    const shopBoard = {squareMm: state.squareMm, sizeId: state.shopSizeId};
     state.mode = mode;
     if (mode === 'home' && !state.autoGrid) {
         // Print-shop squares may be larger than home paper allows; keep the nearest that prints.
         const snapped = snapSquareForMode(state.squareMm);
-        if (snapped !== null) {
+        if (snapped !== null && snapped !== shopBoard.squareMm) {
+            modeNotice = interpolate(S.homeModeSnapped, {from: shopBoard.squareMm, to: snapped, paper: paperLabel(state.paperId)});
+            if (shopBoard.sizeId) {
+                shopBoardBeforeHome = {
+                    squaresX: state.squaresX,
+                    squaresY: state.squaresY,
+                    homeSquareMm: snapped,
+                    squareMm: shopBoard.squareMm,
+                    sizeId: shopBoard.sizeId,
+                };
+            }
             setSquareFollowingBand(snapped);
         }
     }

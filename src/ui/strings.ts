@@ -119,6 +119,8 @@ export const S = {
     shopModeNoFit:
         'This chart is too large for a print-shop board (at most 36 × 48 in). Use fewer or smaller squares, then switch to Print shop.',
     shopModeSnapped: 'Squares shrank from {{from}} mm to {{to}} mm so the chart fits a print-shop board.',
+    homeModeSnapped:
+        'Squares shrank from {{from}} mm to {{to}} mm, the largest {{paper}} prints. Switch back to Print shop to return to {{from}} mm.',
     shopSize: 'Board size',
     shopUnits: 'Units',
     shopSizeGroupIn: 'Inch sizes',

@@ -1,4 +1,4 @@
-export const MAX_PREVIEW_PAGES = 36;
+export const MAX_PREVIEW_PAGES = 5;
 /** Debounce after the user stops manipulating ranges (keyboard / one-off changes). */
 export const PREVIEW_DEBOUNCE_IDLE_MS = 320;
 /** Tighter debounce while a range input pointer is active so previews keep up while dragging. */

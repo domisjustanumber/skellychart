@@ -277,6 +277,100 @@ function wrapGuideBody(body: string, fontPx: number, lineLead: number, maxW: num
 }
 
 /**
+ * A numbered, colour-coded block per chart sheet over a board laid out on a `boardWPx`×`boardHPx` canvas
+ * and drawn at (`bx`, `by`), `dw`×`dh` px: outlined in the sheet's colour and, with `tint`, washed with it.
+ * Every page number gets one size, the largest that fits every block, so no number is left out.
+ */
+function svgSheetBlocks(
+    squaresX: number,
+    squaresY: number,
+    tiling: TilingInfo,
+    boardWPx: number,
+    boardHPx: number,
+    bx: number,
+    by: number,
+    dw: number,
+    dh: number,
+    strokePx: number,
+    tint: boolean,
+): string[] {
+    const parts: string[] = [];
+    const rects = computeCharucoPagePreviewRects(squaresX, squaresY, tiling, boardWPx, boardHPx) ?? [];
+    const blocks = rects.map((r) => ({
+        r,
+        x: bx + r.left * dw,
+        y: by + r.top * dh,
+        w: r.width * dw,
+        h: r.height * dh,
+        label: String(r.sheetIndex),
+    }));
+    const sw = strokePx;
+    for (const b of blocks) {
+        const [cr, cg, cb] = charucoPagePrintRgb(b.r.sheetIndex, tiling.pageCount);
+        const fill = tint ? `fill="rgb(${cr},${cg},${cb})" fill-opacity="0.3"` : 'fill="none"';
+        parts.push(
+            `<rect x="${b.x + sw / 2}" y="${b.y + sw / 2}" width="${Math.max(0, b.w - sw)}" height="${Math.max(0, b.h - sw)}" ${fill} stroke="rgb(${cr},${cg},${cb})" stroke-width="${sw}"/>`,
+        );
+    }
+
+    const fs = Math.min(
+        ...blocks.map((b) => {
+            const inkW = helveticaTextWidthPx(b.label, 1, true) + GUIDE_NUMBER_STROKE_EM;
+            const inkH = GUIDE_DIGIT_HEIGHT_EM + GUIDE_NUMBER_STROKE_EM;
+            return Math.min((b.w * GUIDE_NUMBER_MAX_BLOCK_FRACTION) / inkW, (b.h * GUIDE_NUMBER_MAX_BLOCK_FRACTION) / inkH);
+        }),
+    );
+    blocks.forEach((b) => {
+        const cx = Math.round(b.x + b.w / 2);
+        const baseline = Math.round(b.y + b.h / 2 + (GUIDE_DIGIT_HEIGHT_EM * fs) / 2);
+        const font = `font-size="${fs}" font-family="${FONT}" font-weight="bold" text-anchor="middle"`;
+        // svg2pdf draws text strokes far too wide, so the outline is a ring of black copies under the
+        // white digits.
+        const r = (GUIDE_NUMBER_STROKE_EM / 2) * fs;
+        for (let k = 0; k < 16; k++) {
+            const a = (k * Math.PI) / 8;
+            parts.push(
+                `<text x="${(cx + r * Math.cos(a)).toFixed(1)}" y="${(baseline + r * Math.sin(a)).toFixed(1)}" fill="#000" ${font}>${b.label}</text>`,
+            );
+        }
+        parts.push(`<text x="${cx}" y="${baseline}" fill="#fff" ${font}>${b.label}</text>`);
+    });
+    return parts;
+}
+
+/**
+ * The assembled multi-sheet chart at full size (`squaresX`×`squaresY` squares of `squareLengthMm`) with
+ * the guide's numbered sheet outlines, for the on-screen scale preview. Not printed. The board is left
+ * untinted (black on white, as printed) so the preview reads as the real chart.
+ */
+export function svgAssembledChartWithSheetNumbers(
+    squaresX: number,
+    squaresY: number,
+    squareLengthMm: number,
+    markerLengthRatio: number,
+    tiling: TilingInfo,
+): string {
+    const ppm = PIXELS_PER_MM;
+    const geom: CharucoGeometry = {
+        squaresX,
+        squaresY,
+        squareLength: squareLengthMm,
+        markerLength: squareLengthMm * markerLengthRatio,
+    };
+    const fullWPx = Math.max(1, layoutIntPx(squaresX * squareLengthMm * ppm));
+    const fullHPx = Math.max(1, layoutIntPx(squaresY * squareLengthMm * ppm));
+    // Block outlines stay a visible share of a sheet however large the chart is drawn.
+    const sw = Math.max(2, Math.round(Math.min(fullWPx / tiling.npx, fullHPx / tiling.npy) * 0.02));
+    return (
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fullWPx} ${fullHPx}" width="${fullWPx}" height="${fullHPx}">` +
+        `<rect width="${fullWPx}" height="${fullHPx}" fill="#fff"/>` +
+        renderCharucoBoardSvgFragment(fullWPx, fullHPx, geom) +
+        svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, 0, 0, fullWPx, fullHPx, sw, false).join('') +
+        SVG_ROOT_CLOSE
+    );
+}
+
+/**
  * Assembly guide sheet for a multi-sheet chart: the full chart, never rotated (x runs across), with a
  * numbered, colour-coded block per chart sheet as in the on-screen preview, then how to put it together.
  * The origin banner sits above it (so the guide needs no header line). The paper is turned whichever way
@@ -348,48 +442,7 @@ function svgAssemblyGuideSheet(o: {
             `</svg>`,
     ];
 
-    const rects = computeCharucoPagePreviewRects(squaresX, squaresY, tiling, fullWPx, fullHPx) ?? [];
-    const blocks = rects.map((r) => ({
-        r,
-        x: bx + r.left * dw,
-        y: by + r.top * dh,
-        w: r.width * dw,
-        h: r.height * dh,
-        label: String(r.sheetIndex),
-    }));
-    const sw = Math.max(2, Math.round(0.4 * ppm));
-    for (const b of blocks) {
-        const [cr, cg, cb] = charucoPagePrintRgb(b.r.sheetIndex, tiling.pageCount);
-        parts.push(
-            `<rect x="${b.x + sw / 2}" y="${b.y + sw / 2}" width="${Math.max(0, b.w - sw)}" height="${Math.max(0, b.h - sw)}" fill="rgb(${cr},${cg},${cb})" fill-opacity="0.3" stroke="rgb(${cr},${cg},${cb})" stroke-width="${sw}"/>`,
-        );
-    }
-
-    // Every page number gets one size, the largest that fits every block, so no number is left out
-    // (unlike the on-screen preview, a printed guide has to label every sheet).
-    const fs = Math.min(
-        ...blocks.map((b) => {
-            const inkW = helveticaTextWidthPx(b.label, 1, true) + GUIDE_NUMBER_STROKE_EM;
-            const inkH = GUIDE_DIGIT_HEIGHT_EM + GUIDE_NUMBER_STROKE_EM;
-            return Math.min((b.w * GUIDE_NUMBER_MAX_BLOCK_FRACTION) / inkW, (b.h * GUIDE_NUMBER_MAX_BLOCK_FRACTION) / inkH);
-        }),
-    );
-    blocks.forEach((b) => {
-        const cx = Math.round(b.x + b.w / 2);
-        const baseline = Math.round(b.y + b.h / 2 + (GUIDE_DIGIT_HEIGHT_EM * fs) / 2);
-        const font = `font-size="${fs}" font-family="${FONT}" font-weight="bold" text-anchor="middle"`;
-        // svg2pdf draws text strokes far too wide, so the outline is a ring of black copies under the
-        // white digits.
-        const r = (GUIDE_NUMBER_STROKE_EM / 2) * fs;
-        for (let k = 0; k < 16; k++) {
-            const a = (k * Math.PI) / 8;
-            parts.push(
-                `<text x="${(cx + r * Math.cos(a)).toFixed(1)}" y="${(baseline + r * Math.sin(a)).toFixed(1)}" fill="#000" ${font}>${b.label}</text>`,
-            );
-        }
-        parts.push(`<text x="${cx}" y="${baseline}" fill="#fff" ${font}>${b.label}</text>`);
-    });
-
+    parts.push(...svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, bx, by, dw, dh, Math.max(2, Math.round(0.4 * ppm)), true));
     parts.push(svgCornerMarker(ppm, bx, by));
 
     const textTop = Math.round(by + dh + gapPx);

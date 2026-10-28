@@ -86,6 +86,12 @@ export const S = {
     truncatedPreview:
         'Showing first {{shown}} of {{total}} sheets in the preview. Use Print or Save as PDF to output every sheet.',
     pageLabel: 'Page {{n}}',
+    heightCm: '{{cm}} cm',
+    heightFtIn: '{{ft}}′ {{in}}″',
+    scaleSceneAria: 'To scale: the chart, {{w}} × {{h}} {{unit}}, in front of a {{tall}} person and a {{short}} person.',
+    scaleSceneAriaSheet:
+        'To scale: the printed sheet, {{w}} × {{h}} {{unit}}, in front of a {{tall}} person and a {{short}} person.',
+    scaleSceneAriaNoChart: 'To scale: a {{tall}} person and a {{short}} person.',
     assemblyGuideLabel: 'Assembly guide',
     close: '1 - 2m',
     near: '2 - 4m',

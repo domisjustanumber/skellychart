@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 1000">
+  <defs>
+    <path id="b" d="M200 0C226 0 246 24 246 58C246 92 240 120 231 132C229 140 229 148 230 152C232 168 290 166 326 180C338 185 340 200 338 222C338 262 344 322 352 370C358 400 362 470 363 515C365 540 368 565 367 590C366 612 356 621 347 620C337 619 331 606 331 590C331 565 330 540 331 515C325 470 314 420 309 370C304 330 298 290 294 250C293 262 292 275 292 282C292 320 280 360 278 390C277 420 292 445 295 470C297 500 294 530 293 555C290 620 282 680 278 715C277 745 280 770 279 790C277 850 268 920 266 960C266 975 272 985 271 1000L225 1000C224 985 230 975 230 960C230 920 220 850 217 790C216 770 219 745 218 715C216 680 208 620 204 555C203 540 201 533 200 530C199 533 197 540 196 555C192 620 184 680 182 715C181 745 184 770 183 790C180 850 170 920 170 960C170 975 176 985 175 1000L129 1000C128 985 134 975 134 960C132 920 123 850 121 790C120 770 123 745 122 715C118 680 110 620 107 555C106 530 103 500 105 470C108 445 123 420 122 390C120 360 108 320 108 282C108 275 107 262 106 250C102 290 96 330 91 370C86 420 75 470 69 515C70 540 69 565 69 590C69 606 63 619 53 620C44 621 34 612 33 590C32 565 35 540 37 515C38 470 42 400 48 370C56 322 62 262 62 222C60 200 62 185 74 180C110 166 168 168 170 152C171 148 171 140 169 132C160 120 154 92 154 58C154 24 174 0 200 0Z"/>
+    <clipPath id="c"><use href="#b"/></clipPath>
+    <linearGradient id="gt" gradientUnits="userSpaceOnUse" x1="200" y1="0" x2="296" y2="0">
+      <stop offset="0" stop-color="#555b66" stop-opacity="0"/>
+      <stop offset="0.72" stop-color="#555b66" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#555b66" stop-opacity="0.15"/>
+    </linearGradient>
+    <linearGradient id="gar" gradientUnits="userSpaceOnUse" x1="312" y1="0" x2="367" y2="0">
+      <stop offset="0" stop-color="#555b66" stop-opacity="0.15"/>
+      <stop offset="0.7" stop-color="#555b66" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#555b66" stop-opacity="0.15"/>
+    </linearGradient>
+    <linearGradient id="gal" gradientUnits="userSpaceOnUse" x1="33" y1="0" x2="88" y2="0">
+      <stop offset="0" stop-color="#555b66" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#555b66" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#555b66" stop-opacity="0.2"/>
+    </linearGradient>
+    <linearGradient id="glr" gradientUnits="userSpaceOnUse" x1="212" y1="0" x2="292" y2="0">
+      <stop offset="0" stop-color="#555b66" stop-opacity="0"/>
+      <stop offset="0.72" stop-color="#555b66" stop-opacity="0.48"/>
+      <stop offset="1" stop-color="#555b66" stop-opacity="0.15"/>
+    </linearGradient>
+    <linearGradient id="gll" gradientUnits="userSpaceOnUse" x1="112" y1="0" x2="196" y2="0">
+      <stop offset="0" stop-color="#555b66" stop-opacity="0"/>
+      <stop offset="0.75" stop-color="#555b66" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#555b66" stop-opacity="0.2"/>
+    </linearGradient>
+    <linearGradient id="gh" gradientUnits="userSpaceOnUse" x1="196" y1="0" x2="246" y2="0">
+      <stop offset="0" stop-color="#555b66" stop-opacity="0"/>
+      <stop offset="0.72" stop-color="#555b66" stop-opacity="0.48"/>
+      <stop offset="1" stop-color="#555b66" stop-opacity="0.15"/>
+    </linearGradient>
+    <linearGradient id="gn" gradientUnits="userSpaceOnUse" x1="0" y1="128" x2="0" y2="178">
+      <stop offset="0" stop-color="#555b66" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#555b66" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="rd">
+      <stop offset="0" stop-color="#555b66" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#555b66" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="rl">
+      <stop offset="0" stop-color="#c4c8cf" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#c4c8cf" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <use href="#b" fill="#8d929b"/>
+  <g clip-path="url(#c)">
+    <path fill="url(#gn)" d="M160 128h80v52h-80z"/>
+    <path fill="url(#gt)" d="M180 0h116v1000h-116z"/>
+    <path fill="url(#gar)" d="M304 0h66v626h-66z"/>
+    <path fill="url(#gal)" d="M30 0h66v626h-66z"/>
+    <ellipse fill="url(#rd)" cx="180" cy="760" rx="44" ry="290"/>
+    <ellipse fill="url(#rd)" cx="200" cy="312" rx="96" ry="24"/>
+    <ellipse fill="url(#rd)" cx="200" cy="562" rx="46" ry="60"/>
+    <ellipse fill="url(#rl)" cx="176" cy="46" rx="36" ry="40"/>
+    <ellipse fill="url(#rl)" cx="96" cy="200" rx="44" ry="26"/>
+    <ellipse fill="url(#rl)" cx="152" cy="252" rx="50" ry="52"/>
+    <ellipse fill="url(#rl)" cx="67" cy="310" rx="14" ry="100"/>
+    <ellipse fill="url(#rl)" cx="130" cy="610" rx="22" ry="90"/>
+    <ellipse fill="url(#rl)" cx="226" cy="610" rx="18" ry="90"/>
+    <ellipse fill="url(#rl)" cx="138" cy="850" rx="16" ry="70"/>
+    <ellipse fill="url(#rl)" cx="234" cy="850" rx="14" ry="70"/>
+  </g>
+</svg>

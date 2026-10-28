@@ -32,6 +32,8 @@
   --secondary-bg: var(--action-hover);
   --thumb-bg: color-mix(in srgb, var(--panel), var(--text) 8%);
   --advanced-bg: color-mix(in srgb, var(--panel), #ffffff 8%);
+  /* Floor shadow under the scale-preview people. */
+  --human-shadow: rgba(0, 0, 0, 0.55);
   font-family: system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   line-height: 1.45;
 }
@@ -64,6 +66,7 @@
   --secondary-bg: var(--action-hover);
   --thumb-bg: color-mix(in srgb, var(--panel), var(--text) 5%);
   --advanced-bg: color-mix(in srgb, var(--panel), #000000 4%);
+  --human-shadow: rgba(0, 0, 0, 0.3);
 }
 
 * {
@@ -241,8 +244,6 @@ body {
 
 .panel-preview {
   min-width: 0;
-  /* Shared height cap: the multi-page full chart and a single-page sheet render at the same size. */
-  --preview-max-h: min(300px, 45vh);
 }
 
 .field {
@@ -832,18 +833,71 @@ body {
   background: var(--thumb-bg);
 }
 
-.thumb-grid--single {
-  display: block;
-}
-
-.thumb-grid--single .thumb-img {
-  width: auto;
-  max-width: 100%;
-  max-height: var(--preview-max-h, min(300px, 45vh));
-  margin: 0;
-}
-
 input[type='checkbox'],
 input[type='radio'] {
   accent-color: var(--primary);
+}
+
+/* Scale preview: the chart to scale in front of two people (src/ui/scaleScene.ts). */
+.scale-scene {
+  margin-bottom: 1.25rem;
+  background: var(--thumb-bg);
+  display: flex;
+  justify-content: center;
+  min-height: 2rem;
+}
+
+.scale-scene > svg {
+  display: block;
+  max-width: 100%;
+}
+
+.scale-scene .ss-shadow {
+  stop-color: var(--human-shadow);
+}
+
+.scale-scene .ss-floor {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+
+.scale-scene .ss-chart-shadow {
+  fill: rgba(0, 0, 0, 0.35);
+}
+
+.scale-scene .ss-chart-back {
+  fill: #fff;
+}
+
+.scale-scene .ss-chart-edge {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.scale-scene .ss-ruler {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 1;
+}
+
+/* Keeps a ruler readable where it crosses the chart. */
+.scale-scene .ss-ruler-halo {
+  fill: none;
+  stroke: var(--thumb-bg);
+  stroke-width: 3;
+}
+
+.scale-scene .ss-head-line {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+
+.scale-scene .ss-label {
+  fill: var(--text);
+  font-family: inherit;
+  paint-order: stroke;
+  stroke: var(--thumb-bg);
+  stroke-linejoin: round;
 }

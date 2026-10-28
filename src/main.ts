@@ -1,6 +1,7 @@
 import {APP_VERSION} from './appVersion.js';
 import freemocapLogoUrl from './freemocapLogoUrl.js';
 import {renderCharucoPrintSvg} from './print/svgDocument.js';
+import {svgAssembledChartWithSheetNumbers} from './print/svgAssemblyCore.js';
 import {
     BOARD_GRID_MAX,
     BOARD_GRID_MIN,
@@ -47,6 +48,7 @@ import {
     svgToDataUrl,
 } from './ui/previewSvg.js';
 import {buildPdfBlobFromSvgPages} from './ui/pdfExport.js';
+import {mountScaleScene} from './ui/scaleScene.js';
 import {yieldToMain} from './ui/yieldToMain.js';
 import {
     applyThemePreference,
@@ -152,6 +154,7 @@ function resetPreviewVisualsEmpty(): void {
     // The hint describes the printed sheets, so it must not outlive them (e.g. after a render error).
     byId('fullChartHint').classList.add('hidden');
     byId('thumbGrid').innerHTML = '';
+    scaleScene?.update(null);
 }
 
 function paperDims() {
@@ -395,6 +398,9 @@ function showErr(msg: string | null): void {
         el.textContent = '';
     }
 }
+
+/** The chart to scale in front of two people; mounted in {@link boot}. */
+let scaleScene: ReturnType<typeof mountScaleScene> | null = null;
 
 let previewTimer: ReturnType<typeof setTimeout> | null = null;
 let previewAbort: AbortController | null = null;
@@ -919,12 +925,25 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
             }
             const guideImage = printResult.guide ? svgToDataUrl(printResult.guide.svg) : null;
             const totalPages = printResult.totalPages;
+            // A single sheet is shown as printed; several as the assembled chart with its sheet numbers.
+            const sceneChart =
+                totalPages <= 1
+                    ? {href: pageImages[0]!, widthMm: paperWMm, heightMm: paperHMm, isSheet: true}
+                    : {
+                          href: svgToDataUrl(
+                              svgAssembledChartWithSheetNumbers(px, py, state.squareMm, CHARUCO_MARKER_LENGTH_RATIO, tiling),
+                          ),
+                          widthMm: px * state.squareMm,
+                          heightMm: py * state.squareMm,
+                          isSheet: false,
+                      };
             const truncated = totalPages > MAX_PREVIEW_PAGES;
             if (signal.aborted) {
                 return;
             }
 
             byId('fullChartHint').classList.remove('hidden');
+            scaleScene?.update(sceneChart);
 
             trunc.classList.toggle('hidden', !truncated);
             if (truncated) {
@@ -936,9 +955,8 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
             }
             thumbs.innerHTML = '';
             const layoutN = tiling.pageCount;
-            // A single sheet is the whole chart, so it is shown at full-chart size without a page caption.
+            // A single sheet is the whole chart, so it has no page caption.
             const singlePage = totalPages <= 1;
-            thumbs.classList.toggle('thumb-grid--single', singlePage);
             if (guideImage) {
                 // The assembly guide prints first and is unnumbered.
                 const wrap = document.createElement('div');
@@ -1442,6 +1460,7 @@ function wireUi(): void {
 function boot(): void {
     (byId('brandLogo') as HTMLImageElement).src = freemocapLogoUrl;
     initTheme(() => schedulePreview());
+    scaleScene = mountScaleScene(byId('scaleScene'), shouldUseImperialWorkingDistanceUnits);
     wireUi();
     if (import.meta.env.DEV) {
         initDevQrLinkTargetUi();

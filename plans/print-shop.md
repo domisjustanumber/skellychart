@@ -1,6 +1,6 @@
 # Print-shop mode plan
 
-**Status:** in progress on branch `print-shop` (worktree `C:\Users\Dom\GitHub\skellychart-print-shop`), rebased onto `ui-tweaks` `509ef6f`. Done and committed: steps −1 (`593c1d9`), 0 (`b9a926e`, LF fix `033e2a6`), 0b (`524bd25`), 1 (`4dc3f73`), 2 (`7181759`), 3 (`bb3bdf6`), 4 (`5b1517f`), the rework of steps 1 and 2 for the 2026-10-28 decisions (standard sizes only, no monochrome in phase 1; `5698a35`), 5 (`93102c1`), 6 (`e5ff234`), 7. Next: step 8a. Plan file: `plans/print-shop.md`. All `file:line` references are to the `ui-tweaks` code.
+**Status:** in progress on branch `print-shop` (worktree `C:\Users\Dom\GitHub\skellychart-print-shop`), rebased onto `ui-tweaks` `509ef6f`. Done and committed: steps −1 (`593c1d9`), 0 (`b9a926e`, LF fix `033e2a6`), 0b (`524bd25`), 1 (`4dc3f73`), 2 (`7181759`), 3 (`bb3bdf6`), 4 (`5b1517f`), the rework of steps 1 and 2 for the 2026-10-28 decisions (standard sizes only, no monochrome in phase 1; `5698a35`), 5 (`93102c1`), 6 (`e5ff234`), 7 (`fb39a31`), 8a-8c. Next: step 9. Plan file: `plans/print-shop.md`. All `file:line` references are to the `ui-tweaks` code.
 
 ## Goal
 
@@ -507,7 +507,8 @@ It also asserts the writer-to-parser round trip for every size × every bleed in
 
 *Manual:* Acrobat Preflight > Page boxes and "List fonts"; `pdffonts board.pdf` prints an empty table.
 
-**8a. Mode, default size, URL, preview, summary, export (`main.ts`, `index.html`, `strings.ts`, `style.css`).**
+**8a. Mode, default size, URL, preview, summary, export (`main.ts`, `index.html`, `strings.ts`, `style.css`). Done, with 8b and 8c in one pass.**
+- As built: the mode and units are `aria-pressed` button groups (`.mode-toggle`, after the theme toggle). `defaultRegion()` is exported from `charucoLayout.ts`, so the shop unit uses the default paper's region detection. With the board untouched (`autoGrid`), entering shop mode applies the shop preset; otherwise the board keeps X, Y and its square on the smallest size that fits, shrinks the square within its band if it must (notice under the toggle), or is refused (`S.shopModeNoFit`). Shop links go through `applyShopLink()`; the notices are `S.qrShopSizeFallback`, `S.qrShopSizeNoFit`, `S.qrShopOptionsFallback` and `S.qrShopTooLarge`. `check:dist` now asserts the glyph outlines ship only in the lazily loaded `shopSheet` chunk, with their OFL notice. Verified in Chrome: presets, size, unit, bleed and crop marks, X end-stop, download (dev confirm), and the link cases.
 - **State:** `AppState` (`main.ts:96-103`) gains:
   - `mode`;
   - `shopUnit` (the mm | in toggle), defaulting to `shopUnitForRegion()` (wire the region the way `defaultPaperId()` resolves it) and overridden by the link's unit; `shopUnit` is read from `shopSize.unit`, and changing the toggle rewrites `shopSize.unit`;
@@ -535,17 +536,18 @@ It also asserts the writer-to-parser round trip for every size × every bleed in
 
 *Verify:* all checks pass. Manual (run skill): switch modes, open `t1`, `t1c`, `t4i` and garbled links, then check the PDF boxes in Acrobat.
 
-**8b. Size controls and end-stops.**
+**8b. Size controls and end-stops. Done.**
 - **Size select:** `#shopSize` replaces `#paper` (`index.html:88-91`) in shop mode, filled like the paper select (`main.ts:707-722`), with the two groups sorted by area. There is no Fit or Custom entry.
 - **Sheets stepper:** `#pagesGroup` (`105-120`) is hidden; its readout shows "Trim W × H | chart w × h".
 - **Square slider:** the existing snap (`1378-1388`) end-stops at the largest square that fits the selected size (up to 288 mm).
 - **X/Y:** `setGridSize` (`371-373`) clamps to `maxGridForSquare` for the selected size (approved: X/Y end-stop at the size limit and never change the square or distance).
 - **Size too small for the band:** when the selected size is too small for the distance band's minimum square, show a hint like `pagesFewestHint`: "Too small for 4m+: choose a larger size".
-- **Shop distance presets:** `resolveShopDistancePlan()`. Each preset names a grid and the standard size it lands on (the default size for that grid). **Needs re-derivation for standard sizes only** (the earlier Fit-based proposal was Close 7×5 at 32 mm, Near 5×3 at 100 mm, Far 3×5 at 101 mm, about A2 / 18×24); see open question 1.
+- **Shop distance presets:** `resolveShopDistancePlan()` (decided 2026-10-28), each on its default size: close 7×5 at 32 mm (A3 / 12×18 in), near 5×3 at 100 mm (A2 / 18×24 in), far 3×5 at the largest square on the smallest size that takes it at 101 mm (103 mm on A2, 106 mm on 18×24 in). Close and near sit at the top of their bands, so the square never lands in the next band. `check:shop` asserts each fits, sits in its band and is on its default size.
+- Sizes this grid cannot fit at any square are listed but disabled. Picking a size keeps the board and snaps only the square, staying in the distance band when the size allows; otherwise the band follows and a hint names the size's largest square. The largest sizes (36×48 in, 900×1200 mm) show the 36 in cap note.
 
 *Verify:* `check:shop` asserts that every shop preset is 1 sheet on its default size with a square ≥ the band minimum (10, 33 and 101 mm), and that every valid grid has a valid square on some standard size.
 
-**8c. Print-file options, buttons, filename, guards.**
+**8c. Print-file options, buttons, filename, guards. Done.** The bleed select appends a link's off-list bleed rather than changing it; the readout is "File W′ × H′ = W × H trim + b bleed (+ crop-mark margin)".
 - **Options**, in `#advancedSettings`:
   - **Bleed** select with the fixed list (Page geometry): Standard (3 mm or ⅛ in), None (exact trim), 5 mm (Officeworks mounted), 10 mm (Officeworks corflute/PVC/ACM), ¼ in (6.35 mm), and the other unit's standard. The page size is shown beside it, e.g. "File 24.25 × 36.25 in = 24 × 36 trim + ⅛ in bleed".
   - **Crop marks** checkbox, off by default: "Crop marks (trade printers that trim)". It adds the marks, the slug and the 7 mm mark margin.
@@ -681,9 +683,10 @@ It also asserts the writer-to-parser round trip for every size × every bleed in
 - Phase 2 relies on jsPDF 4.2.1 and svg2pdf 2.8.1 internals. Pin both versions and keep the checks.
 
 **Open questions**
-1. Shop distance presets: which grid and square per band, now that each must land on a standard size? (The Fit-based proposal put far 3×5 at 101 mm on about A2.)
+None.
 
 **Resolved (2026-10-28)**
+- Shop distance presets: close 7×5 at 32 mm, near 5×3 at 100 mm, far 3×5 at the largest square on A2 / 18×24 in (step 8b).
 - `check:home-golden` and its JSON stay committed for good, and run in `build`.
 - X/Y end-stop at the selected size, the 36 in trim cap and the 250-marker limit: approved.
 - Quiet zone: capped, E = min(25, max(10, s/4)).

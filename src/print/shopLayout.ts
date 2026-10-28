@@ -6,7 +6,15 @@
  */
 import {APP_VERSION_DISPLAY} from '../appVersion.js';
 import type {ShopSizeId, ShopUnit} from './charucoDocUrl.js';
-import {boardGridAxisMax, BOARD_GRID_MAX, BOARD_GRID_MIN} from './charucoLayout.js';
+import {
+    boardGridAxisMax,
+    BOARD_GRID_MAX,
+    BOARD_GRID_MIN,
+    SQUARE_LENGTH_LT_2M_MAX_MM,
+    SQUARE_LENGTH_LT_4M_MAX_MM,
+    workingDistanceMinSquareMm,
+    type WorkingDistanceTierId,
+} from './charucoLayout.js';
 import {
     CHARUCO_SQUARE_MM_MIN,
     ORIGIN_BANNER_VISUAL_SCALE,
@@ -238,3 +246,23 @@ export function smallestFittingShopSize(
 
 /** Room the origin corner marker needs beside and above the board (mm); the quiet zone and banner gap cover it. */
 export const SHOP_MARKER_ROOM_MM = {left: ORIGIN_CORNER_MARKER_SIDE_ROOM_MM, top: ORIGIN_CORNER_MARKER_TOP_ROOM_MM};
+
+/**
+ * Print-shop preset for a working distance: close 7 × 5 and near 5 × 3 at the top of their bands, far 3 × 5
+ * at the largest square on the smallest size that takes it at the band minimum; each on its default size.
+ */
+export function resolveShopDistancePlan(
+    tier: WorkingDistanceTierId,
+    unit: ShopUnit,
+    version: string = APP_VERSION_DISPLAY,
+): {squaresX: number; squaresY: number; squareMm: number; sizeId: ShopSizeId} | null {
+    const [squaresX, squaresY] = tier === 'far' ? [3, 5] : tier === 'close' ? [7, 5] : [5, 3];
+    if (tier !== 'far') {
+        const squareMm = tier === 'close' ? SQUARE_LENGTH_LT_2M_MAX_MM : SQUARE_LENGTH_LT_4M_MAX_MM;
+        const sizeId = smallestFittingShopSize(squaresX, squaresY, squareMm, unit, version);
+        return sizeId ? {squaresX, squaresY, squareMm, sizeId} : null;
+    }
+    const sizeId = smallestFittingShopSize(squaresX, squaresY, workingDistanceMinSquareMm('far'), unit, version);
+    const squareMm = sizeId ? maxShopSquareMm(squaresX, squaresY, sizeId, version) : null;
+    return sizeId && squareMm ? {squaresX, squaresY, squareMm, sizeId} : null;
+}

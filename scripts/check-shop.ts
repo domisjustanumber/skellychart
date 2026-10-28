@@ -9,7 +9,13 @@ import {parseCharucoQrSearchParams, SHOP_SIZE_LINK_CODES, shopStandardBleedMm} f
 import {GLYPH_CAP_HEIGHT_EM, GLYPH_OUTLINES, GLYPH_X_HEIGHT_EM} from '../src/print/glyphOutlines.generated.js';
 import {helveticaTextWidthPx} from '../src/print/helveticaMetrics.js';
 import {canOutlineText, outlineText} from '../src/print/outlineText.js';
-import {BOARD_GRID_MAX, BOARD_GRID_MIN, boardGridAxisMax} from '../src/print/charucoLayout.js';
+import {
+    BOARD_GRID_MAX,
+    BOARD_GRID_MIN,
+    boardGridAxisMax,
+    workingDistanceMinSquareMm,
+    workingDistanceTierFromSquareLengthMm,
+} from '../src/print/charucoLayout.js';
 import {
     CHARUCO_SQUARE_MM_MIN,
     MM_ORIGIN_BANNER_BELOW_GAP_MM,
@@ -21,6 +27,7 @@ import {
     SHOP_MARKER_ROOM_MM,
     maxShopGridForSquare,
     maxShopSquareMm,
+    resolveShopDistancePlan,
     shopQuietZoneMm,
     shopSheetLayout,
     shopValidSquaresMm,
@@ -334,6 +341,23 @@ for (const unit of UNITS) {
                     failures.push(`${unit} ${squaresX}×${squaresY} at ${squareMm} mm: default ${chosen}, expected ${first?.id ?? 'none'}`);
                 }
             }
+        }
+    }
+}
+// Distance presets: each fits its size, its square is in its own band, and its size is the default.
+for (const tier of ['close', 'near', 'far'] as const) {
+    for (const unit of UNITS) {
+        const plan = resolveShopDistancePlan(tier, unit);
+        const label = `${tier} preset (${unit})`;
+        if (!plan) {
+            failures.push(`${label}: fits no size`);
+            continue;
+        }
+        if (!shopSheetLayout(plan.squaresX, plan.squaresY, plan.squareMm, plan.sizeId) || workingDistanceTierFromSquareLengthMm(plan.squareMm) !== tier || plan.squareMm < workingDistanceMinSquareMm(tier)) {
+            failures.push(`${label}: ${plan.squaresX}×${plan.squaresY} at ${plan.squareMm} mm on ${plan.sizeId} does not print in the ${tier} band`);
+        }
+        if (smallestFittingShopSize(plan.squaresX, plan.squaresY, plan.squareMm, unit) !== plan.sizeId) {
+            failures.push(`${label}: ${plan.sizeId} is not the default size for its board`);
         }
     }
 }

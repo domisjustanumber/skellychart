@@ -81,13 +81,35 @@
           <h2 id="controls-heading" class="visually-hidden">Chart settings</h2>
 
           <div class="field">
+            <span class="field-label" id="lbl-mode"></span>
+            <div class="mode-toggle" id="modeToggle" role="group" aria-labelledby="lbl-mode">
+              <button type="button" class="mode-toggle-btn" data-mode="home" aria-pressed="true"></button>
+              <button type="button" class="mode-toggle-btn" data-mode="shop" aria-pressed="false"></button>
+            </div>
+            <p id="modeNotice" class="caption mode-notice hidden" role="status"></p>
+          </div>
+
+          <div class="field">
             <label for="distance" id="lbl-distance"></label>
             <select id="distance" class="select"></select>
           </div>
 
-          <div class="field">
+          <div class="field" id="paperField">
             <label for="paper" id="lbl-paper"></label>
             <select id="paper" class="select"></select>
+          </div>
+
+          <div class="field hidden" id="shopSizeField">
+            <div class="field-label-row">
+              <label for="shopSize" id="lbl-shopSize"></label>
+              <div class="mode-toggle mode-toggle--small" id="shopUnitToggle" role="group">
+                <button type="button" class="mode-toggle-btn" data-unit="mm" aria-pressed="false">mm</button>
+                <button type="button" class="mode-toggle-btn" data-unit="in" aria-pressed="false">in</button>
+              </div>
+            </div>
+            <select id="shopSize" class="select"></select>
+            <p id="shopSizeDetail" class="caption"></p>
+            <p id="shopSizeHint" class="caption page-step-hint hidden"></p>
           </div>
 
           <details class="advanced" id="advancedSettings">
@@ -117,6 +139,16 @@
                   </button>
                 </div>
                 <p id="pagesHint" class="caption page-step-hint hidden"></p>
+              </div>
+
+              <div class="field hidden" id="shopBleedField">
+                <label for="shopBleed" id="lbl-shopBleed"></label>
+                <select id="shopBleed" class="select"></select>
+                <p id="shopPageSize" class="caption"></p>
+              </div>
+
+              <div class="field hidden" id="shopCropField">
+                <label class="checkbox-row"><input type="checkbox" id="shopCropMarks" /> <span id="lbl-shopCropMarks"></span></label>
               </div>
 
               <div class="field">

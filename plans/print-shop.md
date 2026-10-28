@@ -441,7 +441,7 @@ Only 975 of the 1521 grids in 2-40 × 2-40 are valid boards. Every grid count in
 **0b. Logo flatten (moved from phase 2; needed for monochrome, which allows no ExtGState).**
 - In `public/freemocap-logo.svg`, path988 (`.st3`, #365D5F at opacity 0.15) has exactly the same geometry as path968 (`.st2`), and nothing is painted between them.
 - Delete path988 and the `.st3` rule, and set `.st2` to **#94C4C7** (0.85·#A4D6D9 + 0.15·#365D5F). It looks the same on screen.
-- Apply it globally. It removes the only ExtGState from home PDFs too. Run `check:home-golden --update` once, on purpose (the only intended home golden change), and the update-banner-size skill; the geometry does not change. It is not a label or layout change, so it needs no major bump.
+- Apply it globally. It removes the logo's ExtGState from home PDFs too (multi-sheet home PDFs keep one: the assembly guide's colour blocks use `fill-opacity="0.3"`, `svgAssemblyCore.ts:364`; shop mode has no guide). Also drop the logo's `sodipodi:namedview` (Inkscape window state, whose `borderopacity`/`pageopacity` attributes would trip step 6's `opacity` check). Run `check:home-golden --update` once, on purpose (the only intended home golden change), and the update-banner-size skill; the geometry does not change. It is not a label or layout change, so it needs no major bump.
 
 *Verify:* `check:banner` reports up to date; the golden diff is limited to the logo; the logo has no `opacity`.
 

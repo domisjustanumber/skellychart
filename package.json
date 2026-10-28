@@ -14,8 +14,9 @@
     "check:dist": "tsx scripts/check-dist-version.ts",
     "check:home-golden": "tsx scripts/check-home-golden.ts",
     "check:links": "tsx scripts/check-links.ts",
+    "check:shop": "tsx scripts/check-shop.ts",
     "prebuild": "npm run check:version",
-    "build": "npm run check:presets && npm run check:banner && npm run check:links && npm run check:home-golden && tsc -b && vite build",
+    "build": "npm run check:presets && npm run check:banner && npm run check:links && npm run check:shop && npm run check:home-golden && tsc -b && vite build",
     "postbuild": "npm run check:dist",
     "preview": "vite preview"
   },

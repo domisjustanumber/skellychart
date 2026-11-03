@@ -1,6 +1,8 @@
 import {PIXELS_PER_MM} from './constants.js';
 import type {PaperUnits} from './papers.js';
 
+export const MM_PER_INCH = 25.4;
+
 export function escapeXml(text: string): string {
     return text
         .replace(/&/g, '&amp;')
@@ -15,7 +17,7 @@ export function rgbCss(rgb: [number, number, number]): string {
 
 /** Convert mm → inch string for SVG/CSS (trims float noise from mm constants). */
 export function mmToInchString(mm: number): string {
-    const inch = mm / 25.4;
+    const inch = mm / MM_PER_INCH;
     return inch.toFixed(4).replace(/\.?0+$/, '');
 }
 
@@ -32,7 +34,7 @@ export function svgRootOuterSizeAttrs(paperWMm: number, paperHMm: number, units:
  * trim plus ⅛ in bleed), otherwise mm.
  */
 export function svgRootOuterSizeAttrsUnit(mediaWMm: number, mediaHMm: number): [string, string] {
-    const eighths = (mm: number) => (mm / 25.4) * 8;
+    const eighths = (mm: number) => (mm / MM_PER_INCH) * 8;
     if ([mediaWMm, mediaHMm].every((mm) => Math.abs(eighths(mm) - Math.round(eighths(mm))) < 1e-6)) {
         return [`${mmToInchString(mediaWMm)}in`, `${mmToInchString(mediaHMm)}in`];
     }

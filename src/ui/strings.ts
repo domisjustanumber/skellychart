@@ -2,19 +2,14 @@
 
 import {DEFAULT_WORKING_DISTANCE, type WorkingDistanceTierId} from '../print/charucoLayout.js';
 import type {Paper, PaperId} from '../print/papers.js';
-import {mmToInchString} from '../print/svgUtils.js';
+import {interpolate} from '../print/labels.js';
+import {MM_PER_INCH, mmToInchString} from '../print/svgUtils.js';
+
+export {interpolate};
 
 /** FreeMoCap multi-camera calibration (using the chart). */
 export const FREEMOCAP_CALIBRATION_DOCS_MULTI_CAM_URL =
     'https://docs.freemocap.org/documentation/multi-camera-calibration.html#setting-up-cameras';
-
-const PLACEHOLDER = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
-
-export function interpolate(template: string, vars: Record<string, string | number>): string {
-    return template.replace(PLACEHOLDER, (_, key: string) =>
-        key in vars ? String(vars[key as keyof typeof vars]) : `{{${key}}}`,
-    );
-}
 
 /** Paper size line in the paper dropdown, in the paper's units: `8.5 × 11 in`, `210 × 297 mm`. */
 export function paperOptionDimensions(p: Paper): string {
@@ -28,6 +23,7 @@ export const S = {
     themeLight: 'Light',
     themeSystem: 'System',
     title: 'FreeMoCap Calibration Chart Generator',
+    chartSettings: 'Chart settings',
     introMain:
         'Create a printable calibration chart that can be used with FreeMoCap. Scan the QR code in the top corner to bring you back here with all of the settings pre-configured.',
     introDocsPrefix: ' ',
@@ -39,6 +35,10 @@ export const S = {
     advanced: 'Advanced settings',
     squareLengthHeading: 'Square length ({{mm}} mm)',
     sheetsOfPaper: 'Sheets of paper',
+    sheetCountOne: '{{count}} sheet of paper',
+    sheetCountMany: '{{count}} sheets of paper',
+    sheetsShortOne: '{{count}} sheet',
+    sheetsShortMany: '{{count}} sheets',
     pagesStepSquares: '{{mm}} mm squares',
     pagesFewerAria: '{{change}} fewer ({{total}} in all), {{mm}} mm squares',
     pagesMoreAria: '{{change}} more ({{total}} in all), {{mm}} mm squares',
@@ -54,6 +54,9 @@ export const S = {
     squaresInY: 'Squares in Y ({{n}})',
     layoutCannotFit:
         'Cannot fit this combination — try another square length, number of sheets, or grid.',
+    layoutSummary: '{{sheets}}; {{squaresX}}×{{squaresY}} squares; {{squareMm}} mm square length',
+    layoutSummaryMulti:
+        '{{sheets}}; {{cols}}×{{rows}} sheet grid + assembly guide; {{squaresX}}×{{squaresY}} squares; {{squareMm}} mm square length',
     printSave: 'Print & Save',
     printCharts: 'Print',
     savePdfFiles: 'Save as PDF',
@@ -157,6 +160,8 @@ export const S = {
     truncatedPreview:
         'Showing first {{shown}} of {{total}} sheets in the preview. Use Print or Save as PDF to output every sheet.',
     pageLabel: 'Page {{n}}',
+    unitCm: 'cm',
+    unitIn: 'in',
     heightCm: '{{cm}} cm',
     heightFtIn: '{{ft}}′ {{in}}″',
     scaleSceneAria: 'To scale: the chart, {{w}} × {{h}} {{unit}}, in front of a {{tall}} person and a {{short}} person.',
@@ -199,12 +204,20 @@ export function distanceSelectLabel(id: WorkingDistanceTierId, imperial: boolean
 }
 
 export function sheetCountPhrase(count: number): string {
-    return count === 1 ? `${count} sheet of paper` : `${count} sheets of paper`;
+    return interpolate(count === 1 ? S.sheetCountOne : S.sheetCountMany, {count});
 }
 
 /** Short count for the sheets stepper: “1 sheet”, “6 sheets”. */
 export function sheetsShort(count: number): string {
-    return count === 1 ? '1 sheet' : `${count} sheets`;
+    return interpolate(count === 1 ? S.sheetsShortOne : S.sheetsShortMany, {count});
+}
+
+/** An assembled chart's size for the `{{w}} × {{h}} {{unit}}` readouts: cm, or inches with imperial units. */
+export function chartSizeVars(wMm: number, hMm: number, imperial: boolean): {w: string; h: string; unit: string} {
+    const fmt = (v: number): string => v.toLocaleString(undefined, {maximumFractionDigits: 1});
+    return imperial
+        ? {w: fmt(wMm / MM_PER_INCH), h: fmt(hMm / MM_PER_INCH), unit: S.unitIn}
+        : {w: fmt(wMm / 10), h: fmt(hMm / 10), unit: S.unitCm};
 }
 
 export function paperLabel(id: PaperId): string {

@@ -4,8 +4,9 @@
  * negative y) and fitted to the container, so everything in it shares one scale. Rulers and text are
  * sized in screen px so they stay legible however large the chart is.
  */
+import {MM_PER_INCH} from '../print/svgUtils.js';
 import figureUrl from './scaleFigure.svg';
-import {interpolate, S} from './strings.js';
+import {chartSizeVars, interpolate, S} from './strings.js';
 
 /** A chart drawn in the scene: an SVG image shown `widthMm`×`heightMm`. */
 export interface ScaleSceneChart {
@@ -55,8 +56,6 @@ const MARGIN_BOTTOM_PX = 6;
 /** White border (px) round a multi-sheet chart, so its black edge squares stand off a dark scene. */
 const CHART_RIM_PX = 3;
 
-const MM_PER_IN = 25.4;
-
 function n(v: number): string {
     return String(+v.toFixed(2));
 }
@@ -74,7 +73,7 @@ export function formatHeightMetric(mm: number): string {
 }
 
 export function formatHeightImperial(mm: number): string {
-    const inches = Math.round(mm / MM_PER_IN);
+    const inches = Math.round(mm / MM_PER_INCH);
     return interpolate(S.heightFtIn, {ft: Math.floor(inches / 12), in: inches % 12});
 }
 
@@ -99,7 +98,7 @@ function rulerTicks(x: number, heightMm: number, scale: number): string {
         }
     };
     level(100, 5, -1);
-    level(6 * MM_PER_IN, 2, 1);
+    level(6 * MM_PER_INCH, 2, 1);
     return out.join('');
 }
 
@@ -223,10 +222,7 @@ function sceneAriaLabel(chart: DrawnChart | null, imperialFirst: boolean): strin
     if (!chart) {
         return interpolate(S.scaleSceneAriaNoChart, people);
     }
-    const fmt = (v: number): string => v.toLocaleString(undefined, {maximumFractionDigits: 1});
-    const size = imperialFirst
-        ? {w: fmt(chart.widthMm / MM_PER_IN), h: fmt(chart.heightMm / MM_PER_IN), unit: 'in'}
-        : {w: fmt(chart.widthMm / 10), h: fmt(chart.heightMm / 10), unit: 'cm'};
+    const size = chartSizeVars(chart.widthMm, chart.heightMm, imperialFirst);
     return interpolate(chart.isSheet ? S.scaleSceneAriaSheet : S.scaleSceneAria, {...people, ...size});
 }
 
@@ -234,7 +230,7 @@ function sceneAriaLabel(chart: DrawnChart | null, imperialFirst: boolean): strin
  * Draws the scale scene into `root` and redraws it when `root` resizes. Call `update` with the chart to
  * show, or `null` for the people alone.
  */
-export function mountScaleScene(root: HTMLElement, imperialFirst: () => boolean): {update(chart: ScaleSceneChart | null): void} {
+export function mountScaleScene(root: HTMLElement, imperialFirst: boolean): {update(chart: ScaleSceneChart | null): void} {
     let current: DrawnChart | null = null;
     let lastW = -1;
     let lastWindowH = -1;
@@ -245,7 +241,7 @@ export function mountScaleScene(root: HTMLElement, imperialFirst: () => boolean)
         }
         lastW = w;
         lastWindowH = window.innerHeight;
-        root.innerHTML = sceneMarkup(w, current, imperialFirst());
+        root.innerHTML = sceneMarkup(w, current, imperialFirst);
     };
     // The scene's height cap follows the window height, so redraw on either change.
     const redrawIfResized = (): void => {

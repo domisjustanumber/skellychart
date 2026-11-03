@@ -12,7 +12,6 @@ import {
     CHARUCO_SQUARE_MM_MIN,
     DEFAULT_WORKING_DISTANCE,
     isWorkingDistanceId,
-    layoutSummaryText,
     maxSquareMmForGridAndPages,
     printedLayout,
     resolveDistancePrintPlan,
@@ -33,7 +32,7 @@ import {printedSheetCount} from './print/tiling.js';
 import {perfLog} from './print/perfDebug.js';
 import {PIXELS_PER_MM} from './print/constants.js';
 import {compareChartVersions, parseChartVersion} from './print/chartVersion.js';
-import {rgbCss, svgRootOuterSizeAttrs} from './print/svgUtils.js';
+import {MM_PER_INCH, rgbCss, svgRootOuterSizeAttrs} from './print/svgUtils.js';
 import {
     buildCharucoDocumentationUrl,
     parseCharucoQrSearchParams,
@@ -92,6 +91,7 @@ import {
 } from './ui/theme.js';
 import {defaultPaperId, defaultRegion, prefersImperialUnits} from './ui/locale.js';
 import {
+    chartSizeVars,
     FREEMOCAP_CALIBRATION_DOCS_MULTI_CAM_URL,
     distanceLabel,
     distanceSelectLabel,
@@ -103,18 +103,8 @@ import {
     sheetsShort,
 } from './ui/strings.js';
 
-function initialBoard(): {paperId: PaperId; squareMm: number; squaresX: number; squaresY: number} {
-    const paperId = defaultPaperId();
-    const paper = paperById(paperId);
-    const plan = resolveDistancePrintPlan(DEFAULT_WORKING_DISTANCE, paperId);
-    const squareMm = maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, paper.wMm, paper.hMm, plan.targetPages);
-    if (squareMm === null) {
-        throw new Error(`The ${paperId} ${DEFAULT_WORKING_DISTANCE} preset does not print (npm run check:presets catches this).`);
-    }
-    return {paperId, squareMm, squaresX: plan.squaresX, squaresY: plan.squaresY};
-}
-
-const defaultBoard = initialBoard();
+/** Imperial units in the UI copy (distances, chart sizes, people's heights); the locale is read once. */
+const IMPERIAL = prefersImperialUnits();
 
 interface AppState {
     distanceId: WorkingDistanceTierId;
@@ -160,10 +150,11 @@ function storeShopOptions(): void {
 const state: AppState = {
     distanceId: DEFAULT_WORKING_DISTANCE,
     mode: 'home',
-    paperId: defaultBoard.paperId,
-    squareMm: defaultBoard.squareMm,
-    squaresX: defaultBoard.squaresX,
-    squaresY: defaultBoard.squaresY,
+    paperId: defaultPaperId(),
+    // Placeholders until boot() applies the distance preset (npm run check:presets checks every one prints).
+    squareMm: 54,
+    squaresX: 5,
+    squaresY: 3,
     autoGrid: true,
     shopUnit: shopUnitForRegion(defaultRegion()),
     shopSizeId: null,
@@ -396,12 +387,21 @@ function setMode(mode: PrintMode): void {
             setSquareFollowingBand(snapped);
         }
     }
+    // An untouched preset follows the mode: home paper's, or the print-shop board's.
+    applyAutoPreset();
     forgetLinkSquare();
     syncUi({previewDelayMs: 0});
 }
 
-function pagesSliderDisplay(tiling: ReturnType<typeof effectiveTiling>): number {
+/** Chart sheets the printed layout uses, excluding the guide sheet; 1 when nothing fits. */
+function chartPageCount(tiling: ReturnType<typeof effectiveTiling>): number {
     return tiling?.pageCount ?? 1;
+}
+
+/** The user took over the board: the distance preset no longer sets it, and a link's square is forgotten. */
+function takeOverBoard(): void {
+    state.autoGrid = false;
+    forgetLinkSquare();
 }
 
 /**
@@ -417,29 +417,19 @@ type PageStepTarget = 'fewer' | 'more' | 'fewest' | 'most';
 
 /**
  * Moves the sheets stepper: sets the square length to the largest that prints the chosen page count.
- * Like the other board sliders it never changes the distance. Returns false when there is nowhere to go.
+ * Like the X / Y sliders it never changes the distance (the square slider is the only board control that
+ * does); it end-stops at the distance minimum. Returns false when there is nowhere to go.
  */
 function stepPages(which: PageStepTarget): boolean {
-    const current = pagesSliderDisplay(effectiveTiling());
+    const current = chartPageCount(effectiveTiling());
     const target = pageStepNeighbours(pageSteps(), current)[which];
     if (!target || target.pages === current) {
         return false;
     }
-    state.autoGrid = false;
-    forgetLinkSquare();
+    takeOverBoard();
     state.squareMm = target.squareMm;
     scheduleSyncUi();
     return true;
-}
-
-/** Assembled chart size for the stepper readout, in cm (or inches with imperial units). */
-function chartSizeParts(imperial: boolean): {w: string; h: string; unit: string} {
-    const fmt = (v: number): string => v.toLocaleString(undefined, {maximumFractionDigits: 1});
-    const wMm = state.squaresX * state.squareMm;
-    const hMm = state.squaresY * state.squareMm;
-    return imperial
-        ? {w: fmt(wMm / 25.4), h: fmt(hMm / 25.4), unit: 'in'}
-        : {w: fmt(wMm / 10), h: fmt(hMm / 10), unit: 'cm'};
 }
 
 /** A sheets stepper button: how many sheets the step adds or removes, and the square length it gives. */
@@ -472,12 +462,12 @@ function renderPageStepButton(
 }
 
 /** Sheets stepper: the printed page count, the stops either side, and why it stops at an end. */
-function syncPageStepper(tiling: ReturnType<typeof effectiveTiling>, imperial: boolean): void {
-    const count = pagesSliderDisplay(tiling);
+function syncPageStepper(tiling: ReturnType<typeof effectiveTiling>): void {
+    const count = chartPageCount(tiling);
+    const printed = printedSheetCount(count);
     const {fewer, more} = tiling ? pageStepNeighbours(pageSteps(), count) : {fewer: null, more: null};
-    byId('lbl-pages').textContent = S.sheetsOfPaper;
-    byId('pagesValue').textContent = tiling ? sheetsShort(printedSheetCount(count)) : '—';
-    const size = chartSizeParts(imperial);
+    byId('pagesValue').textContent = tiling ? sheetsShort(printed) : '—';
+    const size = chartSizeVars(state.squaresX * state.squareMm, state.squaresY * state.squareMm, IMPERIAL);
     byId('pagesDetail').textContent = !tiling
         ? ''
         : tiling.pageCount > 1
@@ -493,10 +483,10 @@ function syncPageStepper(tiling: ReturnType<typeof effectiveTiling>, imperial: b
         hint =
             fewestAnyDistance !== undefined && fewestAnyDistance < count
                 ? interpolate(S.pagesFewestHint, {
-                      distance: distanceLabel(state.distanceId, imperial),
+                      distance: distanceLabel(state.distanceId, IMPERIAL),
                       mm: workingDistanceMinSquareMm(state.distanceId),
                   })
-                : interpolate(S.pagesFewestGridHint, {sheets: sheetsShort(printedSheetCount(count))});
+                : interpolate(S.pagesFewestGridHint, {sheets: sheetsShort(printed)});
     } else if (tiling && !more) {
         // The last stop is always one square per sheet (checked by scripts/check-presets.ts).
         hint = S.pagesMostOnePerSheetHint;
@@ -539,7 +529,7 @@ function wirePageStepButton(btn: HTMLElement, which: 'fewer' | 'more'): void {
             repeatTimer = window.setInterval(() => {
                 repeated = true;
                 // Keeps the preview on the short interactive debounce while repeating (cleared on window pointerup).
-                rangePointerHeld = true;
+                pointerGestureHeld = true;
                 if (!stepPages(which)) {
                     stop();
                 }
@@ -597,15 +587,9 @@ function setGridSize(axis: 'squaresX' | 'squaresY', requested: number): void {
 }
 
 function syncThemeToggle(): void {
-    const group = byId('themeToggle');
-    group.setAttribute('aria-label', S.colorTheme);
     const pref = getStoredPreference();
-    for (const b of group.querySelectorAll<HTMLButtonElement>('[data-theme-pick]')) {
-        const pick = b.dataset.themePick as ThemePreference;
-        const label = pick === 'dark' ? S.themeDark : pick === 'light' ? S.themeLight : S.themeSystem;
-        b.setAttribute('aria-label', label);
-        b.setAttribute('title', label);
-        b.setAttribute('aria-pressed', String(pick === pref));
+    for (const b of byId('themeToggle').querySelectorAll<HTMLButtonElement>('[data-theme-pick]')) {
+        b.setAttribute('aria-pressed', String(b.dataset.themePick === pref));
     }
 }
 
@@ -630,21 +614,15 @@ let previewAbort: AbortController | null = null;
 let pdfExportAbort: AbortController | null = null;
 
 let syncUiRafId: number | null = null;
-/** Cached so we don't rebuild selects on every drag frame (expensive and blocks paint). */
-let syncedDistanceSelectKey = '';
-let syncedPaperSelectKey = '';
 /** True while `#distance` native selection was cleared so re-picking the same option fires `change`; must not overwrite value in `syncUi`. */
 let suppressDistanceSelectUiClamp = false;
-/** Square-length band labels + gradient only depend on locale (imperial vs m) and tier constants. */
-let syncedTierBandKey = '';
-/** While true, previews use a shorter debounce; range `pointerdown`/`pointerup` maintain this. */
-let rangePointerHeld = false;
+/**
+ * While true (range-slider drag or held sheets-stepper button), previews use the short debounce; the
+ * window-level pointerup/pointercancel clears it and runs a full sync.
+ */
+let pointerGestureHeld = false;
 
 type SyncUiOptions = {
-    /**
-     * When true, skips static chrome (titles, intros, unmoving labels) so slider drags do less DOM work per frame.
-     */
-    lite?: boolean;
     /**
      * When set, overrides automatic interactive vs idle debounce for the preview scheduling at the end of this sync.
      */
@@ -661,17 +639,17 @@ function scheduleSyncUi(): void {
     }
     syncUiRafId = window.requestAnimationFrame(() => {
         syncUiRafId = null;
-        syncUi({lite: true});
+        syncUi();
     });
 }
 
-/** Ends a slider drag or a held stepper: one full sync (it drops any pending lite one) and the preview now. */
-function finalizeRangeGesture(): void {
-    if (!rangePointerHeld) {
+/** Ends a slider drag or a held stepper: one sync now (it drops any pending one) and the preview now. */
+function finalizePointerGesture(): void {
+    if (!pointerGestureHeld) {
         return;
     }
-    rangePointerHeld = false;
-    syncUi({lite: false, previewDelayMs: 0});
+    pointerGestureHeld = false;
+    syncUi({previewDelayMs: 0});
 }
 
 function setIntroElement(el: HTMLElement): void {
@@ -685,7 +663,13 @@ function setIntroElement(el: HTMLElement): void {
     el.replaceChildren(prefix, a, suffix);
 }
 
-function setPrintAdviceElement(el: HTMLElement): void {
+/** The printing advice for the mode; rebuilt only when the mode or (print shop) the crop-mark setting changes. */
+function syncPrintAdvice(el: HTMLElement): void {
+    const key = state.mode === 'shop' ? `shop|${state.shopCropMarks}` : 'home';
+    if (el.dataset.key === key) {
+        return;
+    }
+    el.dataset.key = key;
     if (state.mode === 'shop') {
         const finish = document.createElement('p');
         const lead = document.createElement('strong');
@@ -856,145 +840,131 @@ function syncDevQrLinkTargetUi(): void {
     }
 }
 
+/** Copy, option lists and slider bounds that never change in a session; set once in {@link boot}. */
+function initStaticUi(): void {
+    byId('pageTitle').textContent = S.title;
+    setIntroElement(byId('intro'));
+    byId('controls-heading').textContent = S.chartSettings;
+    byId('lbl-mode').textContent = S.printWith;
+    for (const btn of byId('modeToggle').querySelectorAll<HTMLButtonElement>('[data-mode]')) {
+        btn.textContent = btn.dataset.mode === 'shop' ? S.modeShop : S.modeHome;
+    }
+    byId('lbl-distance').textContent = S.workingDistance;
+    byId('lbl-paper').textContent = S.paperSize;
+    byId('lbl-shopSize').textContent = S.shopSize;
+    byId('shopUnitToggle').setAttribute('aria-label', S.shopUnits);
+    byId('lbl-advanced').textContent = S.advanced;
+    byId('lbl-pages').textContent = S.sheetsOfPaper;
+    byId('lbl-shopBleed').textContent = S.shopBleed;
+    byId('lbl-shopCropMarks').textContent = S.shopCropMarks;
+    byId('print-save-heading').textContent = S.printSave;
+    byId('shopOrderTitle').textContent = S.shopOrderTitle;
+    byId('btnCopyOrder').textContent = S.shopOrderCopy;
+    byId('preview-title').textContent = S.previewTitle;
+    byId('fullChartHint').textContent = S.fullChartHint;
+
+    // Square-length band labels; syncUi sizes them to the slider's range.
+    const tierEl = byId('tierLabels');
+    tierEl.replaceChildren(
+        ...(['close', 'near', 'far'] as const).map((id) => {
+            const span = document.createElement('span');
+            span.style.color = `var(--${id})`;
+            span.textContent = distanceLabel(id, IMPERIAL);
+            return span;
+        }),
+    );
+    (tierEl.lastElementChild as HTMLElement).style.flex = '1';
+
+    const sqmm = byId('sqmm') as HTMLInputElement;
+    sqmm.min = String(CHARUCO_SQUARE_MM_MIN);
+    sqmm.step = '1';
+    for (const id of ['sx', 'sy']) {
+        const slider = byId(id) as HTMLInputElement;
+        slider.min = String(BOARD_GRID_MIN);
+        slider.max = String(BOARD_GRID_MAX);
+        slider.step = '1';
+    }
+
+    const distSel = byId('distance') as HTMLSelectElement;
+    for (const {id} of WORKING_DISTANCES) {
+        distSel.add(new Option(distanceSelectLabel(id, IMPERIAL), id));
+    }
+    const paperSel = byId('paper') as HTMLSelectElement;
+    for (const p of PAPERS) {
+        paperSel.add(new Option(interpolate(S.paperOption, {paper: paperLabel(p.id), dims: paperOptionDimensions(p)}), p.id));
+    }
+
+    const themeGroup = byId('themeToggle');
+    themeGroup.setAttribute('aria-label', S.colorTheme);
+    for (const b of themeGroup.querySelectorAll<HTMLButtonElement>('[data-theme-pick]')) {
+        const pick = b.dataset.themePick as ThemePreference;
+        const label = pick === 'dark' ? S.themeDark : pick === 'light' ? S.themeLight : S.themeSystem;
+        b.setAttribute('aria-label', label);
+        b.setAttribute('title', label);
+    }
+    syncThemeToggle();
+}
+
 function syncUi(options: SyncUiOptions = {}): void {
-    const {lite = false, previewDelayMs} = options;
+    const {previewDelayMs} = options;
     const t0 = IS_DEV ? performance.now() : 0;
     if (syncUiRafId !== null) {
         window.cancelAnimationFrame(syncUiRafId);
         syncUiRafId = null;
     }
-    applyAutoPreset();
-    const imperial = prefersImperialUnits();
     const tiling = effectiveTiling();
 
-    if (!lite) {
-        byId('pageTitle').textContent = S.title;
-        setIntroElement(byId('intro'));
-        byId('lbl-distance').textContent = S.workingDistance;
-        byId('lbl-paper').textContent = S.paperSize;
-        byId('lbl-advanced').textContent = S.advanced;
-    }
     syncModeControls();
     byId('lbl-square').textContent = interpolate(S.squareLengthHeading, {mm: state.squareMm});
     byId('lbl-sx').textContent = interpolate(S.squaresInX, {n: state.squaresX});
     byId('lbl-sy').textContent = interpolate(S.squaresInY, {n: state.squaresY});
-    if (!lite) {
-        byId('print-save-heading').textContent = S.printSave;
-        byId('preview-title').textContent = S.previewTitle;
-        byId('fullChartHint').textContent = S.fullChartHint;
-        setPrintAdviceElement(byId('printAdvice'));
-    }
+    syncPrintAdvice(byId('printAdvice'));
 
+    // The band edges move with the slider's end, which print-shop mode raises.
     const frac = squareLengthTierBandEdgeFractions(squareSliderMaxMm());
     const pCloseEnd = frac.closeNear * 100;
     const pNearEnd = frac.nearFar * 100;
-    const tierBandKey = `${imperial}:${pCloseEnd}:${pNearEnd}`;
-    const sliderStack = byId('squareMmSliderStack') as HTMLDivElement;
-    if (tierBandKey !== syncedTierBandKey) {
-        syncedTierBandKey = tierBandKey;
-        const tierEl = byId('tierLabels');
-        tierEl.innerHTML = '';
-        const s1 = document.createElement('span');
-        s1.style.width = `${pCloseEnd}%`;
-        s1.style.color = 'var(--close)';
-        s1.textContent = distanceLabel('close', imperial);
-        const s2 = document.createElement('span');
-        s2.style.width = `${Math.max(0, pNearEnd - pCloseEnd)}%`;
-        s2.style.color = 'var(--near)';
-        s2.textContent = distanceLabel('near', imperial);
-        const s3 = document.createElement('span');
-        s3.style.flex = '1';
-        s3.style.color = 'var(--far)';
-        s3.textContent = distanceLabel('far', imperial);
-        tierEl.append(s1, s2, s3);
-        sliderStack.style.setProperty('--tier-p-close-end', `${pCloseEnd}%`);
-        sliderStack.style.setProperty('--tier-p-near-end', `${pNearEnd}%`);
-    }
+    const [closeLabel, nearLabel] = byId('tierLabels').children as HTMLCollectionOf<HTMLElement>;
+    closeLabel.style.width = `${pCloseEnd}%`;
+    nearLabel.style.width = `${Math.max(0, pNearEnd - pCloseEnd)}%`;
+    const sliderStack = byId('squareMmSliderStack');
+    sliderStack.style.setProperty('--tier-p-close-end', `${pCloseEnd}%`);
+    sliderStack.style.setProperty('--tier-p-near-end', `${pNearEnd}%`);
 
     const sqmm = byId('sqmm') as HTMLInputElement;
-    sqmm.min = String(CHARUCO_SQUARE_MM_MIN);
     sqmm.max = String(squareSliderMaxMm());
-    sqmm.step = '1';
     sqmm.value = String(state.squareMm);
 
-    syncPageStepper(tiling, imperial);
+    syncPageStepper(tiling);
 
-    const sx = byId('sx') as HTMLInputElement;
-    const sy = byId('sy') as HTMLInputElement;
-    sx.min = String(BOARD_GRID_MIN);
-    sx.max = String(BOARD_GRID_MAX);
-    sy.min = String(BOARD_GRID_MIN);
-    sy.max = String(BOARD_GRID_MAX);
-    sx.step = '1';
-    sy.step = '1';
-    sx.value = String(state.squaresX);
-    sy.value = String(state.squaresY);
+    (byId('sx') as HTMLInputElement).value = String(state.squaresX);
+    (byId('sy') as HTMLInputElement).value = String(state.squaresY);
 
-    const distSel = byId('distance') as HTMLSelectElement;
-    const distanceSelectKey = `${imperial}:${WORKING_DISTANCES.map((d) => d.id).join('|')}`;
-    if (distanceSelectKey !== syncedDistanceSelectKey) {
-        syncedDistanceSelectKey = distanceSelectKey;
-        distSel.innerHTML = '';
-        for (const {id} of WORKING_DISTANCES) {
-            const o = document.createElement('option');
-            o.value = id;
-            o.textContent = distanceSelectLabel(id, imperial);
-            distSel.appendChild(o);
-        }
-    }
     if (!suppressDistanceSelectUiClamp) {
-        distSel.value = state.distanceId;
+        (byId('distance') as HTMLSelectElement).value = state.distanceId;
     }
+    (byId('paper') as HTMLSelectElement).value = state.paperId;
 
-    const paperSel = byId('paper') as HTMLSelectElement;
-    const paperSelectKey = PAPERS.map((p) => p.id).join('|');
-    if (paperSelectKey !== syncedPaperSelectKey) {
-        syncedPaperSelectKey = paperSelectKey;
-        paperSel.innerHTML = '';
-        for (const p of PAPERS) {
-            const o = document.createElement('option');
-            o.value = p.id;
-            o.textContent = interpolate(S.paperOption, {
-                paper: paperLabel(p.id),
-                dims: paperOptionDimensions(p),
-            });
-            paperSel.appendChild(o);
-        }
-    }
-    paperSel.value = state.paperId;
-
-    const shopLayout = shopLayoutNow();
-    const summary = state.mode === 'shop' ? shopSummaryText(shopLayout) : layoutSummaryText(
-        tiling,
-        state.squaresX,
-        state.squaresY,
-        state.squareMm,
-        (n) => sheetCountPhrase(printedSheetCount(n)),
-        (cols, rows) => interpolate('; {{cols}}×{{rows}} sheet grid + assembly guide', {cols, rows}),
-        (squaresX, squaresY, squareMm) =>
-            interpolate('; {{squaresX}}×{{squaresY}} squares; {{squareMm}} mm square length', {
-                squaresX,
-                squaresY,
-                squareMm,
-            }),
-        S.layoutCannotFit,
-    );
-    byId('layoutSummary').textContent = summary;
+    byId('layoutSummary').textContent =
+        state.mode === 'shop'
+            ? shopSummaryText(shopLayoutNow())
+            : !tiling
+              ? S.layoutCannotFit
+              : interpolate(tiling.pageCount > 1 ? S.layoutSummaryMulti : S.layoutSummary, {
+                    sheets: sheetCountPhrase(printedSheetCount(tiling.pageCount)),
+                    cols: tiling.npx,
+                    rows: tiling.npy,
+                    squaresX: state.squaresX,
+                    squaresY: state.squaresY,
+                    squareMm: state.squareMm,
+                });
 
     syncExportButtons();
-
-    if (!lite) {
-        syncThemeToggle();
-        showErr(null);
-    }
+    showErr(null);
     if (IS_DEV) {
         const dt = performance.now() - t0;
         if (dt > 16) {
-            perfLog(
-                'syncUi (before schedulePreview debounce)',
-                dt,
-                lite ? 'lite: sliders → reduced DOM refresh' : 'full: distance/paper / range release → DOM refresh',
-            );
+            perfLog('syncUi (before schedulePreview debounce)', dt);
         }
     }
     syncDevQrLinkTargetUi();
@@ -1033,9 +1003,7 @@ function syncExportButtons(): void {
 /** Mode toggle, which board-size control shows, and the print-shop size, unit, bleed and crop-mark controls. */
 function syncModeControls(): void {
     const shop = state.mode === 'shop';
-    byId('lbl-mode').textContent = S.printWith;
     for (const btn of byId('modeToggle').querySelectorAll<HTMLButtonElement>('[data-mode]')) {
-        btn.textContent = btn.dataset.mode === 'shop' ? S.modeShop : S.modeHome;
         btn.setAttribute('aria-pressed', String(btn.dataset.mode === state.mode));
     }
     const notice = byId('modeNotice');
@@ -1051,10 +1019,7 @@ function syncModeControls(): void {
         return;
     }
 
-    byId('lbl-shopSize').textContent = S.shopSize;
-    const unitToggle = byId('shopUnitToggle');
-    unitToggle.setAttribute('aria-label', S.shopUnits);
-    for (const btn of unitToggle.querySelectorAll<HTMLButtonElement>('[data-unit]')) {
+    for (const btn of byId('shopUnitToggle').querySelectorAll<HTMLButtonElement>('[data-unit]')) {
         btn.setAttribute('aria-pressed', String(btn.dataset.unit === state.shopUnit));
     }
 
@@ -1082,9 +1047,11 @@ function syncModeControls(): void {
     sizeSel.value = state.shopSizeId ?? '';
 
     const layout = shopLayoutNow();
-    const imperial = state.shopUnit === 'in';
     byId('shopSizeDetail').textContent = layout
-        ? interpolate(S.shopSizeDetail, {trim: formatShopTrim(layout.trimWMm, layout.trimHMm, state.shopUnit), ...chartSizeParts(imperial)})
+        ? interpolate(S.shopSizeDetail, {
+              trim: formatShopTrim(layout.trimWMm, layout.trimHMm, state.shopUnit),
+              ...chartSizeVars(state.squaresX * state.squareMm, state.squaresY * state.squareMm, state.shopUnit === 'in'),
+          })
         : '';
     // The largest sizes are the walk-in cap: say why there is nothing bigger.
     const atCap = state.shopSizeId === '36x48in' || state.shopSizeId === '900x1200mm';
@@ -1093,7 +1060,6 @@ function syncModeControls(): void {
     hintEl.textContent = hint;
     hintEl.classList.toggle('hidden', hint === '');
 
-    byId('lbl-shopBleed').textContent = S.shopBleed;
     const bleedSel = byId('shopBleed') as HTMLSelectElement;
     const choices = shopBleedChoices(state.shopUnit);
     const current = state.shopBleed === 'std' ? 'std' : String(state.shopBleed.mm);
@@ -1135,11 +1101,8 @@ function syncModeControls(): void {
     } else {
         pageEl.textContent = '';
     }
-    byId('lbl-shopCropMarks').textContent = S.shopCropMarks;
     (byId('shopCropMarks') as HTMLInputElement).checked = state.shopCropMarks;
 
-    byId('shopOrderTitle').textContent = S.shopOrderTitle;
-    byId('btnCopyOrder').textContent = S.shopOrderCopy;
     const orderText = layout ? shopOrderText(layout) : '';
     const orderEl = byId('shopOrderText');
     if (orderEl.textContent !== orderText) {
@@ -1293,7 +1256,7 @@ function schedulePreview(delayOverride?: number): void {
     const delayMs =
         delayOverride !== undefined
             ? delayOverride
-            : rangePointerHeld
+            : pointerGestureHeld
               ? PREVIEW_DEBOUNCE_INTERACTIVE_MS
               : PREVIEW_DEBOUNCE_IDLE_MS;
     previewTimer = setTimeout(() => {
@@ -1551,9 +1514,9 @@ function bleedFileToken(bleedMm: number): string {
     if (bleedMm === 0) {
         return 'trim';
     }
-    const eighths = (bleedMm / 25.4) * 8;
+    const eighths = (bleedMm / MM_PER_INCH) * 8;
     return Math.abs(eighths - Math.round(eighths)) < 1e-6
-        ? `bleed${+(bleedMm / 25.4).toFixed(3)}in`
+        ? `bleed${+(bleedMm / MM_PER_INCH).toFixed(3)}in`
         : `bleed${+bleedMm.toFixed(3)}mm`;
 }
 
@@ -1944,13 +1907,13 @@ function wireUi(): void {
         'pointerdown',
         (e) => {
             if (e.target instanceof HTMLInputElement && e.target.type === 'range') {
-                rangePointerHeld = true;
+                pointerGestureHeld = true;
             }
         },
         true,
     );
-    window.addEventListener('pointerup', finalizeRangeGesture, true);
-    window.addEventListener('pointercancel', finalizeRangeGesture, true);
+    window.addEventListener('pointerup', finalizePointerGesture, true);
+    window.addEventListener('pointercancel', finalizePointerGesture, true);
 
     const distanceSel = byId('distance') as HTMLSelectElement;
     /** Native `<select>` does not fire `change` when re-picking the same option; briefly clear selection so it always fires. */
@@ -1980,6 +1943,7 @@ function wireUi(): void {
             state.distanceId = distanceId;
         }
         state.autoGrid = true;
+        applyAutoPreset();
         clearTransientNotices();
         forgetLinkSquare();
         syncUi();
@@ -2015,14 +1979,15 @@ function wireUi(): void {
                 linkSquareMm = null;
             }
             syncQrVersionBanner();
+        } else {
+            applyAutoPreset();
         }
         syncUi();
     });
 
     const sqmmEl = byId('sqmm') as HTMLInputElement;
     sqmmEl.addEventListener('input', (e) => {
-        state.autoGrid = false;
-        forgetLinkSquare();
+        takeOverBoard();
         clearTransientNotices();
         const raw = Number((e.target as HTMLInputElement).value);
         const snapped = snapSquareForMode(raw);
@@ -2055,8 +2020,7 @@ function wireUi(): void {
 
     const sxEl = byId('sx') as HTMLInputElement;
     sxEl.addEventListener('input', (e) => {
-        state.autoGrid = false;
-        forgetLinkSquare();
+        takeOverBoard();
         clearTransientNotices();
         setGridSize('squaresX', Number((e.target as HTMLInputElement).value));
         scheduleSyncUi();
@@ -2064,8 +2028,7 @@ function wireUi(): void {
 
     const syEl = byId('sy') as HTMLInputElement;
     syEl.addEventListener('input', (e) => {
-        state.autoGrid = false;
-        forgetLinkSquare();
+        takeOverBoard();
         clearTransientNotices();
         setGridSize('squaresY', Number((e.target as HTMLInputElement).value));
         scheduleSyncUi();
@@ -2077,13 +2040,14 @@ function wireUi(): void {
     for (const btn of byId('shopUnitToggle').querySelectorAll<HTMLButtonElement>('[data-unit]')) {
         btn.addEventListener('click', () => {
             state.shopUnit = btn.dataset.unit === 'in' ? 'in' : 'mm';
+            // An untouched preset picks its board size in the new unit.
+            applyAutoPreset();
             syncUi();
         });
     }
     (byId('shopSize') as HTMLSelectElement).addEventListener('change', (e) => {
         const sizeId = (e.target as HTMLSelectElement).value as ShopSizeId;
-        state.autoGrid = false;
-        forgetLinkSquare();
+        takeOverBoard();
         clearTransientNotices();
         state.shopSizeId = sizeId;
         // Keep the board; re-fit only the square, staying in the working distance's band if the size allows.
@@ -2093,7 +2057,7 @@ function wireUi(): void {
             squareMm = maxShopSquareMm(state.squaresX, state.squaresY, sizeId);
             if (squareMm !== null) {
                 shopSizeHint = interpolate(S.shopSizeBandHint, {
-                    distance: distanceLabel(state.distanceId, prefersImperialUnits()),
+                    distance: distanceLabel(state.distanceId, IMPERIAL),
                     size: shopSizeById(sizeId).name,
                     mm: squareMm,
                 });
@@ -2133,13 +2097,16 @@ function wireUi(): void {
 function boot(): void {
     (byId('brandLogo') as HTMLImageElement).src = freemocapLogoUrl;
     initTheme();
-    scaleScene = mountScaleScene(byId('scaleScene'), prefersImperialUnits);
+    initStaticUi();
+    scaleScene = mountScaleScene(byId('scaleScene'), IMPERIAL);
     wireUi();
     initAdvancedFoldout();
     // A literal in release builds, so the dev-only UI is left out of the bundle.
     if (IS_DEV) {
         initDevQrLinkTargetUi();
     }
+    // The default board; a chart link then replaces it (taking the board over) where it gives one.
+    applyAutoPreset();
     applyQrQueryFromLocation();
     syncQrVersionBanner();
     syncUi();

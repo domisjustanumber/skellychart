@@ -7,7 +7,6 @@ import {BOARD_GRID_MAX, BOARD_GRID_MIN, CHARUCO_SQUARE_MM_MAX, CHARUCO_SQUARE_MM
 import {gridFeasibility, type PageStep} from './feasibilityRules.js';
 import {paperById, type PaperId} from './papers.js';
 import {isLargeSheet} from './sheetGeometry.js';
-import type {TilingInfo} from './tiling.js';
 
 export {CHARUCO_SQUARE_MM_MAX, CHARUCO_SQUARE_MM_MIN} from './constants.js';
 export {printedLayout} from './tiling.js';
@@ -181,24 +180,4 @@ export function sheetColorRgb(sheetIndex1Based: number, totalPages: number): [nu
         return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))));
     };
     return [f(0), f(8), f(4)];
-}
-
-export function layoutSummaryText(
-    tiling: TilingInfo | null,
-    squaresX: number,
-    squaresY: number,
-    squareMm: number,
-    sheetCountOne: (n: number) => string,
-    sheetArrangement: (cols: number, rows: number) => string,
-    layoutStats: (sx: number, sy: number, mm: number) => string,
-    layoutCannotFit: string,
-): string {
-    if (!tiling) {
-        return layoutCannotFit;
-    }
-    const partA = sheetCountOne(tiling.pageCount);
-    const partC =
-        tiling.pageCount > 1 ? sheetArrangement(tiling.npx, tiling.npy) : '';
-    const partD = layoutStats(squaresX, squaresY, squareMm);
-    return `${partA}${partC}${partD}`;
 }

@@ -13,3 +13,9 @@ export async function yieldToMain(): Promise<void> {
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
+
+/** {@link yieldToMain}, then throws `signal`'s `AbortError` if it was aborted meanwhile. */
+export async function yieldToMainUnlessAborted(signal: AbortSignal): Promise<void> {
+    await yieldToMain();
+    signal.throwIfAborted();
+}

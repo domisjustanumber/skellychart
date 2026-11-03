@@ -25,8 +25,8 @@ import {
     QR_SIZE_MM,
     SKELLY_TOP_HEIGHT_MM,
 } from './constants.js';
-import {helveticaTextWidthPx} from './helveticaMetrics.js';
-import {sheetSafeMarginsMm} from './sheetGeometry.js';
+import {HELVETICA_CAP_HEIGHT_EM, helveticaTextWidthPx} from './helveticaMetrics.js';
+import {sheetSafeRectPx} from './sheetGeometry.js';
 import {interpolate, pdfLabels} from './labels.js';
 import {SKELLY_LOGO_NATURAL_W_OVER_H} from './skellyLogo.js';
 
@@ -64,7 +64,7 @@ export interface OriginBannerLayoutParams {
     instructions?: 'chart' | 'guide';
     /**
      * Cap height (em) of the face the banner is drawn in, for centring the write-in label on its box:
-     * 0.718 for Helvetica (default); outlined shop text passes `GLYPH_CAP_HEIGHT_EM`.
+     * `HELVETICA_CAP_HEIGHT_EM` (default); outlined shop text passes `GLYPH_CAP_HEIGHT_EM`.
      */
     capHeightEm?: number;
     /** Sheet size (mm) as printed, after any landscape swap; the full banner fills its safe margins. */
@@ -75,8 +75,6 @@ export interface OriginBannerLayoutParams {
     squareLengthMm: number;
     squaresX: number;
     squaresY: number;
-    /** `false` when the logo is unavailable: the banner then leaves no room for it. */
-    hasLogo: boolean;
 }
 
 export interface OriginBannerLayout {
@@ -92,7 +90,10 @@ export interface OriginBannerLayout {
     bannerTitleTop: number;
     /** `hanging` baseline of the column titles. */
     bannerTextTop: number;
-    /** Logo box at `bannerLeft`, `bannerTitleTop`; 0 × 0 without the logo. */
+    /**
+     * Logo box at `bannerLeft`, `bannerTitleTop`. It is kept when the logo did not load, so the banner is
+     * still the height tiling reserved.
+     */
     logoWidthPx: number;
     logoHeightPx: number;
     qrX: number;
@@ -156,21 +157,18 @@ export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBann
     if (!compact && !params.instructions) {
         throw new Error('A full banner needs its instructions.');
     }
-    const margins = compact ? null : sheetSafeMarginsMm(paperWMm, paperHMm);
-    const marginTopPx = margins ? Math.ceil(margins.top * ppm) : params.box!.topPx;
+    const safe = compact ? null : sheetSafeRectPx(paperWMm, paperHMm, ppm);
+    const marginTopPx = safe ? safe.top : params.box!.topPx;
     const {titleFontPx, bodyFontPx, bodyLineLead, vGap} = BANNER_TYPE_PX;
-    const bannerLeft = margins ? Math.ceil(margins.left * ppm) : params.box!.leftPx;
-    // Rounded inwards from the exact sheet size (Letter and Tabloid are not whole px).
-    const bannerRightInner = margins ? Math.floor((paperWMm - margins.right) * ppm) : params.box!.rightPx;
+    const bannerLeft = safe ? safe.left : params.box!.leftPx;
+    const bannerRightInner = safe ? safe.right : params.box!.rightPx;
     const bannerTitleTop = marginTopPx;
     const bannerTextTop = bannerTitleTop + Math.round(ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM * ppm);
-    const logoWidthPx = params.hasLogo ? BANNER_LOGO_PX.widthPx : 0;
-    const logoHeightPx = params.hasLogo ? BANNER_LOGO_PX.heightPx : 0;
+    const {widthPx: logoWidthPx, heightPx: logoHeightPx} = BANNER_LOGO_PX;
     const qrSizePx = BANNER_QR_PX;
     const qrX = bannerRightInner - qrSizePx;
     const gapInstBoard = Math.round(ORIGIN_GAP_BOARD_INFO_TO_INSTRUCTIONS_MM * ppm);
-    const instrLeft =
-        bannerLeft + logoWidthPx + (logoWidthPx > 0 ? Math.round(ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM * ppm) : 0);
+    const instrLeft = bannerLeft + logoWidthPx + Math.round(ORIGIN_GAP_SKELLY_TO_INSTRUCTIONS_MM * ppm);
     // The compact banner has no instructions column, so chart info may run up to the logo.
     const minInstColPx = compact ? 0 : Math.max(1, Math.round(12 * ppm));
     const chart = `${squareLengthMm} mm, ${squaresX}×${squaresY}, v${version}`;
@@ -204,8 +202,8 @@ export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBann
     const w = Math.round(ORIGIN_WRITE_IN_BOX_W_MM * ppm);
     const h = Math.round(ORIGIN_WRITE_IN_BOX_H_MM * ppm);
     const boxTop = y + gap;
-    // The `hanging` baseline sits at the cap top (0.718 em for Helvetica).
-    const textY = boxTop + Math.round((h - (params.capHeightEm ?? 0.718) * bodyFontPx) / 2);
+    // The `hanging` baseline sits at the cap top.
+    const textY = boxTop + Math.round((h - (params.capHeightEm ?? HELVETICA_CAP_HEIGHT_EM) * bodyFontPx) / 2);
     let right = boardInfoRight;
     boardInfoLines.push({text: after, right, y: textY});
     right -= helveticaTextWidthPx(after, bodyFontPx) + gap;
@@ -298,7 +296,6 @@ export function originBannerReserveMm(paperWMm: number, paperHMm: number): numbe
             squareLengthMm: CHARUCO_SQUARE_MM_MAX,
             squaresX: BOARD_GRID_MAX,
             squaresY: BOARD_GRID_MAX,
-            hasLogo: true,
         });
         mm = originBannerStripPx(layout) / PIXELS_PER_MM;
         reserveMmBySheet.set(key, mm);

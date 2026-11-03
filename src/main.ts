@@ -2,7 +2,7 @@ import {APP_VERSION} from './appVersion.js';
 import {IS_DEV} from './env.js';
 import freemocapLogoUrl from './freemocapLogoUrl.js';
 import {renderCharucoPrintSvg} from './print/svgDocument.js';
-import {svgAssembledChartWithSheetNumbers} from './print/svgAssemblyCore.js';
+import {svgAssembledChartWithSheetNumbers} from './print/assemblyGuideSvg.js';
 import {
     BOARD_GRID_MAX,
     BOARD_GRID_MIN,
@@ -82,7 +82,7 @@ import {
 } from './ui/previewSvg.js';
 import {buildPdfBlobFromSvgPages} from './ui/pdfExport.js';
 import {mountScaleScene} from './ui/scaleScene.js';
-import {yieldToMain} from './ui/yieldToMain.js';
+import {yieldToMain, yieldToMainUnlessAborted} from './ui/yieldToMain.js';
 import {
     applyThemePreference,
     getStoredPreference,
@@ -1386,9 +1386,9 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
         const {squaresX: px, squaresY: py} = state;
         const {paperWMm, paperHMm} = tiling;
 
-        const allPages = buildPageSpecs(px, py, tiling);
         // Only the thumbnails that are shown are rendered; sheet headers still count every chart sheet.
-        const pages = allPages.slice(0, MAX_PREVIEW_PAGES);
+        const pages = buildPageSpecs(px, py, tiling).slice(0, MAX_PREVIEW_PAGES);
+        const layoutN = tiling.pageCount;
 
         let printResult: Awaited<ReturnType<typeof renderCharucoPrintSvg>>;
         try {
@@ -1400,9 +1400,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                 markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
                 tiling,
                 pages,
-                totalPages: allPages.length,
-                signal,
-                cooperativeYield: true,
+                betweenSheets: () => yieldToMainUnlessAborted(signal),
             });
         } catch (e) {
             if ((e as Error).name === 'AbortError') {
@@ -1422,7 +1420,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
 
         try {
             const tThumbs = IS_DEV ? performance.now() : 0;
-            const pageImages = printResult.pages.slice(0, MAX_PREVIEW_PAGES).map((svg) => svgToDataUrl(svg));
+            const pageImages = printResult.pages.map((svg) => svgToDataUrl(svg));
             if (IS_DEV) {
                 perfLog(
                     'preview thumbs (svgToDataUrl × N)',
@@ -1431,10 +1429,9 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                 );
             }
             const guideImage = printResult.guide ? svgToDataUrl(printResult.guide.svg) : null;
-            const totalPages = printResult.totalPages;
             // A single sheet is shown as printed; several as the assembled chart with its sheet numbers.
             const sceneChart =
-                totalPages <= 1
+                layoutN <= 1
                     ? {href: pageImages[0]!, widthMm: paperWMm, heightMm: paperHMm, isSheet: true}
                     : {
                           href: svgToDataUrl(
@@ -1444,7 +1441,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                           heightMm: py * state.squareMm,
                           isSheet: false,
                       };
-            const truncated = totalPages > MAX_PREVIEW_PAGES;
+            const truncated = layoutN > MAX_PREVIEW_PAGES;
             if (signal.aborted) {
                 return;
             }
@@ -1457,13 +1454,12 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                 // Counts printed sheets, like the sheets stepper: the guide thumbnail is one of them.
                 trunc.textContent = interpolate(S.truncatedPreview, {
                     shown: pageImages.length + (guideImage ? 1 : 0),
-                    total: printedSheetCount(totalPages),
+                    total: printedSheetCount(layoutN),
                 });
             }
             thumbs.innerHTML = '';
-            const layoutN = tiling.pageCount;
             // A single sheet is the whole chart, so it has no page caption.
-            const singlePage = totalPages <= 1;
+            const singlePage = layoutN <= 1;
             if (guideImage) {
                 // The assembly guide prints first and is unnumbered.
                 const wrap = document.createElement('div');
@@ -1491,7 +1487,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                 img.className = 'thumb-img';
                 img.src = src;
                 img.alt = interpolate(S.pageLabel, {n: i + 1});
-                if (layoutN > 1 && totalPages > 1) {
+                if (!singlePage) {
                     // Same palette as the full-chart blocks so each thumbnail matches its block's colour.
                     img.style.border = `2px solid ${rgbCss(sheetColorRgb(i + 1, layoutN))}`;
                 }
@@ -1759,9 +1755,8 @@ async function savePdfFile(): Promise<void> {
             markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
             tiling,
             pages,
-            signal,
             // Keep the busy label/spinner alive while many sheets are assembled.
-            cooperativeYield: true,
+            betweenSheets: () => yieldToMainUnlessAborted(signal),
         });
         const blob = await buildPdfBlobFromSvgPages(
             [
@@ -1851,7 +1846,6 @@ async function openPrintDialog(): Promise<void> {
             markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
             tiling,
             pages,
-            cooperativeYield: false,
         });
         const [pageWCss, pageHCss] = svgRootOuterSizeAttrs(paperWMm, paperHMm, paperById(paperId).units);
         // The guide may be turned the other way from the chart sheets, so it prints on its own named page.

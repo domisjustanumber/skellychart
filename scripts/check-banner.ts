@@ -23,7 +23,7 @@ import {
     SHEET_HEADER_FONT_PX,
 } from '../src/print/constants.js';
 import {GLYPH_CAP_HEIGHT_EM} from '../src/print/glyphOutlines.generated.js';
-import {helveticaTextWidthPx} from '../src/print/helveticaMetrics.js';
+import {HELVETICA_CAP_HEIGHT_EM, helveticaTextWidthPx} from '../src/print/helveticaMetrics.js';
 import {
     compactBannerHeightMm,
     compactBannerMinWidthPx,
@@ -34,8 +34,7 @@ import {
 import {sheetSafeMarginsMm} from '../src/print/sheetGeometry.js';
 import {SHOP_SQUARE_MM_MAX} from '../src/print/shopSizes.js';
 
-/** Helvetica cap height and descender (em), for the header's ink. */
-const CAP_HEIGHT_EM = 0.718;
+/** Helvetica descender (em), for the header's ink. */
 const DESCENDER_EM = 0.207;
 
 const failures: string[] = [];
@@ -65,7 +64,7 @@ for (const paper of PAPERS) {
     ] as const) {
         const sheet = `${paper.id} ${orientation}`;
         const m = sheetSafeMarginsMm(widthMm, heightMm);
-        if (headerBaselineMm - CAP_HEIGHT_EM * headerFontMm < m.top) {
+        if (headerBaselineMm - HELVETICA_CAP_HEIGHT_EM * headerFontMm < m.top) {
             failures.push(`${sheet}: the header's caps reach above the ${m.top} mm safe top margin`);
         }
         if (headerBaselineMm + DESCENDER_EM * headerFontMm >= MM_HEADER_CONTENT_TOP_MM) {
@@ -88,7 +87,6 @@ for (const paper of PAPERS) {
                                     squareLengthMm,
                                     squaresX,
                                     squaresY,
-                                    hasLogo: true,
                                 });
                                 if (instructions === 'chart') {
                                     const px = originBannerStripPx(layout);
@@ -126,7 +124,7 @@ for (const version of VERSIONS) {
     for (const squareLengthMm of widthRepresentatives(CHARUCO_SQUARE_MM_MIN, SHOP_SQUARE_MM_MAX)) {
         for (const squaresX of gridCounts) {
             for (const squaresY of gridCounts.filter((y) => y <= boardGridAxisMax(squaresX))) {
-                const params = {version, squareLengthMm, squaresX, squaresY, hasLogo: true, capHeightEm: GLYPH_CAP_HEIGHT_EM};
+                const params = {version, squareLengthMm, squaresX, squaresY, capHeightEm: GLYPH_CAP_HEIGHT_EM};
                 bannerHeights.add(Math.round(compactBannerHeightMm(params) * 1e6) / 1e6);
                 widestBannerPx = Math.max(widestBannerPx, compactBannerMinWidthPx(params));
                 bannerLayouts++;
@@ -142,7 +140,7 @@ if (widestBannerPx / PIXELS_PER_MM > 110) {
 }
 {
     // At its minimum width the banner lays out; one px narrower a chart-info line would wrap.
-    const params = {version: VERSIONS[0]!, squareLengthMm: 260, squaresX: 20, squaresY: 25, hasLogo: true};
+    const params = {version: VERSIONS[0]!, squareLengthMm: 260, squaresX: 20, squaresY: 25};
     const minPx = compactBannerMinWidthPx(params);
     const at = (w: number) => {
         try {

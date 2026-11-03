@@ -6,10 +6,9 @@ import QRCode from 'qrcode';
  * The dark modules are one filled path (a rectangle per horizontal run), not `node-qrcode`'s SVG: that
  * strokes each row as a 1-unit line, and renderers anti-alias every stroke edge on its own, which
  * leaves hairline white seams between rows on screen and in printed PDFs. A single path is filled as
- * one shape, so neighbouring modules meet without a gap. `sizePx` is unused (the code is vector) but
- * kept so callers state the size they place it at.
+ * one shape, so neighbouring modules meet without a gap.
  */
-export async function generateQrSvgFragment(url: string, _sizePx: number): Promise<string> {
+export function generateQrSvgFragment(url: string): string {
     // Pin M (qrcode's default) so a library upgrade cannot silently shrink printed modules.
     const {modules} = QRCode.create(url, {errorCorrectionLevel: 'M'});
     const n = modules.size;

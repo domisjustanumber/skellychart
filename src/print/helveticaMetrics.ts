@@ -75,3 +75,9 @@ export function helveticaTextWidthPx(text: string, fontPx: number, bold = false)
     }
     return (units * fontPx) / 1000;
 }
+
+/** Helvetica cap height (em), from the AFM's `CapHeight 718`: where a `hanging` baseline sits. */
+export const HELVETICA_CAP_HEIGHT_EM = 0.718;
+
+/** Helvetica-Bold digit height (em): the top of the zero's bounding box in the AFM (710). */
+export const HELVETICA_BOLD_DIGIT_HEIGHT_EM = 0.71;

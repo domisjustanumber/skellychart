@@ -12,15 +12,11 @@ export interface PrintSvgParams {
     tiling: TilingInfo;
     /** Sheets to render; may be a leading subset of the layout (e.g. preview thumbnails). */
     pages: PageSpec[];
-    /** Chart sheets in the whole layout, for the header's "Page N of M"; defaults to `pages.length`. */
-    totalPages?: number;
-    signal?: AbortSignal;
     /**
-     * When unset or true, `renderCharucoPrintSvgCore` awaits {@link yieldToMain} between sheets
-     * so spinners/layout can update. Passing `false` skips yields (fastest bulk export but can
-     * freeze the UI for large page counts).
+     * Awaited before each sheet, so the caller can let the page repaint (`yieldToMain`); may throw to
+     * abort. Unset, the sheets are made without a break.
      */
-    cooperativeYield?: boolean;
+    betweenSheets?: () => Promise<void> | void;
 }
 
 export interface PrintSvgAssemblyParams extends PrintSvgParams {
@@ -29,7 +25,7 @@ export interface PrintSvgAssemblyParams extends PrintSvgParams {
     chartUrl: string;
     /**
      * Inner markup only (no outer `<svg>`); nested on the sheet for Inkscape/browser compatibility.
-     * `null` when the logo did not load: the banner then leaves no room for it.
+     * `null` when the logo did not load: the banner then leaves its box empty.
      */
     logoSvgInner: string | null;
 }
@@ -43,7 +39,6 @@ export interface PrintSheetSvg {
 
 export interface PrintSvgResult {
     pages: string[];
-    totalPages: number;
     /** Assembly guide printed before the chart sheets; `null` for a single-sheet chart. */
     guide: PrintSheetSvg | null;
 }

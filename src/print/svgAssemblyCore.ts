@@ -1,11 +1,4 @@
-import {
-    charucoBoardPixelLayout,
-    charucoCropXRange,
-    charucoCropYRange,
-    renderCharucoBoardSvgFragment,
-} from '../charuco/board.js';
-import type {CharucoGeometry} from '../charuco/board.js';
-import {APP_VERSION_DISPLAY} from '../appVersion.js';
+import {charucoBoardPixelLayout, charucoCropXRange, charucoCropYRange, renderCharucoBoardSvgFragment} from '../charuco/board.js';
 import {
     JOIN_MEET_DASH_RGB,
     MM_HEADER_CONTENT_TOP_MM,
@@ -13,38 +6,21 @@ import {
     MM_SHEET_HEADER_BASELINE_MM,
     MM_SHEET_HEADER_GAP_MM,
     MM_TAPE_LABEL_INSET_FROM_JOIN_MM,
-    ORIGIN_CORNER_MARKER_PAD_MM,
-    ORIGIN_CORNER_MARKER_TOP_ROOM_MM,
-    ORIGIN_MARKER_AXIS_X_RGB,
-    ORIGIN_MARKER_AXIS_Y_RGB,
     PIXELS_PER_MM,
     SHEET_HEADER_FONT_PX,
 } from './constants.js';
-import {sheetColorRgb} from './charucoLayout.js';
+import {svgAssemblyGuideSheet} from './assemblyGuideSvg.js';
 import {helveticaTextWidthPx} from './helveticaMetrics.js';
 import {interpolate, pdfLabels} from './labels.js';
-import {BANNER_TYPE_PX, layoutOriginBanner, type OriginBannerLayout, wrapHelvetica} from './originBannerLayout.js';
-import {paperById, type PaperId} from './papers.js';
-import {buildPageSpecs, type PageSpec, type TilingInfo} from './tiling.js';
-import type {PrintSheetSvg, PrintSvgAssemblyParams, PrintSvgResult} from './svgAssemblyTypes.js';
-import type {OutlineTextOptions} from './outlineText.js';
+import {originBannerSvg, type OriginBannerInputs} from './originBannerSvg.js';
+import {paperById} from './papers.js';
 import {perfLog, perfNote} from './perfDebug.js';
-import {boardRegionMm, type EdgesMm, originMarkerRoomMm, sheetSafeMarginsMm} from './sheetGeometry.js';
-import {SKELLY_LOGO_VIEWBOX_H, SKELLY_LOGO_VIEWBOX_W} from './skellyLogo.js';
-import {escapeXml, rgbCss, svgRootOpen, svgRootOuterSizeAttrs, SVG_ROOT_CLOSE} from './svgUtils.js';
-import {yieldToMain} from '../ui/yieldToMain.js';
+import {boardRegionMm, originMarkerRoomMm, type SafeRectPx, type SeamSides, seamSides, sheetSafeRectPx} from './sheetGeometry.js';
+import type {PrintSvgAssemblyParams, PrintSvgResult} from './svgAssemblyTypes.js';
+import {FONT, printedBoard, svgCornerMarker} from './svgPrimitives.js';
+import {escapeXml, rgbCss, svgRootOuterSizeAttrs, svgSheetRoot} from './svgUtils.js';
+import type {PageSpec, TilingInfo} from './tiling.js';
 import {IS_DEV} from '../env.js';
-
-/**
- * Helvetica is a PDF standard font, so Save as PDF (svg2pdf) draws the face the banner is wrapped with
- * (`helveticaMetrics.ts`). The rest are its metric-compatible stand-ins for Print where Helvetica is not
- * installed (Arial on Windows; Liberation Sans, Arimo or Nimbus Sans on Linux and ChromeOS).
- */
-const FONT = "Helvetica, Arial, 'Liberation Sans', Arimo, 'Nimbus Sans', sans-serif";
-
-function layoutIntPx(x: number): number {
-    return Math.max(0, Math.floor(x));
-}
 
 function joinDashGapPpm(ppm: number): [number, number] {
     const dash = Math.max(4, Math.round(1.0 * ppm));
@@ -69,78 +45,25 @@ function measureCtx(): CanvasRenderingContext2D {
     return measureCanvas.getContext('2d')!;
 }
 
-function svgDashedVline(x: number, y0: number, y1: number, ppm: number): string {
-    if (y1 < y0) {
-        return '';
-    }
-    const [dash, gap] = joinDashGapPpm(ppm);
-    const stroke = rgbCss(JOIN_MEET_DASH_RGB);
-    const parts: string[] = [];
-    let y = y0;
-    while (y <= y1) {
-        const yEnd = Math.min(y + dash - 1, y1);
-        parts.push(
-            `<line x1="${x}" y1="${y}" x2="${x}" y2="${yEnd}" stroke="${stroke}" stroke-width="1"/>`,
-        );
-        y = yEnd + 1 + gap;
-    }
-    return parts.join('');
-}
-
-function svgDashedHline(x0: number, x1: number, y: number, ppm: number): string {
-    if (x1 < x0) {
-        return '';
-    }
-    const [dash, gap] = joinDashGapPpm(ppm);
-    const stroke = rgbCss(JOIN_MEET_DASH_RGB);
-    const parts: string[] = [];
-    let x = x0;
-    while (x <= x1) {
-        const xEnd = Math.min(x + dash - 1, x1);
-        parts.push(
-            `<line x1="${x}" y1="${y}" x2="${xEnd}" y2="${y}" stroke="${stroke}" stroke-width="1"/>`,
-        );
-        x = xEnd + 1 + gap;
-    }
-    return parts.join('');
-}
-
 /**
- * Draws one line of text in place of a `<text>` element: print-shop sheets pass `outlineText`, so their
- * text is paths. Home sheets leave it out and keep their `<text>` markup.
+ * Dashed cut line along a seam, as whole-px `<line>` segments: vertical (`v`) at x = `at` from y = `from`
+ * to `to` inclusive, or horizontal (`h`) at y = `at` from x = `from` to `to`.
  */
-export type SvgTextEmitter = (text: string, opts: OutlineTextOptions) => string;
-
-/** Origin corner marker: X / Y arrows and their labels at the board's top-left corner (`cx`, `cy`). */
-export function svgCornerMarker(ppm: number, cx: number, cy: number, emitText?: SvgTextEmitter): string {
-    const g = Math.max(1, Math.round(ORIGIN_CORNER_MARKER_PAD_MM * ppm));
-    const ax = 8 * ppm;
-    const colX = rgbCss(ORIGIN_MARKER_AXIS_X_RGB);
-    const colY = rgbCss(ORIGIN_MARKER_AXIS_Y_RGB);
-    const ix = cx - g;
-    const iy = cy - g;
-    const lw = Math.max(1, Math.floor(ppm / 2));
-    const tri = Math.max(1, (ppm * 4) / 5);
-    const hx = Math.max(0, ax - 2 * tri);
-    const hy = Math.max(0, ax - 2 * tri);
-    const fontPx = Math.max(28, Math.round(ax * 0.4));
-    const labelGap = Math.max(8, Math.round(0.75 * ppm));
-    const xLabel = {x: ix + ax + 2 * labelGap, y: iy};
-    const yLabel = {x: ix, y: iy + ax + 2 * labelGap + labelGap};
-    const labels = emitText
-        ? emitText('x', {...xLabel, fontPx, anchor: 'middle', baseline: 'middle', fill: colX}) +
-          emitText('y', {...yLabel, fontPx, anchor: 'middle', baseline: 'middle', fill: colY})
-        : `<text x="${xLabel.x}" y="${xLabel.y}" fill="${colX}" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle" dominant-baseline="middle">x</text>` +
-          `<text x="${yLabel.x}" y="${yLabel.y}" fill="${colY}" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle" dominant-baseline="middle">y</text>`;
-    return (
-        `<g stroke-linecap="square" stroke-linejoin="miter">` +
-        `<line x1="${ix}" y1="${iy}" x2="${ix + hx}" y2="${iy}" stroke="${colX}" stroke-width="${lw}"/>` +
-        `<line x1="${ix}" y1="${iy}" x2="${ix}" y2="${iy + hy}" stroke="${colY}" stroke-width="${lw}"/>` +
-        `<polygon points="${ix + ax},${iy} ${ix + ax - tri * 2},${iy - tri} ${ix + ax - tri * 2},${iy + tri}" fill="${colX}"/>` +
-        `<polygon points="${ix},${iy + ax} ${ix - tri},${iy + ax - tri * 2} ${ix + tri},${iy + ax - tri * 2}" fill="${colY}"/>` +
-        labels +
-        `</g>`
-    );
+function svgDashedSeam(axis: 'v' | 'h', at: number, from: number, to: number, ppm: number): string {
+    if (to < from) {
+        return '';
+    }
+    const [dash, gap] = joinDashGapPpm(ppm);
+    const stroke = rgbCss(JOIN_MEET_DASH_RGB);
+    const parts: string[] = [];
+    let p = from;
+    while (p <= to) {
+        const end = Math.min(p + dash - 1, to);
+        const [x1, y1, x2, y2] = axis === 'v' ? [at, p, at, end] : [p, at, end, at];
+        parts.push(`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${stroke}" stroke-width="1"/>`);
+        p = end + 1 + gap;
+    }
+    return parts.join('');
 }
 
 /**
@@ -153,13 +76,12 @@ function svgSheetHeader(
     middle: string,
     right: string,
     paperWMm: number,
-    margins: EdgesMm,
+    safe: SafeRectPx,
     ppm: number,
     fontPx: number,
 ): string {
-    // Rounded inwards from the exact sheet size (Letter and Tabloid are not whole px).
-    const leftX = Math.ceil(margins.left * ppm);
-    const rightX = Math.floor((paperWMm - margins.right) * ppm);
+    const leftX = safe.left;
+    const rightX = safe.right;
     const innerW = rightX - leftX;
     const gap = Math.round(MM_SHEET_HEADER_GAP_MM * ppm);
     const width = (t: string, px: number): number => (t ? helveticaTextWidthPx(t, px) : 0);
@@ -185,313 +107,6 @@ function svgSheetHeader(
     );
 }
 
-function svgTextBlock(
-    lines: string[],
-    x: number,
-    yStart: number,
-    lineLead: number,
-    anchor: 'start' | 'end',
-    font: string,
-    bold = false,
-): string {
-    const weight = bold ? ' font-weight="bold"' : '';
-    const anchorAttr = anchor === 'end' ? ' text-anchor="end"' : '';
-    const fontPx = font.match(/\d+/)?.[0] ?? '26';
-    const tspans: string[] = [];
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const inner = line === '' ? '&#xa0;' : escapeXml(line);
-        if (i === 0) {
-            tspans.push(`<tspan>${inner}</tspan>`);
-        } else {
-            tspans.push(`<tspan x="${x}" dy="${lineLead}">${inner}</tspan>`);
-        }
-    }
-    return `<text x="${x}" y="${yStart}" fill="#000" font-size="${fontPx}" font-family="${FONT}"${anchorAttr}${weight} dominant-baseline="hanging">${tspans.join('')}</text>`;
-}
-
-/**
- * One right-aligned `<text>`: bold title line + body pieces placed by `layoutOriginBanner`, then the
- * write-in box for the measured square length. With `emitText`, each line is drawn by it instead.
- */
-export function svgCharucoBoardInfoBlock(
-    x: number,
-    yStart: number,
-    titleLine: string,
-    titleFontPx: number,
-    bodyLines: OriginBannerLayout['boardInfoLines'],
-    bodyFontPx: number,
-    writeInBox: OriginBannerLayout['writeInBox'],
-    ppm: number,
-    emitText?: SvgTextEmitter,
-): string {
-    const sw = Math.max(1, Math.round(0.25 * ppm));
-    const box = `<rect x="${writeInBox.x + sw / 2}" y="${writeInBox.y + sw / 2}" width="${writeInBox.w - sw}" height="${writeInBox.h - sw}" fill="#fff" stroke="#000" stroke-width="${sw}"/>`;
-    if (emitText) {
-        const title = emitText(titleLine, {x, y: yStart, fontPx: titleFontPx, bold: true, anchor: 'end', baseline: 'hanging'});
-        const body = bodyLines.map(({text, right, y}) =>
-            emitText(text, {x: right, y, fontPx: bodyFontPx, anchor: 'end', baseline: 'hanging'}),
-        );
-        return title + body.join('') + box;
-    }
-    const titleEscaped = escapeXml(titleLine);
-    const bodyTspans = bodyLines.map(({text, right, y}) => {
-        const inner = text === '' ? '&#xa0;' : escapeXml(text);
-        return `<tspan x="${right}" y="${y}" font-size="${bodyFontPx}" font-weight="normal">${inner}</tspan>`;
-    });
-    return `<text x="${x}" y="${yStart}" fill="#000" font-size="${titleFontPx}" font-family="${FONT}" text-anchor="end" dominant-baseline="hanging"><tspan font-weight="bold">${titleEscaped}</tspan>${bodyTspans.join('')}</text>${box}`;
-}
-
-/** Largest share of a block's width / height a guide page number may cover, as in the on-screen preview. */
-const GUIDE_NUMBER_MAX_BLOCK_FRACTION = 0.5;
-/** Black outline round the guide's white page numbers (em). */
-const GUIDE_NUMBER_STROKE_EM = 0.18;
-/** Helvetica Bold digit height (em). */
-const GUIDE_DIGIT_HEIGHT_EM = 0.71;
-/**
- * Largest scale the guide draws the board at, so it never prints a full-size (or nearly full-size)
- * copy of the board that could be measured or calibrated from by mistake.
- */
-const GUIDE_MAX_BOARD_SCALE = 0.8;
-/** Room left of and above the guide's board for the origin corner marker (mm). */
-const GUIDE_CORNER_MARKER_ROOM_MM = ORIGIN_CORNER_MARKER_TOP_ROOM_MM;
-/** Gap between the guide's title, board and text (mm). */
-const GUIDE_GAP_MM = 4;
-/** Longest guide text line (mm), so landscape sheets don't run it the full width. */
-const GUIDE_TEXT_MAX_W_MM = 190;
-
-interface GuideTextLine {
-    /** List number ("1.") drawn at the left edge; the text then starts at `indent`. */
-    label: string;
-    text: string;
-    indent: number;
-    y: number;
-}
-
-/** Guide body lines from the top (0): numbered items wrap with a hanging indent, after a small gap. */
-function wrapGuideBody(body: string, fontPx: number, lineLead: number, maxW: number): {lines: GuideTextLine[]; height: number} {
-    const lines: GuideTextLine[] = [];
-    let y = 0;
-    let listStarted = false;
-    for (const para of body.split('\n')) {
-        const num = /^(\d+\.)\s+/.exec(para);
-        if (!num) {
-            for (const text of wrapHelvetica(para, fontPx, false, maxW)) {
-                lines.push({label: '', text, indent: 0, y});
-                y += lineLead;
-            }
-            continue;
-        }
-        if (!listStarted) {
-            y += Math.round(lineLead / 2);
-            listStarted = true;
-        }
-        const label = num[1]!;
-        const indent = Math.ceil(helveticaTextWidthPx(`${label} `, fontPx));
-        wrapHelvetica(para.slice(num[0].length), fontPx, false, maxW - indent).forEach((text, i) => {
-            lines.push({label: i === 0 ? label : '', text, indent, y});
-            y += lineLead;
-        });
-    }
-    return {lines, height: y};
-}
-
-/**
- * A numbered, colour-coded block per chart sheet over a board laid out on a `boardWPx`×`boardHPx` canvas
- * and drawn at (`at.x`, `at.y`), scaled by `at.scale`: outlined in the sheet's colour and, with `at.tint`,
- * washed with it. Every page number gets one size, the largest that fits every block, so no number is left out.
- * A single-sheet chart has no blocks.
- */
-function svgSheetBlocks(
-    squaresX: number,
-    squaresY: number,
-    tiling: TilingInfo,
-    boardWPx: number,
-    boardHPx: number,
-    at: {x: number; y: number; scale: number; strokePx: number; tint: boolean},
-): string[] {
-    const parts: string[] = [];
-    if (tiling.pageCount <= 1) {
-        return parts;
-    }
-    const layout = charucoBoardPixelLayout(boardWPx, boardHPx, squaresX, squaresY);
-    const dw = boardWPx * at.scale;
-    const dh = boardHPx * at.scale;
-    const blocks = buildPageSpecs(squaresX, squaresY, tiling).map((page) => {
-        const [l, r] = charucoCropXRange(page.gx0, page.gx1, layout);
-        const [t, b] = charucoCropYRange(page.gy0, page.gy1, layout);
-        return {
-            sheetIndex: page.sheetIndex,
-            x: at.x + (l / boardWPx) * dw,
-            y: at.y + (t / boardHPx) * dh,
-            w: ((r - l) / boardWPx) * dw,
-            h: ((b - t) / boardHPx) * dh,
-            label: String(page.sheetIndex),
-        };
-    });
-    const sw = at.strokePx;
-    for (const b of blocks) {
-        const [cr, cg, cb] = sheetColorRgb(b.sheetIndex, tiling.pageCount);
-        const fill = at.tint ?`fill="rgb(${cr},${cg},${cb})" fill-opacity="0.3"` : 'fill="none"';
-        parts.push(
-            `<rect x="${b.x + sw / 2}" y="${b.y + sw / 2}" width="${Math.max(0, b.w - sw)}" height="${Math.max(0, b.h - sw)}" ${fill} stroke="rgb(${cr},${cg},${cb})" stroke-width="${sw}"/>`,
-        );
-    }
-
-    const fs = Math.min(
-        ...blocks.map((b) => {
-            const inkW = helveticaTextWidthPx(b.label, 1, true) + GUIDE_NUMBER_STROKE_EM;
-            const inkH = GUIDE_DIGIT_HEIGHT_EM + GUIDE_NUMBER_STROKE_EM;
-            return Math.min((b.w * GUIDE_NUMBER_MAX_BLOCK_FRACTION) / inkW, (b.h * GUIDE_NUMBER_MAX_BLOCK_FRACTION) / inkH);
-        }),
-    );
-    blocks.forEach((b) => {
-        const cx = Math.round(b.x + b.w / 2);
-        const baseline = Math.round(b.y + b.h / 2 + (GUIDE_DIGIT_HEIGHT_EM * fs) / 2);
-        const font = `font-size="${fs}" font-family="${FONT}" font-weight="bold" text-anchor="middle"`;
-        // svg2pdf draws text strokes far too wide, so the outline is a ring of black copies under the
-        // white digits.
-        const r = (GUIDE_NUMBER_STROKE_EM / 2) * fs;
-        for (let k = 0; k < 16; k++) {
-            const a = (k * Math.PI) / 8;
-            parts.push(
-                `<text x="${(cx + r * Math.cos(a)).toFixed(1)}" y="${(baseline + r * Math.sin(a)).toFixed(1)}" fill="#000" ${font}>${b.label}</text>`,
-            );
-        }
-        parts.push(`<text x="${cx}" y="${baseline}" fill="#fff" ${font}>${b.label}</text>`);
-    });
-    return parts;
-}
-
-/**
- * The assembled multi-sheet chart at full size (`squaresX`×`squaresY` squares of `squareLengthMm`) with
- * the guide's numbered sheet outlines, for the on-screen scale preview. Not printed. The board is left
- * untinted (black on white, as printed) so the preview reads as the real chart.
- */
-export function svgAssembledChartWithSheetNumbers(
-    squaresX: number,
-    squaresY: number,
-    squareLengthMm: number,
-    markerLengthRatio: number,
-    tiling: TilingInfo,
-): string {
-    const ppm = PIXELS_PER_MM;
-    const geom: CharucoGeometry = {
-        squaresX,
-        squaresY,
-        squareLength: squareLengthMm,
-        markerLength: squareLengthMm * markerLengthRatio,
-    };
-    const fullWPx = Math.max(1, layoutIntPx(squaresX * squareLengthMm * ppm));
-    const fullHPx = Math.max(1, layoutIntPx(squaresY * squareLengthMm * ppm));
-    // Block outlines stay a visible share of a sheet however large the chart is drawn.
-    const sw = Math.max(2, Math.round(Math.min(fullWPx / tiling.npx, fullHPx / tiling.npy) * 0.02));
-    return (
-        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fullWPx} ${fullHPx}" width="${fullWPx}" height="${fullHPx}">` +
-        `<rect width="${fullWPx}" height="${fullHPx}" fill="#fff"/>` +
-        renderCharucoBoardSvgFragment(fullWPx, fullHPx, geom) +
-        svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, {x: 0, y: 0, scale: 1, strokePx: sw, tint: false}).join('') +
-        SVG_ROOT_CLOSE
-    );
-}
-
-/**
- * Assembly guide sheet for a multi-sheet chart: the full chart, never rotated (x runs across), with a
- * numbered, colour-coded block per chart sheet as in the on-screen preview, then how to put it together.
- * The origin banner sits above it (so the guide needs no header line). The paper is turned whichever way
- * shows the chart largest.
- */
-function svgAssemblyGuideSheet(o: {
-    paperId: PaperId;
-    /** Chart sheet size (mm); the guide uses the same paper in either orientation. */
-    paperWMm: number;
-    paperHMm: number;
-    geom: CharucoGeometry;
-    tiling: TilingInfo;
-    ppm: number;
-    /** Origin banner laid out for a sheet this size; `bottom` includes the gap below it. */
-    banner: (sheetWMm: number, sheetHMm: number) => {parts: string[]; bottom: number};
-}): PrintSheetSvg {
-    const {paperId, geom, tiling, ppm} = o;
-    const {bodyFontPx, bodyLineLead} = BANNER_TYPE_PX;
-    const {squaresX, squaresY, squareLength} = geom;
-    const fullWPx = Math.max(1, layoutIntPx(squaresX * squareLength * ppm));
-    const fullHPx = Math.max(1, layoutIntPx(squaresY * squareLength * ppm));
-    const gapPx = Math.round(GUIDE_GAP_MM * ppm);
-    const markerRoomPx = Math.round(GUIDE_CORNER_MARKER_ROOM_MM * ppm);
-    const titleFontPx = Math.round(1.4 * bodyFontPx);
-    const body = interpolate(pdfLabels.assemblyGuideBody, {
-        sheets: tiling.pageCount,
-        cols: tiling.npx,
-        rows: tiling.npy,
-    });
-
-    const layoutFor = (wMm: number, hMm: number) => {
-        const m = sheetSafeMarginsMm(wMm, hMm);
-        const left = Math.ceil(m.left * ppm);
-        const right = Math.floor((wMm - m.right) * ppm);
-        const innerW = right - left;
-        const text = wrapGuideBody(body, bodyFontPx, bodyLineLead, Math.min(innerW, Math.round(GUIDE_TEXT_MAX_W_MM * ppm)));
-        const banner = o.banner(wMm, hMm);
-        const titleTop = banner.bottom;
-        const boardTop = titleTop + titleFontPx + gapPx + markerRoomPx;
-        const areaW = innerW - markerRoomPx;
-        const areaH = Math.floor((hMm - m.bottom) * ppm) - boardTop - gapPx - text.height;
-        const fitScale = Math.min(areaW / fullWPx, areaH / fullHPx);
-        return {wMm, hMm, left, right, text, banner, titleTop, boardTop, fitScale};
-    };
-    const candidates = [layoutFor(o.paperWMm, o.paperHMm)];
-    if (Math.abs(o.paperWMm - o.paperHMm) >= 0.01) {
-        candidates.push(layoutFor(o.paperHMm, o.paperWMm));
-    }
-    // Pick by the uncapped fit, so a small chart still gets the orientation that matches its shape.
-    const g = candidates.reduce((best, c) => (c.fitScale > best.fitScale ? c : best));
-    if (!(g.fitScale > 0)) {
-        throw new Error('The assembly guide does not fit on this paper size.');
-    }
-    const scale = Math.min(g.fitScale, GUIDE_MAX_BOARD_SCALE);
-
-    const dw = fullWPx * scale;
-    const dh = fullHPx * scale;
-    // Centre the board and its corner-marker room together between the safe margins.
-    const bx = Math.round(g.left + markerRoomPx + (g.right - g.left - markerRoomPx - dw) / 2);
-    const by = g.boardTop;
-    const parts: string[] = [
-        '<rect width="100%" height="100%" fill="#fff"/>',
-        ...g.banner.parts,
-        `<text x="${g.left}" y="${g.titleTop}" fill="#000" font-size="${titleFontPx}" font-family="${FONT}" font-weight="bold" dominant-baseline="hanging">${escapeXml(pdfLabels.assemblyGuideTitle)}</text>`,
-        `<svg x="${bx}" y="${by}" width="${dw}" height="${dh}" viewBox="0 0 ${fullWPx} ${fullHPx}" overflow="hidden">` +
-            `<rect width="${fullWPx}" height="${fullHPx}" fill="#fff"/>` +
-            renderCharucoBoardSvgFragment(fullWPx, fullHPx, geom) +
-            `</svg>`,
-    ];
-
-    parts.push(
-        ...svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, {x: bx, y: by, scale, strokePx: Math.max(2, Math.round(0.4 * ppm)), tint: true}),
-    );
-    parts.push(svgCornerMarker(ppm, bx, by));
-
-    const textTop = Math.round(by + dh + gapPx);
-    const tspans = g.text.lines.flatMap((l) => {
-        const out: string[] = [];
-        if (l.label) {
-            out.push(`<tspan x="${g.left}" y="${textTop + l.y}">${escapeXml(l.label)}</tspan>`);
-        }
-        out.push(`<tspan x="${g.left + l.indent}" y="${textTop + l.y}">${escapeXml(l.text)}</tspan>`);
-        return out;
-    });
-    parts.push(
-        `<text fill="#000" font-size="${bodyFontPx}" font-family="${FONT}" dominant-baseline="hanging">${tspans.join('')}</text>`,
-    );
-
-    const [wAttr, hAttr] = svgRootOuterSizeAttrs(g.wMm, g.hMm, paperById(paperId).units);
-    return {
-        svg: svgRootOpen(g.wMm * ppm, g.hMm * ppm, wAttr, hAttr) + parts.join('') + SVG_ROOT_CLOSE,
-        paperWMm: g.wMm,
-        paperHMm: g.hMm,
-    };
-}
-
 /**
  * Top-left (px) of a sheet's tile: centred in the sheet's board region (`sheetGeometry.ts`), less the
  * corner marker's room on the first sheet. Tiling sized the tiles to fit these regions.
@@ -514,17 +129,9 @@ function pageCoordMap(
     return [left + Math.max(0, Math.floor((right - left - tileW) / 2)), top + Math.max(0, Math.floor((bottom - top - tileH) / 2))];
 }
 
-/** Area (px) tape labels must stay inside: the safe margins, and below the header line. */
-interface LabelBoundsPx {
-    left: number;
-    right: number;
-    top: number;
-    bottom: number;
-}
-
 function svgVerticalTapeLabel(
     text: string,
-    bounds: LabelBoundsPx,
+    bounds: SafeRectPx,
     centerY: number,
     side: 'left' | 'right',
     meetX: number,
@@ -560,7 +167,7 @@ function svgHorizontalTapeLabel(
     text: string,
     tileX0: number,
     tileW: number,
-    bounds: LabelBoundsPx,
+    bounds: SafeRectPx,
     gapPx: number,
     fontPx: number,
     ppm: number,
@@ -605,107 +212,28 @@ function svgHorizontalTapeLabel(
 
 export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams): Promise<PrintSvgResult> {
     const ppm = PIXELS_PER_MM;
-    const {
-        paperId,
-        squaresX,
-        squaresY,
-        squareLengthMm,
-        markerLengthRatio,
-        tiling,
-        pages,
-        signal,
-        qrSvgFragment,
-        logoSvgInner,
-        chartUrl,
-        cooperativeYield,
-    } = params;
+    const {paperId, squaresX, squaresY, squareLengthMm, markerLengthRatio, tiling, pages, qrSvgFragment, logoSvgInner, chartUrl} =
+        params;
     const {paperWMm, paperHMm} = tiling;
 
-    const yieldStep = (): Promise<void> =>
-        cooperativeYield !== false ? yieldToMain() : Promise.resolve();
-
-    const abortIfNeeded = (): void => {
-        if (signal?.aborted) {
-            throw new DOMException('Aborted', 'AbortError');
-        }
-    };
-
-    const markerMm = squareLengthMm * markerLengthRatio;
-    const geom: CharucoGeometry = {
-        squaresX,
-        squaresY,
-        squareLength: squareLengthMm,
-        markerLength: markerMm,
-    };
-
-    const fullWPx = Math.max(1, layoutIntPx(squaresX * squareLengthMm * ppm));
-    const fullHPx = Math.max(1, layoutIntPx(squaresY * squareLengthMm * ppm));
+    const board = printedBoard(squaresX, squaresY, squareLengthMm, markerLengthRatio);
+    const {geom, wPx: fullWPx, hPx: fullHPx} = board;
     perfNote('Board per sheet', `only each sheet's own squares (${fullWPx}×${fullHPx}px board, ${pages.length} sheets)`);
-    abortIfNeeded();
-    await yieldStep();
 
     const boardPxLayout = charucoBoardPixelLayout(fullWPx, fullHPx, squaresX, squaresY);
-    const pagePxW = Math.max(1, Math.round(paperWMm * ppm));
-    const pagePxH = Math.max(1, Math.round(paperHMm * ppm));
-    const [svgWidthAttr, svgHeightAttr] = svgRootOuterSizeAttrs(paperWMm, paperHMm, paperById(paperId).units);
-    const margins = sheetSafeMarginsMm(paperWMm, paperHMm);
+    const sizeAttrs = svgRootOuterSizeAttrs(paperWMm, paperHMm, paperById(paperId).units);
+    const safe = sheetSafeRectPx(paperWMm, paperHMm, ppm);
     // Tape labels stay inside the safe margins and below the header line.
-    const labelBounds: LabelBoundsPx = {
-        left: Math.ceil(margins.left * ppm),
-        right: Math.floor((paperWMm - margins.right) * ppm),
-        top: Math.ceil(MM_HEADER_CONTENT_TOP_MM * ppm),
-        bottom: Math.floor((paperHMm - margins.bottom) * ppm),
-    };
+    const labelBounds: SafeRectPx = {...safe, top: Math.ceil(MM_HEADER_CONTENT_TOP_MM * ppm)};
     const seamPx = Math.round(MM_SEAM_LABEL_BAND_MM * ppm);
-    const totalPages = params.totalPages ?? pages.length;
+    const tapeGapPx = tapeLabelInsetFromJoinPx(ppm);
+    // Sheets are numbered row by row from 1, so this is how far the sheet across each seam is.
+    const neighbourStep: Record<keyof SeamSides, number> = {left: -1, right: 1, top: -tiling.npx, bottom: tiling.npx};
     // Only a single-sheet chart carries the banner on the chart itself; tiling reserved its strip. Its
     // height is whole px at PIXELS_PER_MM; round so float mm never loses a px.
     const bannerOnChart = tiling.pageCount === 1;
     const originTopReservePx = Math.round(tiling.bannerReserveMm * ppm);
-    const joinFontPx = SHEET_HEADER_FONT_PX;
-
-    /** Origin banner (logo, instructions, chart info, QR) on a sheet this size. */
-    const buildOriginBanner = (
-        sheetWMm: number,
-        sheetHMm: number,
-        instructions: 'chart' | 'guide',
-    ): {parts: string[]; bottom: number} => {
-        const b = layoutOriginBanner({
-            instructions,
-            paperWMm: sheetWMm,
-            paperHMm: sheetHMm,
-            version: APP_VERSION_DISPLAY,
-            squareLengthMm,
-            squaresX,
-            squaresY,
-            hasLogo: Boolean(logoSvgInner),
-        });
-        const titleFont = `bold ${b.titleFontPx}px ${FONT}`;
-        const bodyFont = `${b.bodyFontPx}px ${FONT}`;
-        const parts: string[] = [
-            svgCharucoBoardInfoBlock(
-                b.boardInfoRight,
-                b.bannerTextTop,
-                b.boardTitle,
-                b.titleFontPx,
-                b.boardInfoLines,
-                b.bodyFontPx,
-                b.writeInBox,
-                ppm,
-            ),
-        ];
-        if (logoSvgInner) {
-            parts.push(
-                `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" x="${b.bannerLeft}" y="${b.bannerTitleTop}" width="${b.logoWidthPx}" height="${b.logoHeightPx}" viewBox="0 0 ${SKELLY_LOGO_VIEWBOX_W} ${SKELLY_LOGO_VIEWBOX_H}" preserveAspectRatio="xMidYMin meet" overflow="hidden">${logoSvgInner}</svg>`,
-            );
-        }
-        parts.push(
-            svgTextBlock([pdfLabels.originInstructionsTitle], b.instrLeft, b.bannerTextTop, b.bodyLineLead, 'start', titleFont, true),
-            svgTextBlock(b.instLines, b.instrLeft, b.instBodyY, b.bodyLineLead, 'start', bodyFont),
-            `<svg x="${b.qrX}" y="${b.bannerTitleTop}" width="${b.qrSizePx}" height="${b.qrSizePx}" overflow="hidden">${qrSvgFragment}</svg>`,
-        );
-        return {parts, bottom: b.bottom};
-    };
+    const bannerInputs: OriginBannerInputs = {squaresX, squaresY, squareLengthMm, logoSvgInner, qrSvgFragment};
 
     const headerLeft = interpolate(pdfLabels.sheetHeaderBrand, {url: chartUrl});
     const headerMiddle = interpolate(pdfLabels.sheetHeaderChart, {
@@ -716,11 +244,11 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
     });
 
     // Tiling reserved the banner's height (`originBannerReserveMm`, laid out by the same
-    // `layoutOriginBanner`), so it fits; without the logo it can come out shorter, never taller.
-    let originBanner: ReturnType<typeof buildOriginBanner> | null = null;
+    // `layoutOriginBanner`), so it fits.
+    let originBanner: ReturnType<typeof originBannerSvg> | null = null;
     if (bannerOnChart && pages.some((p) => p.isOriginPage)) {
-        originBanner = buildOriginBanner(paperWMm, paperHMm, 'chart');
-        const bannerMaxPx = Math.ceil(margins.top * ppm) + originTopReservePx;
+        originBanner = originBannerSvg(bannerInputs, paperWMm, paperHMm, 'chart');
+        const bannerMaxPx = safe.top + originTopReservePx;
         if (originBanner.bottom > bannerMaxPx) {
             throw new Error(`Origin banner is ${originBanner.bottom - bannerMaxPx} px taller than its reserved strip on a ${paperWMm} mm sheet.`);
         }
@@ -730,13 +258,11 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
     const pageLoopT0 = IS_DEV ? performance.now() : 0;
 
     for (const spec of pages) {
-        abortIfNeeded();
-        await yieldStep();
+        await params.betweenSheets?.();
 
-        let [l, r] = charucoCropXRange(spec.gx0, spec.gx1, boardPxLayout);
-        let [t, b] = charucoCropYRange(spec.gy0, spec.gy1, boardPxLayout);
-        r = Math.min(r, fullWPx);
-        b = Math.min(b, fullHPx);
+        // The crop ranges already end inside the board.
+        const [l, r] = charucoCropXRange(spec.gx0, spec.gx1, boardPxLayout);
+        const [t, b] = charucoCropYRange(spec.gy0, spec.gy1, boardPxLayout);
         const tw = Math.max(1, r - l);
         const th = Math.max(1, b - t);
 
@@ -751,12 +277,12 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
                     headerMiddle,
                     interpolate(pdfLabels.sheetHeaderPage, {
                         current: spec.sheetIndex,
-                        total: totalPages,
+                        total: tiling.pageCount,
                         row: spec.row + 1,
                         col: spec.col + 1,
                     }),
                     paperWMm,
-                    margins,
+                    safe,
                     ppm,
                     SHEET_HEADER_FONT_PX,
                 ),
@@ -771,55 +297,43 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
                 `</svg>`,
         );
 
-        if (spec.col < tiling.npx - 1) {
-            const xr = x0 + tw;
-            if (0 <= xr && xr < pagePxW) {
-                parts.push(svgDashedVline(xr, y0, y0 + th - 1, ppm));
-            }
+        // Each seam gets a dashed cut line just outside the tile, then (after all the lines) a tape label
+        // naming the sheet across it.
+        const seam = seamSides(spec.col, spec.row, tiling);
+        if (seam.right) {
+            parts.push(svgDashedSeam('v', x0 + tw, y0, y0 + th - 1, ppm));
         }
-        if (spec.col > 0) {
-            const xl = x0 - 1;
-            if (0 <= xl && xl < pagePxW) {
-                parts.push(svgDashedVline(xl, y0, y0 + th - 1, ppm));
-            }
+        if (seam.left) {
+            parts.push(svgDashedSeam('v', x0 - 1, y0, y0 + th - 1, ppm));
         }
-        if (spec.row < tiling.npy - 1) {
-            const yb = y0 + th;
-            if (0 <= yb && yb < pagePxH) {
-                parts.push(svgDashedHline(x0, x0 + tw - 1, yb, ppm));
-            }
+        if (seam.bottom) {
+            parts.push(svgDashedSeam('h', y0 + th, x0, x0 + tw - 1, ppm));
         }
-        if (spec.row > 0) {
-            const yt = y0 - 1;
-            if (0 <= yt && yt < pagePxH) {
-                parts.push(svgDashedHline(x0, x0 + tw - 1, yt, ppm));
-            }
+        if (seam.top) {
+            parts.push(svgDashedSeam('h', y0 - 1, x0, x0 + tw - 1, ppm));
         }
 
-        const tapeGapPx = tapeLabelInsetFromJoinPx(ppm);
+        const joinsSheet = (side: keyof SeamSides): string =>
+            interpolate(pdfLabels.tapeJoinNearPage, {page: spec.sheetIndex + neighbourStep[side]});
         const midPatternY = y0 + th / 2;
-        if (spec.col > 0) {
-            const msg = interpolate(pdfLabels.tapeJoinNearPage, {page: spec.sheetIndex - 1});
+        if (seam.left) {
             parts.push(
-                svgVerticalTapeLabel(msg, labelBounds, midPatternY, 'left', x0 - 1, tapeGapPx, ppm, joinFontPx),
+                svgVerticalTapeLabel(joinsSheet('left'), labelBounds, midPatternY, 'left', x0 - 1, tapeGapPx, ppm, SHEET_HEADER_FONT_PX),
             );
         }
-        if (spec.col < tiling.npx - 1) {
-            const msg = interpolate(pdfLabels.tapeJoinNearPage, {page: spec.sheetIndex + 1});
+        if (seam.right) {
             parts.push(
-                svgVerticalTapeLabel(msg, labelBounds, midPatternY, 'right', x0 + tw, tapeGapPx, ppm, joinFontPx),
+                svgVerticalTapeLabel(joinsSheet('right'), labelBounds, midPatternY, 'right', x0 + tw, tapeGapPx, ppm, SHEET_HEADER_FONT_PX),
             );
         }
-        if (spec.row > 0) {
-            const msg = interpolate(pdfLabels.tapeJoinNearPage, {page: spec.sheetIndex - tiling.npx});
+        if (seam.top) {
             parts.push(
-                svgHorizontalTapeLabel(msg, x0, tw, labelBounds, tapeGapPx, joinFontPx, ppm, seamPx, 'above', y0 - 1),
+                svgHorizontalTapeLabel(joinsSheet('top'), x0, tw, labelBounds, tapeGapPx, SHEET_HEADER_FONT_PX, ppm, seamPx, 'above', y0 - 1),
             );
         }
-        if (spec.row < tiling.npy - 1) {
-            const msg = interpolate(pdfLabels.tapeJoinNearPage, {page: spec.sheetIndex + tiling.npx});
+        if (seam.bottom) {
             parts.push(
-                svgHorizontalTapeLabel(msg, x0, tw, labelBounds, tapeGapPx, joinFontPx, ppm, seamPx, 'below', y0 + th),
+                svgHorizontalTapeLabel(joinsSheet('bottom'), x0, tw, labelBounds, tapeGapPx, SHEET_HEADER_FONT_PX, ppm, seamPx, 'below', y0 + th),
             );
         }
 
@@ -827,28 +341,17 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
             parts.push(svgCornerMarker(ppm, x0, y0));
         }
 
-        pageSvgs.push(svgRootOpen(paperWMm * ppm, paperHMm * ppm, svgWidthAttr, svgHeightAttr) + parts.join('') + SVG_ROOT_CLOSE);
-        abortIfNeeded();
-        await yieldStep();
+        pageSvgs.push(svgSheetRoot(paperWMm, paperHMm, sizeAttrs, parts.join('')));
     }
 
     if (IS_DEV) {
         perfLog('assemble all page SVG strings', performance.now() - pageLoopT0, `${pages.length} pages`);
     }
 
-    abortIfNeeded();
     const guide =
         tiling.pageCount > 1
-            ? svgAssemblyGuideSheet({
-                  paperId,
-                  paperWMm,
-                  paperHMm,
-                  geom,
-                  tiling,
-                  ppm,
-                  banner: (sheetWMm, sheetHMm) => buildOriginBanner(sheetWMm, sheetHMm, 'guide'),
-              })
+            ? svgAssemblyGuideSheet({paperId, paperWMm, paperHMm, board, tiling, banner: bannerInputs})
             : null;
 
-    return {pages: pageSvgs, totalPages, guide};
+    return {pages: pageSvgs, guide};
 }

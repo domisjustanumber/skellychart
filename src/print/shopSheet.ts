@@ -6,13 +6,14 @@
  * Load this module with `await import()`: it pulls in the glyph outline table.
  */
 import {APP_VERSION_DISPLAY} from '../appVersion.js';
-import {renderCharucoBoardSvgFragment, type CharucoGeometry} from '../charuco/board.js';
+import {renderCharucoBoardSvgFragment} from '../charuco/board.js';
 import {buildCharucoDocumentationUrl, type ShopPrintOptions, type ShopSizeChoice} from './charucoDocUrl.js';
 import {CHARUCO_MARKER_LENGTH_RATIO, PIXELS_PER_MM} from './constants.js';
 import {GLYPH_CAP_HEIGHT_EM} from './glyphOutlines.generated.js';
 import {helveticaTextWidthPx} from './helveticaMetrics.js';
 import {interpolate, pdfLabels} from './labels.js';
-import {BANNER_QR_PX, layoutOriginBanner} from './originBannerLayout.js';
+import {layoutOriginBanner} from './originBannerLayout.js';
+import {svgOriginBannerParts} from './originBannerSvg.js';
 import {outlineText} from './outlineText.js';
 import {resolveQrLinkSourceUrl} from './qrLinkTarget.js';
 import {generateQrSvgFragment} from './qrSvg.js';
@@ -23,10 +24,9 @@ import {
     SHOP_CROP_MARK_LENGTH_MM,
     shopMediaMarginMm,
 } from './shopSizes.js';
-import {svgCharucoBoardInfoBlock, svgCornerMarker} from './svgAssemblyCore.js';
 import {resolveLogoForPrint} from './svgDocument.js';
-import {SKELLY_LOGO_VIEWBOX_H, SKELLY_LOGO_VIEWBOX_W} from './skellyLogo.js';
-import {svgRootOpen, svgRootOuterSizeAttrsUnit, SVG_ROOT_CLOSE} from './svgUtils.js';
+import {printedBoard, svgCornerMarker} from './svgPrimitives.js';
+import {svgRootOuterSizeAttrsUnit, svgSheetRoot} from './svgUtils.js';
 
 /**
  * Fill marking the board's squares and marker cells, which print as rich black (C60 K100). Only print-shop
@@ -106,7 +106,6 @@ export function renderShopSheetSvg(p: ShopSheetParams): ShopSheetSvg {
     const marginMm = shopMediaMarginMm(bleedMm, options.cropMarks);
     const mediaW = layout.trimWMm + 2 * marginMm;
     const mediaH = layout.trimHMm + 2 * marginMm;
-    const [widthAttr, heightAttr] = svgRootOuterSizeAttrsUnit(mediaW, mediaH);
 
     // Content origin on whole px; banner and board keep their exact sizes relative to it.
     const cx = Math.round(layout.content.x * ppm);
@@ -128,29 +127,11 @@ export function renderShopSheetSvg(p: ShopSheetParams): ShopSheetSvg {
         squareLengthMm: squareMm,
         squaresX,
         squaresY,
-        hasLogo: true,
     });
 
-    const geom: CharucoGeometry = {
-        squaresX,
-        squaresY,
-        squareLength: squareMm,
-        markerLength: squareMm * CHARUCO_MARKER_LENGTH_RATIO,
-    };
+    const {geom} = printedBoard(squaresX, squaresY, squareMm, CHARUCO_MARKER_LENGTH_RATIO);
     const trimParts = [
-        svgCharucoBoardInfoBlock(
-            banner.boardInfoRight,
-            banner.bannerTextTop,
-            banner.boardTitle,
-            banner.titleFontPx,
-            banner.boardInfoLines,
-            banner.bodyFontPx,
-            banner.writeInBox,
-            ppm,
-            outlineText,
-        ),
-        `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" x="${banner.bannerLeft}" y="${banner.bannerTitleTop}" width="${banner.logoWidthPx}" height="${banner.logoHeightPx}" viewBox="0 0 ${SKELLY_LOGO_VIEWBOX_W} ${SKELLY_LOGO_VIEWBOX_H}" preserveAspectRatio="xMidYMin meet" overflow="hidden">${p.logoSvgInner}</svg>`,
-        `<svg x="${banner.qrX}" y="${banner.bannerTitleTop}" width="${banner.qrSizePx}" height="${banner.qrSizePx}" overflow="hidden">${p.qrSvgFragment}</svg>`,
+        ...svgOriginBannerParts(banner, p, outlineText),
         `<svg x="${boardX}" y="${boardY}" width="${boardW}" height="${boardH}" viewBox="0 0 ${boardW} ${boardH}" overflow="hidden">` +
             `<rect width="${boardW}" height="${boardH}" fill="#fff"/>` +
             renderCharucoBoardSvgFragment(boardW, boardH, geom, undefined, SHOP_RICH_BLACK_FILL) +
@@ -203,7 +184,7 @@ export function renderShopSheetSvg(p: ShopSheetParams): ShopSheetSvg {
     }
 
     return {
-        svg: svgRootOpen(mediaW * ppm, mediaH * ppm, widthAttr, heightAttr) + parts.join('') + SVG_ROOT_CLOSE,
+        svg: svgSheetRoot(mediaW, mediaH, svgRootOuterSizeAttrsUnit(mediaW, mediaH), parts.join('')),
         mediaMm: {w: mediaW, h: mediaH},
         trimBoxMm: {x: marginMm, y: marginMm, w: layout.trimWMm, h: layout.trimHMm},
         bleedBoxMm: {x: marginMm - bleedMm, y: marginMm - bleedMm, w: layout.trimWMm + 2 * bleedMm, h: layout.trimHMm + 2 * bleedMm},
@@ -229,7 +210,7 @@ export async function renderShopPrintSvg(params: {
         params.squareMm,
         {kind: 'shop', size: params.size, options: params.options},
     );
-    const qrSvgFragment = await generateQrSvgFragment(chartUrl, BANNER_QR_PX);
+    const qrSvgFragment = generateQrSvgFragment(chartUrl);
     const logoSvgInner = await resolveLogoForPrint();
     if (!logoSvgInner) {
         throw new Error('The FreeMoCap logo did not load, so the print-shop file was not made. Reload the page and try again.');

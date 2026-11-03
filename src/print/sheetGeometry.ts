@@ -56,11 +56,37 @@ export function sheetSafeMarginsMm(paperWMm: number, paperHMm: number): EdgesMm 
     return {top: MM_SAFE_SIDE, right: MM_SAFE_TRAILING, bottom: MM_SAFE_SIDE, left: MM_SAFE_TRAILING};
 }
 
+/** The safe printing area of a sheet in px coordinates (not distances from the edges). */
+export interface SafeRectPx {
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+}
+
+/** {@link sheetSafeMarginsMm} as px coordinates, rounded inwards (Letter and Tabloid are not whole px). */
+export function sheetSafeRectPx(paperWMm: number, paperHMm: number, ppm: number): SafeRectPx {
+    const m = sheetSafeMarginsMm(paperWMm, paperHMm);
+    return {
+        left: Math.ceil(m.left * ppm),
+        top: Math.ceil(m.top * ppm),
+        right: Math.floor((paperWMm - m.right) * ppm),
+        bottom: Math.floor((paperHMm - m.bottom) * ppm),
+    };
+}
+
 /** What the board region depends on: the sheet grid and the banner strip reserved on the first sheet. */
 export interface SheetGridLayout {
     npx: number;
     npy: number;
     bannerReserveMm: number;
+}
+
+export type SeamSides = Record<'left' | 'right' | 'top' | 'bottom', boolean>;
+
+/** Edges of the sheet at (`col`, `row`) that are seams: joined to the next sheet, so cut away. */
+export function seamSides(col: number, row: number, layout: {npx: number; npy: number}): SeamSides {
+    return {left: col > 0, right: col < layout.npx - 1, top: row > 0, bottom: row < layout.npy - 1};
 }
 
 /**
@@ -78,8 +104,9 @@ export function boardRegionMm(
 ): EdgesMm {
     const m = sheetSafeMarginsMm(paperWMm, paperHMm);
     const seam = MM_SEAM_LABEL_BAND_MM;
+    const s = seamSides(col, row, layout);
     let top: number;
-    if (row > 0) {
+    if (s.top) {
         top = MM_HEADER_CONTENT_TOP_MM + seam;
     } else if (layout.bannerReserveMm > 0) {
         top = m.top + layout.bannerReserveMm;
@@ -88,9 +115,9 @@ export function boardRegionMm(
     }
     return {
         top,
-        right: m.right + (col < layout.npx - 1 ? seam : 0),
-        bottom: m.bottom + (row < layout.npy - 1 ? seam : 0),
-        left: m.left + (col > 0 ? seam : 0),
+        right: m.right + (s.right ? seam : 0),
+        bottom: m.bottom + (s.bottom ? seam : 0),
+        left: m.left + (s.left ? seam : 0),
     };
 }
 

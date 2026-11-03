@@ -97,7 +97,6 @@ for (const c of cases) {
         markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
         tiling,
         pages: buildPageSpecs(c.squaresX, c.squaresY, tiling),
-        cooperativeYield: false,
     });
     // The logo markup keeps the file's line endings, which Git checks out as CRLF on Windows and LF elsewhere.
     const lf = (svg: string) => svg.replace(/\r\n?/g, '\n');

@@ -1,7 +1,6 @@
 import freemocapLogoUrl from '../freemocapLogoUrl.js';
 import {resolveQrLinkSourceUrl} from './qrLinkTarget.js';
 import {buildCharucoDocumentationUrl} from './charucoDocUrl.js';
-import {BANNER_QR_PX} from './originBannerLayout.js';
 import {generateQrSvgFragment} from './qrSvg.js';
 import {perfAsync} from './perfDebug.js';
 import {renderCharucoPrintSvgCore} from './svgAssemblyCore.js';
@@ -9,11 +8,8 @@ import type {PrintSvgParams, PrintSvgResult} from './svgAssemblyTypes.js';
 
 export type {PrintSvgParams} from './svgAssemblyTypes.js';
 
-/** One resolved XML fetch/read per runtime (browser tab or Node process). */
-let memoLogoXmlPromise: Promise<string | null> | undefined;
-
-/** Inner fragment (no wrapper) after first successful parse — reused for every print SVG. */
-let memoLogoSvgInner: string | undefined;
+/** The logo's inner markup, loaded once per runtime (browser tab or Node process). */
+let memoLogoSvgInner: Promise<string | null> | undefined;
 
 function stripOuterSvgWrapper(svgXml: string): string {
     const t = svgXml.trim().replace(/^<\?xml[\s\S]*?\?>/, '').trimStart();
@@ -32,10 +28,7 @@ function stripEmbeddedPngImages(svgInner: string): string {
     );
 }
 
-function logoInnerMarkupFromXml(xml: string): string {
-    return stripEmbeddedPngImages(stripOuterSvgWrapper(xml));
-}
-
+/** The logo file's XML: fetched in a browser, read from `CHARUCO_LOGO_FILE` under Node (the build checks). */
 async function fetchFreemocapLogoSvgXmlOnce(): Promise<string | null> {
     try {
         if (typeof window !== 'undefined') {
@@ -57,30 +50,17 @@ async function fetchFreemocapLogoSvgXmlOnce(): Promise<string | null> {
     }
 }
 
-async function loadFreemocapLogoSvgXml(): Promise<string | null> {
-    memoLogoXmlPromise ??= fetchFreemocapLogoSvgXmlOnce();
-    return memoLogoXmlPromise;
-}
-
-function warmupFreemocapLogoCache(): void {
-    void loadFreemocapLogoSvgXml().catch(() => {});
-}
-
 /**
  * Inline logo markup (nested `<svg>`) so exported charts open in Inkscape; a top-level `<image
  * href="data:image/svg+xml,...">` is often shown as broken there, and `xlink:href` on `<image>` is
  * still what many SVG 1.1 tools expect for external images. `null` when the logo did not load; the banner
- * draws it in `BANNER_LOGO_PX`.
+ * draws it in `BANNER_LOGO_PX`. Never rejects.
  */
-export async function resolveLogoForPrint(): Promise<string | null> {
-    const xml = await loadFreemocapLogoSvgXml();
-    if (!xml) {
-        return null;
-    }
-    if (memoLogoSvgInner === undefined) {
-        memoLogoSvgInner = logoInnerMarkupFromXml(xml);
-    }
-    return memoLogoSvgInner || null;
+export function resolveLogoForPrint(): Promise<string | null> {
+    memoLogoSvgInner ??= fetchFreemocapLogoSvgXmlOnce().then((xml) =>
+        xml ? stripEmbeddedPngImages(stripOuterSvgWrapper(xml)) || null : null,
+    );
+    return memoLogoSvgInner;
 }
 
 export async function renderCharucoPrintSvg(params: PrintSvgParams): Promise<PrintSvgResult> {
@@ -91,7 +71,7 @@ export async function renderCharucoPrintSvg(params: PrintSvgParams): Promise<Pri
         params.squareLengthMm,
         params.paperId,
     );
-    const qrSvgFragment = await perfAsync('QR SVG fragment', () => generateQrSvgFragment(docUrl, BANNER_QR_PX));
+    const qrSvgFragment = generateQrSvgFragment(docUrl);
     const logoSvgInner = await perfAsync('Logo SVG inner fragment (cached after first fetch)', () => resolveLogoForPrint());
 
     return perfAsync('renderCharucoPrintSvgCore (board + all sheets)', () =>
@@ -105,5 +85,5 @@ export async function renderCharucoPrintSvg(params: PrintSvgParams): Promise<Pri
 }
 
 if (typeof window !== 'undefined') {
-    queueMicrotask(() => warmupFreemocapLogoCache());
+    queueMicrotask(() => void resolveLogoForPrint());
 }

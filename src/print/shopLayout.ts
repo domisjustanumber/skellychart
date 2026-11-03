@@ -45,7 +45,7 @@ export function shopBannerSizeMm(
     if (hit) {
         return hit;
     }
-    const params = {version, squareLengthMm: squareMm, squaresX, squaresY, hasLogo: true};
+    const params = {version, squareLengthMm: squareMm, squaresX, squaresY};
     const size = {
         heightMm: compactBannerHeightMm(params),
         minWidthMm: compactBannerMinWidthPx(params) / PIXELS_PER_MM,

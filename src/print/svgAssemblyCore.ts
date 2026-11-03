@@ -16,7 +16,7 @@ import {paperById} from './papers.js';
 import {perfLog, perfNote} from './perfDebug.js';
 import {boardRegionMm, originMarkerRoomMm, type SafeRectPx, type SeamSides, seamSides, sheetSafeRectPx} from './sheetGeometry.js';
 import type {PrintSvgAssemblyParams, PrintSvgResult} from './svgAssemblyTypes.js';
-import {capTopToBaseline, centreToBaseline, FONT, printedBoard, svgCornerMarker} from './svgPrimitives.js';
+import {centreToBaseline, FONT, printedBoard, svgCornerMarker} from './svgPrimitives.js';
 import {escapeXml, rgbCss, svgRootOuterSizeAttrs, svgSheetRoot} from './svgUtils.js';
 import {buildPageSpecs, type PageSpec, type TilingInfo} from './tiling.js';
 import {IS_DEV} from '../env.js';
@@ -29,10 +29,6 @@ function joinDashGapPpm(ppm: number): [number, number] {
 
 function tapeLabelInsetFromJoinPx(ppm: number): number {
     return Math.max(1, Math.round(MM_TAPE_LABEL_INSET_FROM_JOIN_MM * ppm));
-}
-
-function tapeLabelSheetInsetPx(ppm: number): number {
-    return Math.max(1, Math.floor(ppm / 6));
 }
 
 /** Room (px) kept clear past each end of a side tape label, so it stops short of the sheet's bounds. */
@@ -122,59 +118,48 @@ function pageCoordMap(
     return [left + Math.max(0, Math.floor((right - left - tileW) / 2)), top + Math.max(0, Math.floor((bottom - top - tileH) / 2))];
 }
 
-function svgVerticalTapeLabel(
-    text: string,
-    bounds: SafeRectPx,
-    centerY: number,
-    side: 'left' | 'right',
-    meetX: number,
-    gapPx: number,
-    ppm: number,
-    fontPx: number,
-): string {
-    // The label's box: a line high across the seam, its width plus a little padding along it.
-    const rw = fontPx * 1.2;
-    const rh = helveticaTextWidthPx(text, fontPx) + 2 * TAPE_LABEL_END_PAD_PX;
-    const inset = tapeLabelSheetInsetPx(ppm);
-    let px: number;
-    if (side === 'left') {
-        px = meetX - gapPx - rw;
-        px = Math.max(bounds.left + inset, px);
-    } else {
-        px = meetX + gapPx;
-        px = Math.min(px, bounds.right - rw - inset);
-    }
-    const py = Math.max(bounds.top, Math.min(centerY - rh / 2, bounds.bottom - rh));
-    const cx = px + rw / 2;
-    const cy = py + rh / 2;
-    const angle = (side === 'left' ? -90 : 90) + 180;
-    return (
-        `<text transform="rotate(${angle} ${cx} ${cy})" x="${cx}" y="${centreToBaseline(cy, fontPx)}" fill="#000" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle">${escapeXml(text)}</text>`
-    );
-}
+/**
+ * Per seam: the axis that crosses it, which way along that axis the seam lies from the tile, and the turn
+ * (degrees) that puts the tops of the label's letters towards the tile.
+ */
+const TAPE_LABEL_SIDES: Record<keyof SeamSides, {axis: 'x' | 'y'; out: -1 | 1; angle: number}> = {
+    left: {axis: 'x', out: -1, angle: 90},
+    right: {axis: 'x', out: 1, angle: 270},
+    top: {axis: 'y', out: -1, angle: 180},
+    bottom: {axis: 'y', out: 1, angle: 0},
+};
 
 /**
- * Tape label `gapPx` above or below the cut line at `meetY`, centred on the tile (or from its left edge
- * when wider). The seam band (`MM_SEAM_LABEL_BAND_MM`) is sized to hold it, so it needs no clamp.
+ * Tape label on one `side` of the tile at (`x`, `y`), `gapPx` beyond its cut line and centred on the tile
+ * along it. A side label longer than its tile stays inside `bounds`; a top or bottom one starts from the
+ * tile's left edge instead. The seam band (`MM_SEAM_LABEL_BAND_MM`) is sized to hold it across the seam,
+ * so that needs no clamp.
  */
-function svgHorizontalTapeLabel(
+function svgTapeLabel(
     text: string,
-    tileX0: number,
-    tileW: number,
+    side: keyof SeamSides,
+    tile: {x: number; y: number; w: number; h: number},
+    bounds: SafeRectPx,
     gapPx: number,
     fontPx: number,
-    placement: 'above' | 'below',
-    meetY: number,
 ): string {
-    const w = helveticaTextWidthPx(text, fontPx);
-    const px = tileX0 + Math.max(0, (tileW - w) / 2);
-    if (placement === 'above') {
-        const rh = Math.ceil((HELVETICA_ASCENT_EM + HELVETICA_DESCENT_EM) * fontPx);
-        const cx = px + w / 2;
-        const cy = meetY - gapPx - rh / 2;
-        return `<text transform="rotate(180 ${cx} ${cy})" x="${cx}" y="${centreToBaseline(cy, fontPx)}" fill="#000" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle">${escapeXml(text)}</text>`;
+    const {axis, out, angle} = TAPE_LABEL_SIDES[side];
+    const len = helveticaTextWidthPx(text, fontPx);
+    const lineH = Math.ceil((HELVETICA_ASCENT_EM + HELVETICA_DESCENT_EM) * fontPx);
+    // The cut line is the px just outside the tile (`svgDashedSeam`).
+    const across = (start: number, size: number): number => (out < 0 ? start - 1 : start + size) + out * (gapPx + lineH / 2);
+    let cx: number;
+    let cy: number;
+    if (axis === 'x') {
+        const half = len / 2 + TAPE_LABEL_END_PAD_PX;
+        cx = across(tile.x, tile.w);
+        cy = Math.max(bounds.top + half, Math.min(tile.y + tile.h / 2, bounds.bottom - half));
+    } else {
+        cx = tile.x + Math.max(tile.w, len) / 2;
+        cy = across(tile.y, tile.h);
     }
-    return `<text x="${px}" y="${capTopToBaseline(meetY + gapPx, fontPx)}" fill="#000" font-size="${fontPx}" font-family="${FONT}">${escapeXml(text)}</text>`;
+    const turn = angle ? ` transform="rotate(${angle} ${cx} ${cy})"` : '';
+    return `<text${turn} x="${cx}" y="${centreToBaseline(cy, fontPx)}" fill="#000" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle">${escapeXml(text)}</text>`;
 }
 
 export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams): Promise<PrintSvgResult> {
@@ -280,28 +265,11 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
             parts.push(svgDashedSeam('h', y0 - 1, x0, x0 + tw - 1, ppm));
         }
 
-        const joinsSheet = (side: keyof SeamSides): string =>
-            interpolate(pdfLabels.tapeJoinNearPage, {page: spec.sheetIndex + neighbourStep[side]});
-        const midPatternY = y0 + th / 2;
-        if (seam.left) {
-            parts.push(
-                svgVerticalTapeLabel(joinsSheet('left'), labelBounds, midPatternY, 'left', x0 - 1, tapeGapPx, ppm, SHEET_HEADER_FONT_PX),
-            );
-        }
-        if (seam.right) {
-            parts.push(
-                svgVerticalTapeLabel(joinsSheet('right'), labelBounds, midPatternY, 'right', x0 + tw, tapeGapPx, ppm, SHEET_HEADER_FONT_PX),
-            );
-        }
-        if (seam.top) {
-            parts.push(
-                svgHorizontalTapeLabel(joinsSheet('top'), x0, tw, tapeGapPx, SHEET_HEADER_FONT_PX, 'above', y0 - 1),
-            );
-        }
-        if (seam.bottom) {
-            parts.push(
-                svgHorizontalTapeLabel(joinsSheet('bottom'), x0, tw, tapeGapPx, SHEET_HEADER_FONT_PX, 'below', y0 + th),
-            );
+        for (const side of Object.keys(TAPE_LABEL_SIDES) as (keyof SeamSides)[]) {
+            if (seam[side]) {
+                const text = interpolate(pdfLabels.tapeJoinNearPage, {page: spec.sheetIndex + neighbourStep[side]});
+                parts.push(svgTapeLabel(text, side, {x: x0, y: y0, w: tw, h: th}, labelBounds, tapeGapPx, SHEET_HEADER_FONT_PX));
+            }
         }
 
         if (spec.isOriginPage) {

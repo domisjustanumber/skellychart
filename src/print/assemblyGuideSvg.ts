@@ -1,7 +1,7 @@
 /**
  * A multi-sheet chart's assembly guide sheet, and the assembled chart with its numbered sheets that the
- * on-screen scale preview shows. Both draw the same colour-coded sheet blocks, numbered unless the guide's
- * numbers would be too small to read.
+ * on-screen scale preview shows. Both draw the same colour-coded sheet blocks, numbered unless the numbers
+ * would be too small to read.
  */
 import {
     charucoBoardPixelLayout,
@@ -36,6 +36,11 @@ const GUIDE_NUMBER_FULL_BLOCK_FRACTION = 0.75;
 const GUIDE_NUMBER_MIN_PX = 21;
 /** Black outline round the guide's white page numbers (em). */
 const GUIDE_NUMBER_STROKE_EM = 0.18;
+/**
+ * Smallest digit height (screen px) the on-screen preview draws its page numbers at, at the largest scale
+ * it shows the chart: below about 3 px a digit is a smudge, so a chart of hundreds of sheets goes unnumbered.
+ */
+const PREVIEW_DIGIT_MIN_PX = 3;
 /**
  * Largest scale the guide draws the board at, so it never prints a full-size (or nearly full-size)
  * copy of the board that could be measured or calibrated from by mistake.
@@ -131,8 +136,10 @@ function sheetNumberPx(blocks: ReturnType<typeof sheetBlocks>): number {
 
 /**
  * A colour-coded block per chart sheet ({@link sheetBlocks}): outlined in the sheet's colour and, with
- * `at.tint`, washed with it. With `at.numbered`, every page number gets {@link sheetNumberPx}; a smaller
- * block's number shrinks to fit it, so no number is left out. A single-sheet chart has no blocks.
+ * `at.tint`, washed with it. Unless `at.numbers` is `'none'`, every page number gets {@link sheetNumberPx};
+ * a smaller block's number shrinks to fit it, so no number is left out. Its black outline is a ring of
+ * copies (`'copies'`, for print) or a stroke under the white digits (`'stroke'`, on screen only). A
+ * single-sheet chart has no blocks.
  */
 function svgSheetBlocks(
     squaresX: number,
@@ -140,7 +147,7 @@ function svgSheetBlocks(
     tiling: TilingInfo,
     boardWPx: number,
     boardHPx: number,
-    at: {x: number; y: number; scale: number; strokePx: number; tint: boolean; numbered: boolean},
+    at: {x: number; y: number; scale: number; strokePx: number; tint: boolean; numbers: 'none' | 'copies' | 'stroke'},
 ): string[] {
     const parts: string[] = [];
     if (tiling.pageCount <= 1) {
@@ -156,7 +163,7 @@ function svgSheetBlocks(
         );
     }
 
-    if (!at.numbered) {
+    if (at.numbers === 'none') {
         return parts;
     }
     const fs = sheetNumberPx(blocks);
@@ -165,6 +172,13 @@ function svgSheetBlocks(
         const cx = Math.round(b.x + b.w / 2);
         const baseline = Math.round(b.y + b.h / 2 + (HELVETICA_BOLD_DIGIT_HEIGHT_EM * bfs) / 2);
         const font = `font-size="${bfs}" font-family="${FONT}" font-weight="bold" text-anchor="middle"`;
+        if (at.numbers === 'stroke') {
+            // Painted under the fill, so half its width shows: the same outline as the ring below.
+            parts.push(
+                `<text x="${cx}" y="${baseline}" fill="#fff" stroke="#000" stroke-width="${(GUIDE_NUMBER_STROKE_EM * bfs).toFixed(1)}" stroke-linejoin="round" paint-order="stroke" ${font}>${b.label}</text>`,
+            );
+            return;
+        }
         // svg2pdf draws text strokes far too wide, so the outline is a ring of black copies under the
         // white digits.
         const r = (GUIDE_NUMBER_STROKE_EM / 2) * bfs;
@@ -182,18 +196,21 @@ function svgSheetBlocks(
 /**
  * The assembled multi-sheet chart at full size with the guide's numbered sheet outlines, for the
  * on-screen scale preview. Not printed. The board is left untinted (black on white, as printed) so the
- * preview reads as the real chart.
+ * preview reads as the real chart. `shownPxPerMm` is the largest scale (screen px per mm) the preview
+ * shows it at; page numbers too small to read there ({@link PREVIEW_DIGIT_MIN_PX}) are left out.
  */
-export function svgAssembledChartWithSheetNumbers(chart: PrintedChart): string {
+export function svgAssembledChartWithSheetNumbers(chart: PrintedChart, shownPxPerMm: number): string {
     const {squaresX, squaresY, tiling} = chart;
     const {geom, wPx: fullWPx, hPx: fullHPx} = printedBoard(squaresX, squaresY, chart.squareMm);
     // Block outlines stay a visible share of a sheet however large the chart is drawn.
     const sw = Math.max(2, Math.round(Math.min(fullWPx / tiling.npx, fullHPx / tiling.npy) * 0.02));
+    const numberPx = sheetNumberPx(sheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, {x: 0, y: 0, scale: 1}));
+    const readable = (numberPx * HELVETICA_BOLD_DIGIT_HEIGHT_EM * shownPxPerMm) / PIXELS_PER_MM >= PREVIEW_DIGIT_MIN_PX;
     return (
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fullWPx} ${fullHPx}" width="${fullWPx}" height="${fullHPx}">` +
         `<rect width="${fullWPx}" height="${fullHPx}" fill="#fff"/>` +
         renderCharucoBoardSvgFragment(fullWPx, fullHPx, geom) +
-        svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, {x: 0, y: 0, scale: 1, strokePx: sw, tint: false, numbered: true}).join('') +
+        svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, {x: 0, y: 0, scale: 1, strokePx: sw, tint: false, numbers: readable ? 'stroke' : 'none'}).join('') +
         `</svg>`
     );
 }
@@ -288,7 +305,7 @@ export function svgAssemblyGuideSheet(o: {
     ];
 
     parts.push(
-        ...svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, {x: bx, y: by, scale, strokePx: Math.max(2, Math.round(0.4 * ppm)), tint: true, numbered: g.numbered}),
+        ...svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, {x: bx, y: by, scale, strokePx: Math.max(2, Math.round(0.4 * ppm)), tint: true, numbers: g.numbered ? 'copies' : 'none'}),
     );
     parts.push(svgCornerMarker(ppm, bx, by));
 

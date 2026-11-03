@@ -64,6 +64,19 @@ function n(v: number): string {
     return String(+v.toFixed(2));
 }
 
+/** Height (mm) of the top of a chart `heightMm` tall: held at {@link CHART_CENTRE_MM}, or on the floor. */
+function chartTopMm(heightMm: number): number {
+    return Math.max(0, CHART_CENTRE_MM - heightMm / 2) + heightMm;
+}
+
+/**
+ * Largest scale (screen px per mm) the scene draws a chart `heightMm` tall at: its height cap over the
+ * taller of the tall person and the chart. A narrow container or a short window draws it smaller.
+ */
+export function scaleSceneMaxPxPerMm(heightMm: number): number {
+    return (MAX_H_PX - MARGIN_TOP_PX - MARGIN_BOTTOM_PX) / Math.max(PEOPLE[0].heightMm, chartTopMm(heightMm));
+}
+
 /** Soft floor shadow under each person. */
 const SCENE_DEFS =
     `<defs>` +
@@ -122,7 +135,7 @@ function sceneMarkup(availW: number, maxH: number, chart: DrawnChart | null, imp
     const chartBox = chart
         ? {
               x: -chart.widthMm / 2,
-              y: -(Math.max(0, CHART_CENTRE_MM - chart.heightMm / 2) + chart.heightMm),
+              y: -chartTopMm(chart.heightMm),
               w: chart.widthMm,
               h: chart.heightMm,
               href: chart.href,

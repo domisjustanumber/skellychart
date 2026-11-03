@@ -10,7 +10,7 @@ import {printedSheetCount} from '../print/tiling.js';
 import {perfLog} from '../print/perfDebug.js';
 import {PIXELS_PER_MM} from '../print/constants.js';
 import {rgbCss} from '../print/svgUtils.js';
-import {mountScaleScene} from './scaleScene.js';
+import {mountScaleScene, scaleSceneMaxPxPerMm} from './scaleScene.js';
 import {yieldToMain, yieldToMainUnlessAborted} from './yieldToMain.js';
 import {IMPERIAL, shopLayoutNow, shopOptions, snapshotChart, state} from './appState.js';
 import {byId} from './dom.js';
@@ -203,7 +203,7 @@ async function runPreview(scheduleBaselineMs?: number, scheduledDelayMs?: number
         scaleScene?.update(
             multi
                 ? {
-                      svg: svgAssembledChartWithSheetNumbers(chart),
+                      svg: svgAssembledChartWithSheetNumbers(chart, scaleSceneMaxPxPerMm(chart.squaresY * chart.squareMm)),
                       widthMm: chart.squaresX * chart.squareMm,
                       heightMm: chart.squaresY * chart.squareMm,
                       isSheet: false,

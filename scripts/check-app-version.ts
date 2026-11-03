@@ -1,6 +1,6 @@
 /**
- * Guardrail run by `prebuild`: the app version must be semver, its major must match the
- * printed-label spec version, and `package-lock.json` must agree with `package.json`.
+ * Guardrail run by `prebuild`: the app version must be one a build may stamp (`APP_VERSION_RE`, the
+ * grammar the chart link reader accepts), and `package-lock.json` must agree with `package.json`.
  *
  * Printed charts embed the app version in their QR URL, so a drifted or malformed
  * version would make charts harder to trace back to the generator that made them.
@@ -9,12 +9,9 @@ import {readFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-import {CHARUCO_PRINT_LABEL_SPEC_VERSION} from '../src/print/constants.js';
+import {APP_VERSION_RE} from '../src/print/chartVersion.js';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-
-/** Keep in sync with `SEMVER` in `vite.config.ts`. */
-const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 function fail(message: string): never {
     console.error(`check:version: ${message}`);
@@ -29,17 +26,8 @@ if (typeof version !== 'string') {
     fail('package.json has no "version" field');
 }
 
-const match = SEMVER.exec(version);
-if (!match) {
-    fail(`package.json "version" must be semver, got ${JSON.stringify(version)}`);
-}
-
-const major = Number(match[1]);
-if (major !== CHARUCO_PRINT_LABEL_SPEC_VERSION) {
-    fail(
-        `app major ${major} (package.json ${version}) must equal CHARUCO_PRINT_LABEL_SPEC_VERSION ` +
-            `(${CHARUCO_PRINT_LABEL_SPEC_VERSION}) in src/print/constants.ts — bump both together.`,
-    );
+if (!APP_VERSION_RE.test(version)) {
+    fail(`package.json "version" must be x.y.z or x.y.z-prerelease, got ${JSON.stringify(version)}`);
 }
 
 const lock = JSON.parse(readFileSync(join(repoRoot, 'package-lock.json'), 'utf8')) as {
@@ -54,4 +42,4 @@ if (lockVersions.some((v) => v !== version)) {
     );
 }
 
-console.log(`check:version: ${version} (label spec v${CHARUCO_PRINT_LABEL_SPEC_VERSION}) OK`);
+console.log(`check:version: ${version} OK`);

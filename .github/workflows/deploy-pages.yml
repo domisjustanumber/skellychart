@@ -1,10 +1,16 @@
 name: Deploy site to GitHub Pages
 
 # One workflow does bump → build → push → deploy, so a merge to main produces exactly
-# one deployment. The bump commit is pushed with GITHUB_TOKEN (which never triggers
-# workflows) and carries [skip ci] (a second guard). The build job also refuses to run
-# for a commit whose message contains [skip ci], so a replayed release commit cannot
-# start a second deploy.
+# one deployment. A push that changed package.json's version ships that exact version, so
+# to choose the next release set it yourself (`npm version 2.1.0 --no-git-tag-version`
+# updates the lockfile too); any other push is patch-bumped and the bump committed back.
+# workflow_dispatch builds the committed version as-is.
+#
+# The bump commit is pushed with GITHUB_TOKEN, which never triggers workflows. Its
+# [skip ci] marker keeps that true if the push is ever switched to a PAT or app token.
+# GitHub never starts a push run whose head commit message contains [skip ci], [ci skip],
+# [no ci], [skip actions] or [actions skip]: keep these out of PR titles and squash-merge
+# messages, or that merge will not deploy (re-run it with workflow_dispatch).
 on:
   push:
     branches: [main]
@@ -22,8 +28,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # workflow_dispatch always deploys; push events skip release commits.
-    if: github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip ci]')
     # contents: write is needed only for the version-bump push. Requires the repository's
     # workflow permissions to allow write, and branch protection must let the Actions bot push.
     permissions:
@@ -40,9 +44,32 @@ jobs:
 
       - run: npm ci
 
-      - name: Bump patch version
+      # Compares with the version main had before this push (none before v2, so v2.0.0 ships
+      # as 2.0.0). The checkout is shallow, so fetch that commit; if it cannot be fetched,
+      # bump as usual. An all-zero SHA means the branch was just created.
+      - name: Bump patch version unless the push set it
+        id: bump
         if: github.event_name == 'push'
-        run: npm version patch --no-git-tag-version
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          CUR="$(node -p "require('./package.json').version")"
+          PREV=""
+          if [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            if git fetch --no-tags --depth=1 origin "$BEFORE"; then
+              PREV="$(git show "$BEFORE:package.json" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version ?? ''")"
+            else
+              echo "::warning::could not fetch $BEFORE; bumping as usual"
+              PREV="$CUR"
+            fi
+          fi
+          if [ "$PREV" = "$CUR" ]; then
+            npm version patch --no-git-tag-version
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "package.json version set by this push (${PREV:-none} → $CUR); building it as-is"
+          fi
 
       - name: Build site
         run: npm run build
@@ -54,7 +81,7 @@ jobs:
       # or another merge moved main), this run fails instead of deploying a version
       # that never reaches main.
       - name: Commit and push version bump
-        if: github.event_name == 'push'
+        if: steps.bump.outputs.bumped == 'true'
         run: |
           set -euo pipefail
           VERSION="$(node -p "require('./package.json').version")"

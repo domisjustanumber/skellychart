@@ -18,11 +18,6 @@ export const PRODUCTION_PRINT_SOURCE_URL = 'https://skelly.cam/c/';
 /** In-memory fallback when storage is blocked (private mode); survives the page session. */
 let sessionTarget: QrLinkTarget | null = null;
 
-/** Vite replaces this at dev/build time; `null` in release builds. Read via `typeof` for tsx scripts. */
-function devLanIp(): string | null {
-    return typeof __DEV_LAN_IP__ === 'string' && __DEV_LAN_IP__.length > 0 ? __DEV_LAN_IP__ : null;
-}
-
 /**
  * True only in a browser on the dev server. The `typeof` guards keep the print modules
  * importable from Node/tsx (e.g. `scripts/check-app-version.ts`) where neither exists.
@@ -76,7 +71,7 @@ function isLoopbackHost(hostname: string): boolean {
  */
 function localDevQrSourceUrl(): string {
     const {protocol, hostname, port} = window.location;
-    const host = isLoopbackHost(hostname) ? (devLanIp() ?? hostname) : hostname;
+    const host = isLoopbackHost(hostname) ? (__DEV_LAN_IP__ ?? hostname) : hostname;
     return `${protocol}//${host}${port ? `:${port}` : ''}/`;
 }
 

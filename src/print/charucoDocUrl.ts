@@ -1,6 +1,6 @@
-import {APP_VERSION} from '../appVersion.js';
+import {APP_VERSION, DEV_APP_VERSION} from '../appVersion.js';
 import {CHARUCO_MARKER_LENGTH_RATIO, OPENCV_LABEL_VERSION} from './constants.js';
-import {parseChartVersion, type ChartVersion} from './chartVersion.js';
+import {APP_VERSION_SOURCE, parseChartVersion, type ChartVersion} from './chartVersion.js';
 
 export function charucoCv2QueryValue(markerLengthRatio: number): string {
     return `${OPENCV_LABEL_VERSION}+DICT_4X4_250+ratio=${markerLengthRatio}`;
@@ -105,12 +105,13 @@ export interface ParsedCharucoQrQuery {
 }
 
 /**
- * `develop` is the fixed token dev servers stamp (see `DEV_APP_VERSION` in `vite.config.ts`).
- * It has no numeric core, so `parseChartVersion` returns null for it — but the board
- * parameters still round-trip.
+ * The version is either a build's {@link APP_VERSION_SOURCE} or {@link DEV_APP_VERSION}, which has no
+ * numeric core, so `parseChartVersion` returns null for it — but the board parameters still round-trip.
+ * This is a frozen link grammar: renaming the dev token would stop dev-printed charts from parsing.
  */
-const PACKED_CHART_RE =
-    /^(develop|\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)w(\d+)h(\d+)s(\d+(?:\.\d+)?)(?:p(\d))?(?:t(.*))?$/;
+const PACKED_CHART_RE = new RegExp(
+    String.raw`^(${DEV_APP_VERSION}|${APP_VERSION_SOURCE})w(\d+)h(\d+)s(\d+(?:\.\d+)?)(?:p(\d))?(?:t(.*))?$`,
+);
 
 /**
  * The `t` tail is parsed in stages so a damaged size never loses the board and damaged options never

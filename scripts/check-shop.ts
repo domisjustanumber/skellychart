@@ -4,7 +4,7 @@
  * compact banner is checked with the home banner (`scripts/check-banner.ts`).
  */
 import fs from 'node:fs';
-import {displayAppVersion} from '../src/appVersion.js';
+import {DEV_APP_VERSION, displayAppVersion} from '../src/appVersion.js';
 import {parseCharucoQrSearchParams, SHOP_SIZE_LINK_CODES, shopStandardBleedMm} from '../src/print/charucoDocUrl.js';
 import {GLYPH_CAP_HEIGHT_EM, GLYPH_OUTLINES, GLYPH_X_HEIGHT_EM} from '../src/print/glyphOutlines.generated.js';
 import {helveticaTextWidthPx} from '../src/print/helveticaMetrics.js';
@@ -211,7 +211,7 @@ for (const bold of [false, true]) {
     }
 }
 const pkgVersion: string = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
-for (const version of ['develop', pkgVersion, process.env.VITE_APP_VERSION?.trim()].filter((v): v is string => Boolean(v))) {
+for (const version of [DEV_APP_VERSION, pkgVersion]) {
     for (const printed of [version, displayAppVersion(version)]) {
         if (!canOutlineText(`v${printed}`) || !canOutlineText(`v${printed}`, true)) {
             failures.push(`version "${printed}" has characters with no outline`);

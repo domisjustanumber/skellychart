@@ -1,6 +1,6 @@
 /**
  * Build guard for the origin banner, which is laid out live (`src/print/originBannerLayout.ts`), for every
- * version that gets built (dev, release and any `VITE_APP_VERSION` override), square length and grid:
+ * version that gets built (dev and release), square length and grid:
  *
  * - Home sheets: every paper in portrait and landscape lays the banner's instruction and chart-info
  *   columns out side by side, on a single-sheet chart and on the assembly guide, and a single-sheet
@@ -10,8 +10,8 @@
  *   descenders above the board.
  * - Print-shop boards: the compact banner is one height for every chart (the QR sets it), and narrow.
  */
-import {BUILD_APP_VERSION, PACKAGE_VERSION} from './useBuildAppVersion.js';
-import {displayAppVersion} from '../src/appVersion.js';
+import {PACKAGE_VERSION} from './useBuildAppVersion.js';
+import {DEV_APP_VERSION, displayAppVersion} from '../src/appVersion.js';
 import {BOARD_GRID_MAX, BOARD_GRID_MIN, PAPER_OPTIONS, boardGridAxisMax} from '../src/print/charucoLayout.js';
 import {
     CHARUCO_SQUARE_MM_MAX,
@@ -39,9 +39,9 @@ const DESCENDER_EM = 0.207;
 
 const failures: string[] = [];
 const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
-const BUILT = displayAppVersion(BUILD_APP_VERSION);
-/** Dev servers print `DEV_APP_VERSION` from `vite.config.ts`; builds print the package version or the override. */
-const VERSIONS = [...new Set(['develop', PACKAGE_VERSION, BUILD_APP_VERSION].map(displayAppVersion))];
+const BUILT = displayAppVersion(PACKAGE_VERSION);
+/** Dev servers print `DEV_APP_VERSION`; builds print the package version. */
+const VERSIONS = [DEV_APP_VERSION, PACKAGE_VERSION].map(displayAppVersion);
 
 /** One value per distinct printed width: the banner depends on numbers only through their Helvetica widths. */
 function widthRepresentatives(min: number, max: number): number[] {

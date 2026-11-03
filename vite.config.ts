@@ -3,34 +3,24 @@ import {networkInterfaces} from 'node:os';
 import {join} from 'node:path';
 import {defineConfig} from 'vite';
 
-const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+import {DEV_APP_VERSION} from './src/appVersion.ts';
+import {APP_VERSION_RE} from './src/print/chartVersion.ts';
 
 // Vite bundles this config to a temp file, so resolve from the project cwd (npm scripts run there).
 const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
     version: string;
 };
-if (!SEMVER.test(pkg.version)) {
-    throw new Error(`package.json "version" must be semver, got ${String(pkg.version)}`);
+// `prebuild` runs check:version too, but a bare `vite build` does not.
+if (!APP_VERSION_RE.test(pkg.version)) {
+    throw new Error(`package.json "version" must be x.y.z or x.y.z-prerelease, got ${String(pkg.version)}`);
 }
 
 /**
- * Fixed dev token, deliberately 7 characters like the current release semver (`1.10.10`).
- * Dev-printed charts then keep the same banner layout and QR density as production while
- * still being obviously not a release.
- */
-const DEV_APP_VERSION = 'develop';
-
-/**
  * - `npm run dev`: the literal {@link DEV_APP_VERSION}, so a dev-printed QR is never mistaken
- *   for a release and the printed banner/QR stay the same width as production.
+ *   for a release.
  * - `npm run build` / CI: the exact package.json version.
- * - `VITE_APP_VERSION` is an optional one-off override; CI does not set it.
  */
 function resolveAppVersion(command: 'build' | 'serve'): string {
-    const override = process.env.VITE_APP_VERSION?.trim();
-    if (override) {
-        return override;
-    }
     return command === 'serve' ? DEV_APP_VERSION : pkg.version;
 }
 

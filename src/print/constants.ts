@@ -76,12 +76,6 @@ export const ORIGIN_MARKER_AXIS_X_RGB: [number, number, number] = [0xa5, 0x28, 0
 export const ORIGIN_MARKER_AXIS_Y_RGB: [number, number, number] = [0x33, 0x6c, 0x34];
 export const JOIN_MEET_DASH_RGB: [number, number, number] = [90, 90, 90];
 export const PIXELS_PER_MM = 12;
-/**
- * Printed label/layout contract version. Must equal the major component of the app
- * version (`package.json`); bump both together when printed labels, layout, or QR
- * query semantics change. The origin banner prints the full app semver, not this.
- */
-export const CHARUCO_PRINT_LABEL_SPEC_VERSION = 2;
 
 function explicitCharucoPrintSourceUrl(): string | null {
     const v = import.meta.env.VITE_CHARUCO_PRINT_SOURCE_URL;

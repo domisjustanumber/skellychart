@@ -738,7 +738,7 @@ function setPrintAdviceElement(el: HTMLElement): void {
     el.replaceChildren(shop, home, homeRule);
 }
 
-/** Keeps {@link window.location} query `v,w,h,s,cv2` aligned with QR / exported charts. */
+/** Keeps the address bar's packed chart query (`b`) in step with the QR / exported chart; drops legacy keys. */
 function syncAddressBarChartQuery(): void {
     const {squaresX, squaresY} = state;
     const u = new URL(window.location.href);

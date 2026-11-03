@@ -6,6 +6,15 @@ export interface ChartVersion {
     prerelease: string | null;
 }
 
+/**
+ * The version a build stamps: `x.y.z` with an optional prerelease, and no `v` prefix or `+build`
+ * metadata. The packed link reader is built from it, so whatever a build may stamp also parses.
+ * No imports: `vite.config.ts` and the tsx scripts load this module too.
+ */
+export const APP_VERSION_SOURCE = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?`;
+export const APP_VERSION_RE = new RegExp(`^(?:${APP_VERSION_SOURCE})$`);
+
+/** Tolerant reader for every token ever printed, including legacy bare integers and `v` prefixes. */
 const CHART_VERSION_RE =
     /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
 
@@ -14,9 +23,8 @@ const CHART_VERSION_RE =
  *
  * - Legacy charts use a bare integer: `1` → 1.0.0.
  * - Current charts use the app semver: `1.4.2`.
- * - Dev servers stamp the literal `develop`, which has no numeric core: like any other
- *   malformed token it returns null, so the link is still usable for board geometry.
- * - Malformed tokens return null so the link is still usable for board geometry.
+ * - Malformed tokens, including the dev-server literal `develop` (no numeric core), return null
+ *   so the link is still usable for board geometry.
  */
 export function parseChartVersion(raw: string): ChartVersion | null {
     const m = CHART_VERSION_RE.exec(raw.trim());

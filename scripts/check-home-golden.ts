@@ -42,12 +42,12 @@ const measureContext = {
 
 const {
     PAPER_OPTIONS,
-    computeEffectivePrintLayout,
     maxSquareMmForGridAndPages,
+    printedLayout,
     resolveDistancePrintPlan,
 } = await import('../src/print/charucoLayout.js');
 const {CHARUCO_MARKER_LENGTH_RATIO} = await import('../src/print/constants.js');
-const {buildPageSpecs, nominalPaperToPdfDimensionsMm} = await import('../src/print/tiling.js');
+const {buildPageSpecs} = await import('../src/print/tiling.js');
 const {renderCharucoPrintSvg} = await import('../src/print/svgDocument.js');
 
 const SOURCE_URL = 'https://skelly.cam/c/';
@@ -86,21 +86,18 @@ for (const [paperId, squaresX, squaresY, squareMm] of [
 const actual: Record<string, string> = {};
 for (const c of cases) {
     const paper = PAPER_OPTIONS.find((p) => p.id === c.paperId)!;
-    const tiling = computeEffectivePrintLayout(c.squaresX, c.squaresY, c.squareMm, paper.wMm, paper.hMm);
+    const tiling = printedLayout(c.squaresX, c.squaresY, c.squareMm, paper.wMm, paper.hMm);
     if (!tiling) {
         throw new Error(`${c.key}: does not print`);
     }
-    const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(paper.wMm, paper.hMm, tiling);
     const {pages: svgs, guide} = await renderCharucoPrintSvg({
         paperId: c.paperId,
         squaresX: c.squaresX,
         squaresY: c.squaresY,
         squareLengthMm: c.squareMm,
-        paperWMm,
-        paperHMm,
         markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
         tiling,
-        pages: buildPageSpecs(c.squaresX, c.squaresY, tiling).pages,
+        pages: buildPageSpecs(c.squaresX, c.squaresY, tiling),
         documentationSourceUrl: SOURCE_URL,
         cooperativeYield: false,
     });

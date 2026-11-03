@@ -14,12 +14,10 @@ export interface TilingInfo {
     maxCyRest: number;
     npx: number;
     npy: number;
-    landscape: boolean;
-    /**
-     * Strip (mm) reserved above the board on the first sheet for the origin banner. Only a single-sheet
-     * chart carries the banner; a multi-sheet chart prints it on the assembly guide, so this is 0 unless
-     * the board fits on one sheet only without the banner (see {@link computeTilingInfoSingle}).
-     */
+    /** The chart sheet (mm) this tiling was computed for, turned the way it prints. */
+    paperWMm: number;
+    paperHMm: number;
+    /** Banner strip (mm) above the board on a single-sheet chart; 0 otherwise. */
     bannerReserveMm: number;
 }
 
@@ -30,8 +28,6 @@ export interface PageSpec {
     gy1: number;
     sheetIndex: number;
     isOriginPage: boolean;
-    npx: number;
-    npy: number;
     col: number;
     row: number;
 }
@@ -53,7 +49,7 @@ function tileWithFirstSheetReserve(
     paperWMm: number,
     paperHMm: number,
     bannerStripMm: number,
-): Omit<TilingInfo, 'landscape'> | null {
+): TilingInfo | null {
     const marker = originMarkerRoomMm(bannerStripMm);
     let npx = 1;
     let npy = 1;
@@ -80,7 +76,7 @@ function tileWithFirstSheetReserve(
         const nextNpy = squaresY <= maxCyFirst ? 1 : 1 + Math.ceil((squaresY - maxCyFirst) / maxCyRest);
         // More sheets only ever shrink the regions, so the counts only grow until they settle.
         if (nextNpx === npx && nextNpy === npy) {
-            return {pageCount: npx * npy, maxCx, maxCyFirst, maxCyRest, npx, npy, bannerReserveMm: bannerStripMm};
+            return {pageCount: npx * npy, maxCx, maxCyFirst, maxCyRest, npx, npy, paperWMm, paperHMm, bannerReserveMm: bannerStripMm};
         }
         npx = nextNpx;
         npy = nextNpy;
@@ -91,16 +87,17 @@ function tileWithFirstSheetReserve(
 /**
  * A chart that fits on one sheet carries the origin banner above the board. A chart that needs several
  * prints the banner on the assembly guide instead, so its first sheet reserves nothing. If the board fits
- * on one sheet only without the banner, it keeps the layout tiled with the banner's strip reserved (left
- * empty), since a single sheet must carry the banner.
+ * on one sheet only without the banner, it keeps the sheets tiled with the banner's strip reserved, since
+ * a single sheet must carry the banner, but prints them without the strip: a first sheet without it is
+ * never shorter (`check:presets`), so the tiles still fit.
  */
-function computeTilingInfoSingle(
+function tileOneOrientation(
     squaresX: number,
     squaresY: number,
     squareMm: number,
     paperWMm: number,
     paperHMm: number,
-): Omit<TilingInfo, 'landscape'> | null {
+): TilingInfo | null {
     const withBanner = tileWithFirstSheetReserve(
         squaresX,
         squaresY,
@@ -113,91 +110,37 @@ function computeTilingInfoSingle(
         return withBanner;
     }
     const withoutBanner = tileWithFirstSheetReserve(squaresX, squaresY, squareMm, paperWMm, paperHMm, 0);
-    return withoutBanner && withoutBanner.pageCount > 1 ? withoutBanner : withBanner;
+    if (withoutBanner && withoutBanner.pageCount > 1) {
+        return withoutBanner;
+    }
+    return withBanner && {...withBanner, bannerReserveMm: 0};
 }
 
 /**
- * When page count and per-sheet tile-area score (`maxCx * maxCyRest`) tie, prefer sheet orientation
- * that matches grid aspect: wider boards (sx > sy) favor landscape paper; taller boards favor portrait.
- * Square boards keep portrait (matches historical default).
+ * The layout printed for this board and square length, or `null` if it cannot be printed at all. The
+ * board is always exactly `squaresX`×`squaresY` (never transposed); only the paper turns: fewest
+ * sheets, then the most squares per sheet (`maxCx * maxCyRest`), then the board's own aspect (wider
+ * boards take landscape, taller and square ones portrait).
  */
-export function paperOrientationPreferenceTieBreak(squaresX: number, squaresY: number, landscape: boolean): number {
-    if (squaresX === squaresY) {
-        return landscape ? 1 : 0;
-    }
-    if (squaresX > squaresY) {
-        return landscape ? 0 : 1;
-    }
-    return landscape ? 1 : 0;
-}
-
-export function computeTilingInfo(
+export function printedLayout(
     squaresX: number,
     squaresY: number,
     squareMm: number,
     nominalWMm: number,
     nominalHMm: number,
 ): TilingInfo | null {
-    if (Math.abs(nominalWMm - nominalHMm) < 0.01) {
-        const t = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm);
-        return t ? {...t, landscape: false} : null;
+    const portrait = tileOneOrientation(squaresX, squaresY, squareMm, nominalWMm, nominalHMm);
+    const landscape = tileOneOrientation(squaresX, squaresY, squareMm, nominalHMm, nominalWMm);
+    if (!portrait || !landscape) {
+        return portrait ?? landscape;
     }
-    const portrait = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalWMm, nominalHMm);
-    const landscape = computeTilingInfoSingle(squaresX, squaresY, squareMm, nominalHMm, nominalWMm);
-    const scored: {
-        info: Omit<TilingInfo, 'landscape'>;
-        landscape: boolean;
-        key: [number, number, number];
-    }[] = [];
-    if (portrait) {
-        const prod = portrait.maxCx * portrait.maxCyRest;
-        scored.push({
-            info: portrait,
-            landscape: false,
-            key: [portrait.pageCount, -prod, paperOrientationPreferenceTieBreak(squaresX, squaresY, false)],
-        });
+    const better =
+        portrait.pageCount - landscape.pageCount ||
+        landscape.maxCx * landscape.maxCyRest - portrait.maxCx * portrait.maxCyRest;
+    if (better !== 0) {
+        return better < 0 ? portrait : landscape;
     }
-    if (landscape) {
-        const prod = landscape.maxCx * landscape.maxCyRest;
-        scored.push({
-            info: landscape,
-            landscape: true,
-            key: [landscape.pageCount, -prod, paperOrientationPreferenceTieBreak(squaresX, squaresY, true)],
-        });
-    }
-    if (scored.length === 0) {
-        return null;
-    }
-    scored.sort((a, b) => {
-        for (let i = 0; i < 3; i++) {
-            if (a.key[i] !== b.key[i]) {
-                return a.key[i]! - b.key[i]!;
-            }
-        }
-        return 0;
-    });
-    const best = scored[0]!;
-    return {...best.info, landscape: best.landscape};
-}
-
-/**
- * PDF / physical sheet width×height (mm) for a nominal paper size from presets (`wMm`×`hMm`, short×long).
- * Must match the orientation used when `tiling` was computed (`computeTilingInfo*` swaps dimensions
- * when `landscape` is true); otherwise `maxCx` / row caps assume the wrong printable width and tiles
- * bisect ChArUco squares on the raster.
- */
-export function nominalPaperToPdfDimensionsMm(
-    nominalWMm: number,
-    nominalHMm: number,
-    tiling: TilingInfo,
-): {paperWMm: number; paperHMm: number} {
-    if (Math.abs(nominalWMm - nominalHMm) < 0.01) {
-        return {paperWMm: nominalWMm, paperHMm: nominalHMm};
-    }
-    if (tiling.landscape) {
-        return {paperWMm: nominalHMm, paperHMm: nominalWMm};
-    }
-    return {paperWMm: nominalWMm, paperHMm: nominalHMm};
+    return squaresX > squaresY ? landscape : portrait;
 }
 
 /**
@@ -208,11 +151,7 @@ export function printedSheetCount(chartSheets: number): number {
     return chartSheets > 1 ? chartSheets + 1 : chartSheets;
 }
 
-export function buildPageSpecs(
-    squaresX: number,
-    squaresY: number,
-    tiling: TilingInfo,
-): {pages: PageSpec[]; npx: number; npy: number} {
+export function buildPageSpecs(squaresX: number, squaresY: number, tiling: TilingInfo): PageSpec[] {
     const {maxCx, maxCyFirst, maxCyRest, npx} = tiling;
     const rowRanges: [number, number][] = [];
     let gy = 0;
@@ -222,7 +161,6 @@ export function buildPageSpecs(
         rowRanges.push([gy, gyEnd]);
         gy = gyEnd;
     }
-    const npy = rowRanges.length;
     const pages: PageSpec[] = [];
     let sheet = 0;
     for (let row = 0; row < rowRanges.length; row++) {
@@ -238,12 +176,10 @@ export function buildPageSpecs(
                 gy1,
                 sheetIndex: sheet,
                 isOriginPage: col === 0 && row === 0,
-                npx,
-                npy,
                 col,
                 row,
             });
         }
     }
-    return {pages, npx, npy};
+    return pages;
 }

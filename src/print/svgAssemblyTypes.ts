@@ -6,9 +6,8 @@ export interface PrintSvgParams {
     squaresX: number;
     squaresY: number;
     squareLengthMm: number;
-    paperWMm: number;
-    paperHMm: number;
     markerLengthRatio: number;
+    /** The printed layout; its `paperWMm` × `paperHMm` is the chart sheet every page is drawn on. */
     tiling: TilingInfo;
     /** Sheets to render; may be a leading subset of the layout (e.g. preview thumbnails). */
     pages: PageSpec[];

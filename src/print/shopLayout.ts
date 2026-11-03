@@ -24,7 +24,6 @@ import {
 import {helveticaTextWidthPx} from './helveticaMetrics.js';
 import {compactBannerHeightMm, compactBannerMinWidthPx} from './originBannerLayout.js';
 import {SHOP_SQUARE_MM_MAX, shopSizeById, shopSizeGroups} from './shopSizes.js';
-import {paperOrientationPreferenceTieBreak} from './tiling.js';
 
 /** White quiet zone inside the trim on every side (mm): a quarter square, at least 10 mm, at most 25 mm. */
 export function shopQuietZoneMm(squareMm: number): number {
@@ -127,52 +126,48 @@ export function shopSheetLayout(
         }
         const e = layout.quietZoneMm;
         const capacity = Math.floor((w - 2 * e) / squareMm) * Math.floor((h - 2 * e - banner.heightMm) / squareMm);
-        return [{layout: {...layout, sizeId, landscape}, capacity, preference: paperOrientationPreferenceTieBreak(squaresX, squaresY, landscape)}];
+        return [{layout: {...layout, sizeId, landscape}, capacity, preference: Number(landscape !== (squaresX > squaresY))}];
     });
     candidates.sort((a, b) => b.capacity - a.capacity || a.preference - b.preference);
     return candidates[0]?.layout ?? null;
 }
 
-const squareCache = new Map<string, number[]>();
+const squareCache = new Map<string, number | null>();
 const SQUARE_CACHE_LIMIT = 512;
 
-/** Square lengths (mm) the board prints at on this size, ascending; contiguous from 10 mm when any fit. */
-export function shopValidSquaresMm(
-    squaresX: number,
-    squaresY: number,
-    sizeId: ShopSizeId,
-    version: string = APP_VERSION_DISPLAY,
-): number[] {
-    const key = `${sizeId}:${squaresX}x${squaresY}:${version}`;
-    const hit = squareCache.get(key);
-    if (hit) {
-        return hit;
-    }
-    const valid: number[] = [];
-    for (let s = CHARUCO_SQUARE_MM_MIN; s <= SHOP_SQUARE_MM_MAX; s++) {
-        if (shopSheetLayout(squaresX, squaresY, s, sizeId, version)) {
-            valid.push(s);
-        }
-    }
-    if (squareCache.size >= SQUARE_CACHE_LIMIT) {
-        squareCache.clear();
-    }
-    squareCache.set(key, valid);
-    return valid;
-}
-
-/** Largest square length (mm) the board prints at on this size, or `null` if none. */
+/**
+ * Largest square length (mm) the board prints at on this size, or `null` if none. Every length from
+ * CHARUCO_SQUARE_MM_MIN up to it prints too, with no gaps (checked by scripts/check-shop.ts).
+ */
 export function maxShopSquareMm(
     squaresX: number,
     squaresY: number,
     sizeId: ShopSizeId,
     version: string = APP_VERSION_DISPLAY,
 ): number | null {
-    const valid = shopValidSquaresMm(squaresX, squaresY, sizeId, version);
-    return valid[valid.length - 1] ?? null;
+    const key = `${sizeId}:${squaresX}x${squaresY}:${version}`;
+    const hit = squareCache.get(key);
+    if (hit !== undefined) {
+        return hit;
+    }
+    let max: number | null = null;
+    for (let s = SHOP_SQUARE_MM_MAX; s >= CHARUCO_SQUARE_MM_MIN; s--) {
+        if (shopSheetLayout(squaresX, squaresY, s, sizeId, version)) {
+            max = s;
+            break;
+        }
+    }
+    if (squareCache.size >= SQUARE_CACHE_LIMIT) {
+        squareCache.clear();
+    }
+    squareCache.set(key, max);
+    return max;
 }
 
-/** Nearest square length at or above `minSquareMm` the board prints at on this size (ties go smaller). */
+/**
+ * Nearest square length at or above `minSquareMm` the board prints at on this size, or `null` if none.
+ * The lengths that print have no gaps (see {@link maxShopSquareMm}), so snapping is a clamp.
+ */
 export function snapShopSquareMm(
     raw: number,
     squaresX: number,
@@ -181,14 +176,9 @@ export function snapShopSquareMm(
     minSquareMm: number = CHARUCO_SQUARE_MM_MIN,
     version: string = APP_VERSION_DISPLAY,
 ): number | null {
-    const target = Math.round(Math.max(CHARUCO_SQUARE_MM_MIN, Math.min(SHOP_SQUARE_MM_MAX, raw)));
-    let best: number | null = null;
-    for (const s of shopValidSquaresMm(squaresX, squaresY, sizeId, version)) {
-        if (s >= minSquareMm && (best === null || Math.abs(s - target) < Math.abs(best - target))) {
-            best = s;
-        }
-    }
-    return best;
+    const max = maxShopSquareMm(squaresX, squaresY, sizeId, version);
+    const min = Math.max(CHARUCO_SQUARE_MM_MIN, Math.ceil(minSquareMm));
+    return max === null || max < min ? null : Math.min(max, Math.max(min, Math.round(raw)));
 }
 
 /**

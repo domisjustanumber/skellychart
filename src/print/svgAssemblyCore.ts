@@ -601,8 +601,6 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
         squaresX,
         squaresY,
         squareLengthMm,
-        paperWMm,
-        paperHMm,
         markerLengthRatio,
         tiling,
         pages,
@@ -612,6 +610,7 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
         chartUrl,
         cooperativeYield,
     } = params;
+    const {paperWMm, paperHMm} = tiling;
 
     const yieldStep = (): Promise<void> =>
         cooperativeYield !== false ? yieldToMain() : Promise.resolve();

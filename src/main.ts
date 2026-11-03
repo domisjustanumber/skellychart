@@ -12,11 +12,11 @@ import {
     PAPER_OPTIONS,
     paperById,
     charucoPagePreviewBorderColor,
-    computeEffectivePrintLayout,
     defaultPaperId,
     defaultRegion,
     layoutSummaryText,
     maxSquareMmForGridAndPages,
+    printedLayout,
     resolveDistancePrintPlan,
     shouldUseImperialWorkingDistanceUnits,
     snapSquareMm,
@@ -24,11 +24,11 @@ import {
     pageStepNeighbours,
     steppablePageCounts,
     type PageStep,
-    validTargetPageCountsForGrid,
     workingDistanceMinSquareMm,
     workingDistanceTierFromSquareLengthMm,
 } from './print/charucoLayout.js';
-import {buildPageSpecs, nominalPaperToPdfDimensionsMm, printedSheetCount} from './print/tiling.js';
+import {gridFeasibility} from './print/feasibilityRules.js';
+import {buildPageSpecs, printedSheetCount} from './print/tiling.js';
 import {perfDev, perfLog} from './print/perfDebug.js';
 import {
     CHARUCO_MARKER_LENGTH_RATIO,
@@ -278,7 +278,7 @@ function applyAutoPreset(): void {
  */
 function effectiveTiling() {
     const pd = paperDims();
-    return computeEffectivePrintLayout(state.squaresX, state.squaresY, state.squareMm, pd.wMm, pd.hMm);
+    return printedLayout(state.squaresX, state.squaresY, state.squareMm, pd.wMm, pd.hMm);
 }
 
 /** The print-shop board as laid out on its size, or `null` (home mode, or it does not fit). */
@@ -312,15 +312,13 @@ function squareSliderMaxMm(): number {
     return state.mode === 'shop' ? SHOP_SQUARE_MM_MAX : CHARUCO_SQUARE_MM_MAX;
 }
 
-/** Nearest square length (at or above `minSquareMm`) the board prints at in the current mode. */
-function snapSquareForMode(raw: number, minSquareMm?: number): number | null {
+/** Nearest square length the board prints at in the current mode. */
+function snapSquareForMode(raw: number): number | null {
     if (state.mode === 'shop') {
-        return state.shopSizeId
-            ? snapShopSquareMm(raw, state.squaresX, state.squaresY, state.shopSizeId, minSquareMm)
-            : null;
+        return state.shopSizeId ? snapShopSquareMm(raw, state.squaresX, state.squaresY, state.shopSizeId) : null;
     }
     const pd = paperDims();
-    return snapSquareMm(raw, state.squaresX, state.squaresY, pd.wMm, pd.hMm, minSquareMm);
+    return snapSquareMm(raw, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
 }
 
 /**
@@ -409,10 +407,13 @@ function pagesSliderDisplay(tiling: ReturnType<typeof effectiveTiling>): number 
     return tiling?.pageCount ?? 1;
 }
 
-/** Stops of the sheets stepper for the current grid, paper and working distance. */
+/**
+ * Stops of the sheets stepper for the current grid, paper and working distance: they end-stop at the
+ * distance's minimum square length and never change the distance.
+ */
 function pageSteps(): PageStep[] {
     const pd = paperDims();
-    return steppablePageCounts(state.squaresX, state.squaresY, pd.wMm, pd.hMm, distanceMinSquareMm());
+    return steppablePageCounts(state.squaresX, state.squaresY, pd.wMm, pd.hMm, workingDistanceMinSquareMm(state.distanceId));
 }
 
 type PageStepTarget = 'fewer' | 'more' | 'fewest' | 'most';
@@ -491,10 +492,13 @@ function syncPageStepper(tiling: ReturnType<typeof effectiveTiling>, imperial: b
     let hint = '';
     if (tiling && !fewer && count > 1) {
         const pd = paperDims();
-        const fewestAnyDistance = validTargetPageCountsForGrid(state.squaresX, state.squaresY, pd.wMm, pd.hMm)[0];
+        const fewestAnyDistance = gridFeasibility(state.squaresX, state.squaresY, pd.wMm, pd.hMm).steps[0]?.pages;
         hint =
             fewestAnyDistance !== undefined && fewestAnyDistance < count
-                ? interpolate(S.pagesFewestHint, {distance: bandLabel(state.distanceId, imperial), mm: distanceMinSquareMm()})
+                ? interpolate(S.pagesFewestHint, {
+                      distance: bandLabel(state.distanceId, imperial),
+                      mm: workingDistanceMinSquareMm(state.distanceId),
+                  })
                 : interpolate(S.pagesFewestGridHint, {sheets: sheetsShort(printedSheetCount(count))});
     } else if (tiling && !more) {
         // The last stop is always one square per sheet (checked by scripts/check-presets.ts).
@@ -578,11 +582,6 @@ function setSquareFollowingBand(squareMm: number): void {
         state.distanceId = bandAfter;
     }
     state.squareMm = squareMm;
-}
-
-/** Smallest square length the selected working distance allows; the Pages slider end-stops here and never changes distance. */
-function distanceMinSquareMm(): number {
-    return workingDistanceMinSquareMm(state.distanceId);
 }
 
 /**
@@ -672,26 +671,13 @@ function scheduleSyncUi(): void {
     });
 }
 
-function finalizeRangeGestureUi(): void {
-    rangePointerHeld = false;
-    if (syncUiRafId !== null) {
-        window.cancelAnimationFrame(syncUiRafId);
-        syncUiRafId = null;
-    }
-    syncUi({lite: false, previewDelayMs: 0});
-}
-
-function wireRangeResponsiveUi(el: HTMLInputElement): void {
-    el.addEventListener('pointerdown', () => {
-        rangePointerHeld = true;
-    });
-}
-
-function finalizeRangeGestureIfNeeded(): void {
+/** Ends a slider drag or a held stepper: one full sync (it drops any pending lite one) and the preview now. */
+function finalizeRangeGesture(): void {
     if (!rangePointerHeld) {
         return;
     }
-    finalizeRangeGestureUi();
+    rangePointerHeld = false;
+    syncUi({lite: false, previewDelayMs: 0});
 }
 
 function setIntroElement(el: HTMLElement): void {
@@ -1418,10 +1404,9 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
         const previewWallStart = perfDev() ? performance.now() : 0;
 
         const {squaresX: px, squaresY: py} = state;
-        const pd = paperDims();
-        const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
+        const {paperWMm, paperHMm} = tiling;
 
-        const allPages = buildPageSpecs(px, py, tiling).pages;
+        const allPages = buildPageSpecs(px, py, tiling);
         // Only the thumbnails that are shown are rendered; sheet headers still count every chart sheet.
         const pages = allPages.slice(0, MAX_PREVIEW_PAGES);
 
@@ -1432,8 +1417,6 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                 squaresX: px,
                 squaresY: py,
                 squareLengthMm: state.squareMm,
-                paperWMm,
-                paperHMm,
                 markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
                 tiling,
                 pages,
@@ -1782,20 +1765,17 @@ async function savePdfFile(): Promise<void> {
     const gridX = state.squaresX;
     const gridY = state.squaresY;
     const prefix = exportBasenamePrefix();
-    const pd = paperById(paperId) ?? PAPER_OPTIONS[0]!;
-    const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
+    const {paperWMm, paperHMm} = tiling;
     const px = gridX;
     const py = gridY;
     await runPdfExport(async (signal, setLabel) => {
         await yieldToMain();
-        const pages = buildPageSpecs(px, py, tiling).pages;
+        const pages = buildPageSpecs(px, py, tiling);
         const {pages: svgs, guide} = await renderCharucoPrintSvg({
             paperId,
             squaresX: px,
             squaresY: py,
             squareLengthMm: squareMm,
-            paperWMm,
-            paperHMm,
             markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
             tiling,
             pages,
@@ -1878,10 +1858,9 @@ async function openPrintDialog(): Promise<void> {
         // Snapshot the chart before yielding, as Save does, so a control change cannot mix two layouts.
         const paperId = state.paperId;
         const squareMm = state.squareMm;
-        const pd = paperDims();
-        const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
+        const {paperWMm, paperHMm} = tiling;
         const {squaresX: px, squaresY: py} = state;
-        const pages = buildPageSpecs(px, py, tiling).pages;
+        const pages = buildPageSpecs(px, py, tiling);
         await yieldToMain();
 
         const {pages: svgs, guide} = await renderCharucoPrintSvg({
@@ -1889,8 +1868,6 @@ async function openPrintDialog(): Promise<void> {
             squaresX: px,
             squaresY: py,
             squareLengthMm: squareMm,
-            paperWMm,
-            paperHMm,
             markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
             tiling,
             pages,
@@ -2007,12 +1984,12 @@ function applyQrQueryFromLocation(): void {
             state.squareMm = Math.round(parsed.squareLengthMm);
         }
         const linkedSquareMm = state.squareMm;
-        // A link is not a slider: pick the largest distance whose minimum this square length meets.
-        state.distanceId = workingDistanceTierFromSquareLengthMm(state.squareMm);
         const snapped = snapSquareMm(state.squareMm, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
         if (snapped !== null) {
             state.squareMm = snapped;
         }
+        // A link is not a slider: pick the largest distance whose minimum this square length meets.
+        state.distanceId = workingDistanceTierFromSquareLengthMm(state.squareMm);
         linkSquareMm = state.squareMm !== linkedSquareMm ? linkedSquareMm : null;
     }
 
@@ -2092,8 +2069,17 @@ function syncQrVersionBanner(): void {
 }
 
 function wireUi(): void {
-    window.addEventListener('pointerup', finalizeRangeGestureIfNeeded, true);
-    window.addEventListener('pointercancel', finalizeRangeGestureIfNeeded, true);
+    window.addEventListener(
+        'pointerdown',
+        (e) => {
+            if (e.target instanceof HTMLInputElement && e.target.type === 'range') {
+                rangePointerHeld = true;
+            }
+        },
+        true,
+    );
+    window.addEventListener('pointerup', finalizeRangeGesture, true);
+    window.addEventListener('pointercancel', finalizeRangeGesture, true);
 
     const distanceSel = byId('distance') as HTMLSelectElement;
     /** Native `<select>` does not fire `change` when re-picking the same option; briefly clear selection so it always fires. */
@@ -2157,7 +2143,6 @@ function wireUi(): void {
     });
 
     const sqmmEl = byId('sqmm') as HTMLInputElement;
-    wireRangeResponsiveUi(sqmmEl);
     sqmmEl.addEventListener('input', (e) => {
         state.autoGrid = false;
         forgetLinkSquare();
@@ -2192,7 +2177,6 @@ function wireUi(): void {
     });
 
     const sxEl = byId('sx') as HTMLInputElement;
-    wireRangeResponsiveUi(sxEl);
     sxEl.addEventListener('input', (e) => {
         state.autoGrid = false;
         forgetLinkSquare();
@@ -2202,7 +2186,6 @@ function wireUi(): void {
     });
 
     const syEl = byId('sy') as HTMLInputElement;
-    wireRangeResponsiveUi(syEl);
     syEl.addEventListener('input', (e) => {
         state.autoGrid = false;
         forgetLinkSquare();

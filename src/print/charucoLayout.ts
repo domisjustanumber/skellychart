@@ -4,7 +4,7 @@
  */
 import {buildPageSpecs, type TilingInfo} from './tiling.js';
 import {BOARD_GRID_MAX, BOARD_GRID_MIN, CHARUCO_SQUARE_MM_MAX, CHARUCO_SQUARE_MM_MIN} from './constants.js';
-import {gridFeasibility, printedLayout} from './feasibilityRules.js';
+import {gridFeasibility, type PageStep} from './feasibilityRules.js';
 import {charucoBoardPixelLayout, charucoCropXRange, charucoCropYRange} from '../charuco/board.js';
 
 export const PAPER_OPTIONS: {id: string; wMm: number; hMm: number}[] = [
@@ -178,6 +178,8 @@ export function resolveDistancePrintPlan(
 }
 
 export {CHARUCO_SQUARE_MM_MAX, CHARUCO_SQUARE_MM_MIN} from './constants.js';
+export {printedLayout} from './tiling.js';
+export type {PageStep} from './feasibilityRules.js';
 
 /**
  * Square lengths up to this (mm) map to the `close` preset (UI: “1 - 2m”); between this and
@@ -255,31 +257,10 @@ export function maxSquareMmForGridAndPages(
 }
 
 /**
- * Page counts the Pages slider offers, ascending: each prints exactly that many sheets at its largest
- * square length, and that square is at least `minSquareMm` (the working distance minimum). The last is
- * one square per sheet at the largest square length that prints.
- */
-export function validTargetPageCountsForGrid(
-    squaresX: number,
-    squaresY: number,
-    paperWMm: number,
-    paperHMm: number,
-    minSquareMm: number = CHARUCO_SQUARE_MM_MIN,
-): number[] {
-    const f = gridFeasibility(squaresX, squaresY, paperWMm, paperHMm);
-    return f.pageCounts.filter((p) => f.maxSquareMmByPageCount.get(p)! >= minSquareMm);
-}
-
-/** One stop of the sheets stepper: a page count and the largest square length that prints exactly it. */
-export interface PageStep {
-    pages: number;
-    squareMm: number;
-}
-
-/**
- * Stops of the sheets stepper, ascending: the page counts from {@link validTargetPageCountsForGrid}, minus
- * near-duplicates (a count whose largest square is less than max(1 mm, 3%) bigger than the previous kept
- * stop). The fewest and the most sheets are always kept.
+ * Stops of the sheets stepper, ascending: every page count the grid prints on whose largest square length
+ * is at least `minSquareMm` (the working distance minimum), minus near-duplicates (a count whose largest
+ * square is less than max(1 mm, 3%) bigger than the previous kept stop). The fewest and the most sheets
+ * are always kept; the most is one square per sheet at the largest square length that prints.
  */
 export function steppablePageCounts(
     squaresX: number,
@@ -288,10 +269,7 @@ export function steppablePageCounts(
     paperHMm: number,
     minSquareMm: number = CHARUCO_SQUARE_MM_MIN,
 ): PageStep[] {
-    const all = validTargetPageCountsForGrid(squaresX, squaresY, paperWMm, paperHMm, minSquareMm).map((pages) => ({
-        pages,
-        squareMm: maxSquareMmForGridAndPages(squaresX, squaresY, paperWMm, paperHMm, pages)!,
-    }));
+    const all = gridFeasibility(squaresX, squaresY, paperWMm, paperHMm).steps.filter((s) => s.squareMm >= minSquareMm);
     const kept: PageStep[] = [];
     all.forEach((step, i) => {
         const prev = kept[kept.length - 1];
@@ -319,33 +297,20 @@ export function pageStepNeighbours(
     };
 }
 
-/** Square lengths (mm) that print on this paper, ascending. */
-export function enumerateValidSquareSizes(
-    squaresX: number,
-    squaresY: number,
-    paperWMm: number,
-    paperHMm: number,
-): number[] {
-    return gridFeasibility(squaresX, squaresY, paperWMm, paperHMm).validSquaresMm;
-}
-
-/** Nearest printable square length at or above `minSquareMm` (ties go smaller), or `null` if none exists. */
+/**
+ * Nearest printable square length, or `null` if none exists. A grid prints every length from
+ * CHARUCO_SQUARE_MM_MIN up to its largest with no gaps (checked by scripts/check-presets.ts), so snapping
+ * is a clamp.
+ */
 export function snapSquareMm(
     raw: number,
     squaresX: number,
     squaresY: number,
     paperWMm: number,
     paperHMm: number,
-    minSquareMm: number = CHARUCO_SQUARE_MM_MIN,
 ): number | null {
-    const target = Math.round(Math.max(CHARUCO_SQUARE_MM_MIN, Math.min(CHARUCO_SQUARE_MM_MAX, raw)));
-    let best: number | null = null;
-    for (const s of enumerateValidSquareSizes(squaresX, squaresY, paperWMm, paperHMm)) {
-        if (s >= minSquareMm && (best === null || Math.abs(s - target) < Math.abs(best - target))) {
-            best = s;
-        }
-    }
-    return best;
+    const max = gridFeasibility(squaresX, squaresY, paperWMm, paperHMm).maxSquareMm;
+    return max === null ? null : Math.min(max, Math.max(CHARUCO_SQUARE_MM_MIN, Math.round(raw)));
 }
 
 export interface CharucoPagePreviewRect {
@@ -370,7 +335,7 @@ export function computeCharucoPagePreviewRects(
     const pw = Math.max(1, Math.round(previewCanvasW));
     const ph = Math.max(1, Math.round(previewCanvasH));
     const layout = charucoBoardPixelLayout(pw, ph, squaresX, squaresY);
-    return buildPageSpecs(squaresX, squaresY, tiling).pages.map((r) => {
+    return buildPageSpecs(squaresX, squaresY, tiling).map((r) => {
         const [l, rPx] = charucoCropXRange(r.gx0, r.gx1, layout);
         const [t, bPx] = charucoCropYRange(r.gy0, r.gy1, layout);
         return {
@@ -415,17 +380,6 @@ export function charucoPagePrintRgb(sheetIndex1Based: number, totalPages: number
         return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))));
     };
     return [f(0), f(8), f(4)];
-}
-
-/** The layout printed for this board: exactly squaresX×squaresY, fewest sheets, best paper orientation. */
-export function computeEffectivePrintLayout(
-    squaresX: number,
-    squaresY: number,
-    squareMm: number,
-    paperWMm: number,
-    paperHMm: number,
-): TilingInfo | null {
-    return printedLayout(squaresX, squaresY, squareMm, paperWMm, paperHMm);
 }
 
 export function layoutSummaryText(

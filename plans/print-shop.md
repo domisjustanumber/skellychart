@@ -454,8 +454,8 @@ It also asserts the writer-to-parser round trip for every size × every bleed in
 - With standard sizes only, shop geometry lives in its own pure module instead of threading a `SheetProfile` through the home functions (`feasibilityRules.ts`, `tiling.ts`, `charucoLayout.ts` are unchanged). Step 8 calls the shop functions in shop mode.
 - Feasibility depends only on the trim, so bleed and marks are not inputs.
 - `shopQuietZoneMm(s)` = min(25, max(10, s/4)); `shopBannerSizeMm()` (memoised by printed text widths).
-- `shopSheetLayout(X, Y, s, sizeId)` returns `ShopLayout | null` with trim, E, banner, board and content boxes and the orientation (the page is added from the options at render time). It tries both orientations: more squares held first, then `paperOrientationPreferenceTieBreak` (`tiling.ts`), as home paper does.
-- `shopValidSquaresMm`, `maxShopSquareMm`, `snapShopSquareMm` (cached per size and grid); `maxShopGridForSquare(axis, other, s, sizeId)`, which also applies X·Y ≤ 501; `smallestFittingShopSize(X, Y, s, unit)` (the default size): the first size in dropdown order whose layout is non-null, or null.
+- `shopSheetLayout(X, Y, s, sizeId)` returns `ShopLayout | null` with trim, E, banner, board and content boxes and the orientation (the page is added from the options at render time). It tries both orientations: more squares held first, then the board's own aspect (wider boards landscape), as home paper does.
+- `maxShopSquareMm` (cached per size and grid; every length below it fits too, so `snapShopSquareMm` is a clamp); `maxShopGridForSquare(axis, other, s, sizeId)`, which also applies X·Y ≤ 501; `smallestFittingShopSize(X, Y, s, unit)` (the default size): the first size in dropdown order whose layout is non-null, or null.
 - `squareLengthTierBandEdgeFractions` and the square slider range take the shop maximum in step 8b.
 
 *Verified:* `check:shop` checks, for every size, a sampled set of grids and every square, that:

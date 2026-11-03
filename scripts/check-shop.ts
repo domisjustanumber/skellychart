@@ -28,7 +28,6 @@ import {
     resolveShopDistancePlan,
     shopQuietZoneMm,
     shopSheetLayout,
-    shopValidSquaresMm,
     smallestFittingShopSize,
 } from '../src/print/shopLayout.js';
 import {
@@ -230,16 +229,14 @@ for (const size of SHOP_SIZES) {
     for (const squaresX of SAMPLE_COUNTS) {
         for (const squaresY of SAMPLE_COUNTS.filter((y) => y <= boardGridAxisMax(squaresX))) {
             const label = `${size.id} ${squaresX}×${squaresY}`;
-            const valid = shopValidSquaresMm(squaresX, squaresY, size.id);
-            if (valid.length > 0 && (valid[0] !== CHARUCO_SQUARE_MM_MIN || valid.some((s, i) => i > 0 && s !== valid[i - 1]! + 1))) {
-                failures.push(`${label}: valid squares are not contiguous from ${CHARUCO_SQUARE_MM_MIN} mm`);
-            }
             const max = maxShopSquareMm(squaresX, squaresY, size.id);
-            if (max !== null && max < SHOP_SQUARE_MM_MAX && shopSheetLayout(squaresX, squaresY, max + 1, size.id)) {
-                failures.push(`${label}: ${max + 1} mm also fits, so ${max} mm is not the largest square`);
-            }
-            for (const s of valid) {
-                const l = shopSheetLayout(squaresX, squaresY, s, size.id)!;
+            // Snapping is a clamp, so every square length up to the largest must print too.
+            for (let s = CHARUCO_SQUARE_MM_MIN; max !== null && s <= max; s++) {
+                const l = shopSheetLayout(squaresX, squaresY, s, size.id);
+                if (!l) {
+                    failures.push(`${label}: ${s} mm does not fit, so the valid squares are not contiguous from ${CHARUCO_SQUARE_MM_MIN} mm`);
+                    break;
+                }
                 const e = shopQuietZoneMm(s);
                 const {content: c, board: b, banner: n} = l;
                 const tooClose = c.x < e - 1e-9 || c.y < e - 1e-9 || c.x + c.w > l.trimWMm - e + 1e-9 || c.y + c.h > l.trimHMm - e + 1e-9;

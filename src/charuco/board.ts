@@ -74,6 +74,9 @@ export function charucoCropYRange(
 
 export interface CharucoMarkerModel {
     id: number;
+    /** Square column and row the marker sits in. */
+    col: number;
+    row: number;
     /** Axis-aligned corners in board plane (mm); OpenCV order: TL, TR, BR, BL. */
     cornersMm: [{x: number; y: number}, {x: number; y: number}, {x: number; y: number}, {x: number; y: number}];
 }
@@ -94,6 +97,8 @@ export function buildCharucoMarkers(geom: CharucoGeometry): CharucoMarkerModel[]
             const y0 = y * squareLength + diff;
             markers.push({
                 id: nextId++,
+                col: x,
+                row: y,
                 cornersMm: [
                     {x: x0, y: y0},
                     {x: x0 + markerLength, y: y0},
@@ -131,13 +136,26 @@ function blitGray(
     }
 }
 
-/** OpenCV `CharucoBoardImpl::generateImage` + `Board::Impl::generateImage` (aligned blit path). */
-export function renderCharucoBoardGray(widthPx: number, heightPx: number, geom: CharucoGeometry): Uint8Array {
-    const {squaresX: w, squaresY: h, squareLength, markerLength} = geom;
-    const img = new Uint8Array(widthPx * heightPx);
-    img.fill(255);
+/** Pixel square of one marker on the board image: its top-left corner and side. */
+interface CharucoMarkerPlacement {
+    id: number;
+    col: number;
+    row: number;
+    x: number;
+    y: number;
+    side: number;
+}
 
-    const {startX, startY, pixInSquare, pixBoardW, pixBoardH} = charucoBoardPixelLayout(widthPx, heightPx, w, h);
+/**
+ * Marker squares of `Board::Impl::generateImage` (aligned blit path), shared by the raster that is
+ * checked against OpenCV and the printed SVG. Markers under 6 px are left out.
+ */
+function charucoMarkerPlacements(
+    layout: ReturnType<typeof charucoBoardPixelLayout>,
+    geom: CharucoGeometry,
+): CharucoMarkerPlacement[] {
+    const {squaresX: w, squaresY: h, squareLength, markerLength} = geom;
+    const {startX, startY, pixInSquare} = layout;
 
     const pixInMarker = (markerLength / squareLength) * pixInSquare;
     const pixInMarginMarker = 0.5 * (pixInSquare - pixInMarker);
@@ -167,21 +185,41 @@ export function renderCharucoBoardGray(widthPx: number, heightPx: number, geom: 
     const zoneOffX = startX + arucoX0;
     const zoneOffY = startY + arucoY0;
 
+    const placements: CharucoMarkerPlacement[] = [];
     for (const m of markers) {
         const oc0 = m.cornersMm[0]!;
         const oc2 = m.cornersMm[2]!;
         const p0 = {x: ((oc0.x - minX) / sizeX) * arucoW, y: ((oc0.y - minY) / sizeY) * arucoH};
         const p2 = {x: ((oc2.x - minX) / sizeX) * arucoW, y: ((oc2.y - minY) / sizeY) * arucoH};
-        let dstW = Math.round(p2.x - p0.x);
-        let dstH = Math.round(p2.y - p0.y);
+        const dstW = Math.round(p2.x - p0.x);
+        const dstH = Math.round(p2.y - p0.y);
         const side = Math.min(dstW, dstH);
         if (side < 6) {
             continue;
         }
-        const markerGray = generateImageMarker(m.id, side, 1);
-        const dx = zoneOffX + Math.round(p0.x);
-        const dy = zoneOffY + Math.round(p0.y);
-        blitGray(img, widthPx, dx, dy, markerGray, side, side);
+        placements.push({
+            id: m.id,
+            col: m.col,
+            row: m.row,
+            x: zoneOffX + Math.round(p0.x),
+            y: zoneOffY + Math.round(p0.y),
+            side,
+        });
+    }
+    return placements;
+}
+
+/** OpenCV `CharucoBoardImpl::generateImage` + `Board::Impl::generateImage` (aligned blit path). */
+export function renderCharucoBoardGray(widthPx: number, heightPx: number, geom: CharucoGeometry): Uint8Array {
+    const {squaresX: w, squaresY: h} = geom;
+    const img = new Uint8Array(widthPx * heightPx);
+    img.fill(255);
+
+    const layout = charucoBoardPixelLayout(widthPx, heightPx, w, h);
+    const {startX, startY, pixInSquare, pixBoardW, pixBoardH} = layout;
+
+    for (const p of charucoMarkerPlacements(layout, geom)) {
+        blitGray(img, widthPx, p.x, p.y, generateImageMarker(p.id, p.side, 1), p.side, p.side);
     }
 
     for (let y = 0; y < h; y++) {
@@ -217,27 +255,6 @@ export function renderCharucoBoardGray(widthPx: number, heightPx: number, geom: 
     }
 
     return img;
-}
-
-export function grayToRgba(gray: Uint8Array, width: number, height: number): Uint8ClampedArray {
-    const out = new Uint8ClampedArray(width * height * 4);
-    let gi = 0;
-    let oi = 0;
-    for (let i = 0; i < width * height; i++) {
-        const g = gray[gi++]!;
-        out[oi++] = g;
-        out[oi++] = g;
-        out[oi++] = g;
-        out[oi++] = 255;
-    }
-    return out;
-}
-
-export function putGrayOnCanvas(canvas: HTMLCanvasElement, gray: Uint8Array): void {
-    const {width, height} = canvas;
-    const ctx = canvas.getContext('2d')!;
-    const rgba = grayToRgba(gray, width, height);
-    ctx.putImageData(new ImageData(rgba as Uint8ClampedArray<ArrayBuffer>, width, height), 0, 0);
 }
 
 /**
@@ -301,36 +318,10 @@ export function renderCharucoBoardSvgFragment(
     squares?: CharucoSquareRange,
     fill = '#000',
 ): string {
-    const {squaresX: w, squaresY: h, squareLength, markerLength} = geom;
+    const {squaresX: w, squaresY: h} = geom;
     const parts: string[] = [`<g fill="${fill}">`];
-    const {startX, startY, pixInSquare, pixBoardW, pixBoardH} = charucoBoardPixelLayout(widthPx, heightPx, w, h);
-
-    const pixInMarker = (markerLength / squareLength) * pixInSquare;
-    const pixInMarginMarker = 0.5 * (pixInSquare - pixInMarker);
-    const endArucoX = Math.round(pixInSquare * (w - 1) + pixInMarginMarker + pixInMarker);
-    const endArucoY = Math.round(pixInSquare * (h - 1) + pixInMarginMarker + pixInMarker);
-    const arucoX0 = Math.round(pixInMarginMarker);
-    const arucoY0 = Math.round(pixInMarginMarker);
-    const arucoW = endArucoX - arucoX0;
-    const arucoH = endArucoY - arucoY0;
-
-    const markers = buildCharucoMarkers(geom);
-    let minX = markers[0]!.cornersMm[0]!.x;
-    let maxX = markers[0]!.cornersMm[0]!.x;
-    let minY = markers[0]!.cornersMm[0]!.y;
-    let maxY = markers[0]!.cornersMm[0]!.y;
-    for (const m of markers) {
-        for (const c of m.cornersMm) {
-            minX = Math.min(minX, c.x);
-            maxX = Math.max(maxX, c.x);
-            minY = Math.min(minY, c.y);
-            maxY = Math.max(maxY, c.y);
-        }
-    }
-    const sizeX = maxX - minX;
-    const sizeY = maxY - minY;
-    const zoneOffX = startX + arucoX0;
-    const zoneOffY = startY + arucoY0;
+    const layout = charucoBoardPixelLayout(widthPx, heightPx, w, h);
+    const {startX, startY, pixInSquare, pixBoardW, pixBoardH} = layout;
 
     const gx0 = squares?.gx0 ?? 0;
     const gx1 = squares?.gx1 ?? w;
@@ -355,45 +346,15 @@ export function renderCharucoBoardSvgFragment(
         }
     }
 
-    for (const m of markers) {
-        const oc0 = m.cornersMm[0]!;
-        const oc2 = m.cornersMm[2]!;
+    for (const p of charucoMarkerPlacements(layout, geom)) {
         // Each marker sits inside one white square; skip markers outside the requested range.
-        const mx = Math.floor(oc0.x / squareLength);
-        const my = Math.floor(oc0.y / squareLength);
-        if (mx < gx0 || mx >= gx1 || my < gy0 || my >= gy1) {
+        if (p.col < gx0 || p.col >= gx1 || p.row < gy0 || p.row >= gy1) {
             continue;
         }
-        const p0 = {x: ((oc0.x - minX) / sizeX) * arucoW, y: ((oc0.y - minY) / sizeY) * arucoH};
-        const p2 = {x: ((oc2.x - minX) / sizeX) * arucoW, y: ((oc2.y - minY) / sizeY) * arucoH};
-        const dstW = Math.round(p2.x - p0.x);
-        const dstH = Math.round(p2.y - p0.y);
-        const side = Math.min(dstW, dstH);
-        if (side < 6) {
-            continue;
-        }
-        const dx = zoneOffX + Math.round(p0.x);
-        const dy = zoneOffY + Math.round(p0.y);
         parts.push(
-            `<g transform="translate(${dx} ${dy})" shape-rendering="crispEdges">${arucoMarkerSvgPath(m.id, side, 1, fill)}</g>`,
+            `<g transform="translate(${p.x} ${p.y})" shape-rendering="crispEdges">${arucoMarkerSvgPath(p.id, p.side, 1, fill)}</g>`,
         );
     }
     parts.push('</g>');
     return parts.join('');
-}
-
-/** Standalone SVG document for a ChArUco board at pixel resolution. */
-export function renderCharucoBoardSvg(
-    widthPx: number,
-    heightPx: number,
-    geom: CharucoGeometry,
-): string {
-    const inner = renderCharucoBoardSvgFragment(widthPx, heightPx, geom);
-    return (
-        `<?xml version="1.0" encoding="UTF-8"?>` +
-        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${widthPx} ${heightPx}" width="${widthPx}" height="${heightPx}">` +
-        `<rect width="100%" height="100%" fill="#fff"/>` +
-        inner +
-        `</svg>`
-    );
 }

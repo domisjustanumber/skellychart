@@ -31,45 +31,23 @@ export const pdfLabels = {
     shopSlugParts: ['PRINT AT 100% - DO NOT SCALE', 'Trim {{trim}}', '{{squaresX}} × {{squaresY}} squares', '{{mm}} mm', 'v{{version}}', 'CMYK - PRINT AS SUPPLIED'],
     originInstructionsTitle: 'Instructions',
     /**
-     * Instructions column of a single-sheet chart's banner (wrapped when laid out). Its height is
-     * reserved by tiling, so rerun `npm run generate:banner` after changing it.
+     * Instructions column of the origin banner (wrapped when laid out), with `{{measure}}` replaced by
+     * {@link originMeasureChart} on a single-sheet chart or {@link originMeasureGuide} on the assembly guide.
      */
     originInstructionsBody: `Print at 1:1 or 100% scale. In the print dialog, disable "Fit to page", "Shrink to fit", and any similar scaling.
-Measure a black square with a ruler to ensure the printed size matches the "Square length" in the chart to the right.
+{{measure}}
 Curvature will affect camera calibration — mount the chart flat on a rigid board so it cannot bend or flop.
 For instructions on how to use the chart, buy a pre-made one, or print another, scan the QR code in the top corner.`,
-    /** Instructions column of the banner on a multi-sheet chart's assembly guide. */
-    originInstructionsBodyGuide: `Print at 1:1 or 100% scale. In the print dialog, disable "Fit to page", "Shrink to fit", and any similar scaling.
-Measure a black square on a chart page (not the reduced chart below) with a ruler to ensure the printed size matches the "Square length" to the right.
-Curvature will affect camera calibration — mount the chart flat on a rigid board so it cannot bend or flop.
-For instructions on how to use the chart, buy a pre-made one, or print another, scan the QR code in the top corner.`,
+    originMeasureChart: 'Measure a black square with a ruler to ensure the printed size matches the "Square length" in the chart to the right.',
+    originMeasureGuide: 'Measure a black square on a chart page (not the reduced chart below) with a ruler to ensure the printed size matches the "Square length" to the right.',
     /**
-     * Single multi-line block for ChArUco metadata beside the QR code. First line is rendered bold;
-     * remaining lines are wrapped as body text (see {@link originChartInfoParts}). `{{box}}` marks the
-     * empty box the user writes their measured square length in; its line is never wrapped.
+     * ChArUco metadata beside the QR code: a bold title, body lines (wrapped), then the write-in line,
+     * `before`, the empty box the user writes their measured square length in, then `after`; it is never
+     * wrapped.
      */
-    originChartInfo: `ChArUco calibration chart v{{version}}
-Size: {{squaresX}} x {{squaresY}} (X x Y)
-Square length: {{mm}} mm
-Measured square length: {{box}} mm`,
+    originChartInfo: {
+        title: 'ChArUco calibration chart v{{version}}',
+        lines: ['Size: {{squaresX}} x {{squaresY}} (X x Y)', 'Square length: {{mm}} mm'],
+        writeIn: {before: 'Measured square length:', after: 'mm'},
+    },
 } as const;
-
-/** Stands in for the write-in box in {@link originChartInfoParts}' body lines. */
-export const ORIGIN_WRITE_IN_BOX_MARK = String.fromCharCode(0xfffc);
-
-export type OriginChartInfoVars = {
-    version: string | number;
-    mm: string | number;
-    squaresX: string | number;
-    squaresY: string | number;
-};
-
-/** First line → bold title; rest → wrapped detail lines on the sheet banner. */
-export function originChartInfoParts(vars: OriginChartInfoVars): {titleLine: string; bodyBlock: string} {
-    const full = interpolate(pdfLabels.originChartInfo, {...vars, box: ORIGIN_WRITE_IN_BOX_MARK});
-    const idx = full.indexOf('\n');
-    if (idx === -1) {
-        return {titleLine: full, bodyBlock: ''};
-    }
-    return {titleLine: full.slice(0, idx), bodyBlock: full.slice(idx + 1)};
-}

@@ -1,8 +1,7 @@
 import freemocapLogoUrl from '../freemocapLogoUrl.js';
-import {getCharucoPrintSourceUrl, PIXELS_PER_MM, QR_SIZE_MM, SKELLY_TOP_HEIGHT_MM} from './constants.js';
+import {getCharucoPrintSourceUrl} from './constants.js';
 import {buildCharucoDocumentationUrl} from './charucoDocUrl.js';
-import {bannerLogoSizePx} from './originBannerLayout.js';
-import {SKELLY_LOGO_NATURAL_W_OVER_H} from './skellyLogo.js';
+import {BANNER_QR_PX} from './originBannerLayout.js';
 import {generateQrSvgFragment} from './qrSvg.js';
 import {perfAsync} from './perfDebug.js';
 import {renderCharucoPrintSvgCore} from './svgAssemblyCore.js';
@@ -71,26 +70,21 @@ function warmupFreemocapLogoCache(): void {
 /**
  * Inline logo markup (nested `<svg>`) so exported charts open in Inkscape; a top-level `<image
  * href="data:image/svg+xml,...">` is often shown as broken there, and `xlink:href` on `<image>` is
- * still what many SVG 1.1 tools expect for external images.
+ * still what many SVG 1.1 tools expect for external images. `null` when the logo did not load; the banner
+ * draws it in `BANNER_LOGO_PX`.
  */
-export async function resolveLogoForPrint(ppm: number): Promise<{
-    logoSvgInner: string | null;
-    widthPx: number;
-    heightPx: number;
-}> {
+export async function resolveLogoForPrint(): Promise<string | null> {
     const xml = await loadFreemocapLogoSvgXml();
     if (!xml) {
-        return {logoSvgInner: null, widthPx: 0, heightPx: 0};
+        return null;
     }
     if (memoLogoSvgInner === undefined) {
         memoLogoSvgInner = logoInnerMarkupFromXml(xml);
     }
-    const {widthPx, heightPx} = bannerLogoSizePx(SKELLY_TOP_HEIGHT_MM, SKELLY_LOGO_NATURAL_W_OVER_H, ppm);
-    return {logoSvgInner: memoLogoSvgInner || null, widthPx, heightPx};
+    return memoLogoSvgInner || null;
 }
 
 export async function renderCharucoPrintSvg(params: PrintSvgParams): Promise<PrintSvgResult> {
-    const ppm = PIXELS_PER_MM;
     const docUrl = buildCharucoDocumentationUrl(
         params.documentationSourceUrl ?? getCharucoPrintSourceUrl(),
         params.squaresX,
@@ -98,18 +92,15 @@ export async function renderCharucoPrintSvg(params: PrintSvgParams): Promise<Pri
         params.squareLengthMm,
         params.paperId,
     );
-    const qrSizePx = Math.max(32, Math.round(QR_SIZE_MM * ppm));
-    const qrSvgFragment = await perfAsync('QR SVG fragment', () => generateQrSvgFragment(docUrl, qrSizePx));
-    const logo = await perfAsync('Logo SVG inner fragment (cached after first fetch)', () => resolveLogoForPrint(ppm));
+    const qrSvgFragment = await perfAsync('QR SVG fragment', () => generateQrSvgFragment(docUrl, BANNER_QR_PX));
+    const logoSvgInner = await perfAsync('Logo SVG inner fragment (cached after first fetch)', () => resolveLogoForPrint());
 
     return perfAsync('renderCharucoPrintSvgCore (board + all sheets)', () =>
         renderCharucoPrintSvgCore({
             ...params,
             qrSvgFragment,
             chartUrl: docUrl,
-            logoSvgInner: logo.logoSvgInner,
-            logoWidthPx: logo.widthPx,
-            logoHeightPx: logo.heightPx,
+            logoSvgInner,
         }),
     );
 }

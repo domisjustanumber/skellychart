@@ -4,7 +4,7 @@
  * comes from per-edge safe margins and seam bands (`sheetGeometry.ts`), not freemocap's uniform 13 mm
  * margin and 12 mm join strip, so the two no longer tile the same.
  */
-import {originBannerReserveMm} from './originBannerStrip.js';
+import {originBannerReserveMm} from './originBannerLayout.js';
 import {boardRegionMm, originMarkerRoomMm} from './sheetGeometry.js';
 
 export interface TilingInfo {

@@ -13,18 +13,17 @@ import {
     MM_SHEET_HEADER_BASELINE_MM,
     MM_SHEET_HEADER_GAP_MM,
     MM_TAPE_LABEL_INSET_FROM_JOIN_MM,
-    ORIGIN_BANNER_VISUAL_SCALE,
     ORIGIN_CORNER_MARKER_PAD_MM,
     ORIGIN_CORNER_MARKER_TOP_ROOM_MM,
     ORIGIN_MARKER_AXIS_X_RGB,
     ORIGIN_MARKER_AXIS_Y_RGB,
-    ORIGIN_BANNER_MIN_TYPE_FRACTION,
     PIXELS_PER_MM,
+    SHEET_HEADER_FONT_PX,
 } from './constants.js';
 import {charucoPagePrintRgb, computeCharucoPagePreviewRects} from './charucoLayout.js';
 import {helveticaTextWidthPx} from './helveticaMetrics.js';
 import {interpolate, pdfLabels} from './labels.js';
-import {layoutOriginBanner, type OriginBannerLayout, wrapHelvetica} from './originBannerLayout.js';
+import {BANNER_TYPE_PX, layoutOriginBanner, type OriginBannerLayout, wrapHelvetica} from './originBannerLayout.js';
 import type {PageSpec, TilingInfo} from './tiling.js';
 import type {PrintSheetSvg, PrintSvgAssemblyParams, PrintSvgResult} from './svgAssemblyTypes.js';
 import type {OutlineTextOptions} from './outlineText.js';
@@ -224,11 +223,8 @@ export function svgCharucoBoardInfoBlock(
     ppm: number,
     emitText?: SvgTextEmitter,
 ): string {
-    let box = '';
-    if (writeInBox) {
-        const sw = Math.max(1, Math.round(0.25 * ppm));
-        box = `<rect x="${writeInBox.x + sw / 2}" y="${writeInBox.y + sw / 2}" width="${writeInBox.w - sw}" height="${writeInBox.h - sw}" fill="#fff" stroke="#000" stroke-width="${sw}"/>`;
-    }
+    const sw = Math.max(1, Math.round(0.25 * ppm));
+    const box = `<rect x="${writeInBox.x + sw / 2}" y="${writeInBox.y + sw / 2}" width="${writeInBox.w - sw}" height="${writeInBox.h - sw}" fill="#fff" stroke="#000" stroke-width="${sw}"/>`;
     if (emitText) {
         const title = emitText(titleLine, {x, y: yStart, fontPx: titleFontPx, bold: true, anchor: 'end', baseline: 'hanging'});
         const body = bodyLines.map(({text, right, y}) =>
@@ -405,13 +401,12 @@ function svgAssemblyGuideSheet(o: {
     paperHMm: number;
     geom: CharucoGeometry;
     tiling: TilingInfo;
-    bodyFontPx: number;
-    bodyLineLead: number;
     ppm: number;
     /** Origin banner laid out for a sheet this size; `bottom` includes the gap below it. */
     banner: (sheetWMm: number, sheetHMm: number) => {parts: string[]; bottom: number};
 }): PrintSheetSvg {
-    const {paperId, geom, tiling, bodyFontPx, bodyLineLead, ppm} = o;
+    const {paperId, geom, tiling, ppm} = o;
+    const {bodyFontPx, bodyLineLead} = BANNER_TYPE_PX;
     const {squaresX, squaresY, squareLength} = geom;
     const fullWPx = Math.max(1, layoutIntPx(squaresX * squareLength * ppm));
     const fullHPx = Math.max(1, layoutIntPx(squaresY * squareLength * ppm));
@@ -614,8 +609,6 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
         signal,
         qrSvgFragment,
         logoSvgInner,
-        logoWidthPx,
-        logoHeightPx,
         chartUrl,
         cooperativeYield,
     } = params;
@@ -657,43 +650,28 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
     };
     const seamPx = Math.round(MM_SEAM_LABEL_BAND_MM * ppm);
     const totalPages = params.totalPages ?? pages.length;
-    // Only a single-sheet chart carries the banner on the chart itself; tiling reserved its strip. Generated
-    // heights are whole px at PIXELS_PER_MM; round so float mm never loses a px.
+    // Only a single-sheet chart carries the banner on the chart itself; tiling reserved its strip. Its
+    // height is whole px at PIXELS_PER_MM; round so float mm never loses a px.
     const bannerOnChart = tiling.pageCount === 1;
     const originTopReservePx = Math.round(tiling.bannerReserveMm * ppm);
-    const bScale = ORIGIN_BANNER_VISUAL_SCALE;
-    const bodyFontPx = Math.round(26 * (ppm / 12) * bScale);
-    const joinFontPx = bodyFontPx;
+    const joinFontPx = SHEET_HEADER_FONT_PX;
 
-    const skellyW = logoSvgInner ? logoWidthPx : 0;
-    const skellyH = logoSvgInner ? logoHeightPx : 0;
-
-    /**
-     * Origin banner (logo, instructions, chart info, QR) at a given type scale on a sheet this size.
-     * Returns `null` when the text columns do not fit side by side at that scale.
-     */
+    /** Origin banner (logo, instructions, chart info, QR) on a sheet this size. */
     const buildOriginBanner = (
-        typeScale: number,
         sheetWMm: number,
         sheetHMm: number,
-        instructionsBody?: string,
-    ): {parts: string[]; bottom: number} | null => {
+        instructions: 'chart' | 'guide',
+    ): {parts: string[]; bottom: number} => {
         const b = layoutOriginBanner({
+            instructions,
             paperWMm: sheetWMm,
             paperHMm: sheetHMm,
-            typeScale,
             version: APP_VERSION_DISPLAY,
             squareLengthMm,
             squaresX,
             squaresY,
-            logoWidthPx: skellyW,
-            logoHeightPx: skellyH,
-            ppm,
-            instructionsBody,
+            hasLogo: Boolean(logoSvgInner),
         });
-        if (!b) {
-            return null;
-        }
         const titleFont = `bold ${b.titleFontPx}px ${FONT}`;
         const bodyFont = `${b.bodyFontPx}px ${FONT}`;
         const parts: string[] = [
@@ -708,9 +686,9 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
                 ppm,
             ),
         ];
-        if (logoSvgInner && skellyW > 0) {
+        if (logoSvgInner) {
             parts.push(
-                `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" x="${b.bannerLeft}" y="${b.bannerTitleTop}" width="${skellyW}" height="${skellyH}" viewBox="0 0 ${SKELLY_LOGO_VIEWBOX_W} ${SKELLY_LOGO_VIEWBOX_H}" preserveAspectRatio="xMidYMin meet" overflow="hidden">${logoSvgInner}</svg>`,
+                `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" x="${b.bannerLeft}" y="${b.bannerTitleTop}" width="${b.logoWidthPx}" height="${b.logoHeightPx}" viewBox="0 0 ${SKELLY_LOGO_VIEWBOX_W} ${SKELLY_LOGO_VIEWBOX_H}" preserveAspectRatio="xMidYMin meet" overflow="hidden">${logoSvgInner}</svg>`,
             );
         }
         parts.push(
@@ -729,27 +707,14 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
         paper: pdfLabels.sheetHeaderPaper[paperId] ?? paperId,
     });
 
-    // Tiling reserved exactly the banner's height (`originBannerStrip.generated.ts`, laid out by the same
-    // `layoutOriginBanner`), so the full-size banner fits. Stepping the type down only happens if that
-    // file is stale; `npm run check:banner` fails the build first.
-    let originBanner: ReturnType<typeof buildOriginBanner> = null;
+    // Tiling reserved the banner's height (`originBannerReserveMm`, laid out by the same
+    // `layoutOriginBanner`), so it fits; without the logo it can come out shorter, never taller.
+    let originBanner: ReturnType<typeof buildOriginBanner> | null = null;
     if (bannerOnChart && pages.some((p) => p.isOriginPage)) {
+        originBanner = buildOriginBanner(paperWMm, paperHMm, 'chart');
         const bannerMaxPx = Math.ceil(margins.top * ppm) + originTopReservePx;
-        for (let typeScale = bScale; typeScale >= bScale * ORIGIN_BANNER_MIN_TYPE_FRACTION - 1e-9; typeScale -= bScale * 0.05) {
-            const candidate = buildOriginBanner(typeScale, paperWMm, paperHMm);
-            if (candidate && candidate.bottom <= bannerMaxPx) {
-                originBanner = candidate;
-                break;
-            }
-        }
-        if (!originBanner) {
-            throw new Error('Origin banner does not fit the reserved strip on this paper size.');
-        }
-        // A stale table shows up as spare space or shrunk type; flag it while editing banner text.
-        if (typeof import.meta.env !== 'undefined' && import.meta.env.DEV && originBanner.bottom !== bannerMaxPx) {
-            console.warn(
-                `Origin banner is ${bannerMaxPx - originBanner.bottom} px off its reserved strip on a ${paperWMm} mm sheet; run \`npm run generate:banner\`.`,
-            );
+        if (originBanner.bottom > bannerMaxPx) {
+            throw new Error(`Origin banner is ${originBanner.bottom - bannerMaxPx} px taller than its reserved strip on a ${paperWMm} mm sheet.`);
         }
     }
 
@@ -785,7 +750,7 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
                     paperWMm,
                     margins,
                     ppm,
-                    bodyFontPx,
+                    SHEET_HEADER_FONT_PX,
                 ),
             );
         }
@@ -872,20 +837,8 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
                   paperHMm,
                   geom,
                   tiling,
-                  bodyFontPx,
-                  bodyLineLead: bodyFontPx + Math.max(4, Math.round(0.52 * ppm * bScale)),
                   ppm,
-                  banner: (sheetWMm, sheetHMm) => {
-                      // Nothing reserves the guide's banner, so it only steps its type down if the
-                      // columns do not fit side by side at full size.
-                      for (let ts = bScale; ts >= bScale * ORIGIN_BANNER_MIN_TYPE_FRACTION - 1e-9; ts -= bScale * 0.05) {
-                          const b = buildOriginBanner(ts, sheetWMm, sheetHMm, pdfLabels.originInstructionsBodyGuide);
-                          if (b) {
-                              return b;
-                          }
-                      }
-                      throw new Error('Origin banner does not fit on the assembly guide on this paper size.');
-                  },
+                  banner: (sheetWMm, sheetHMm) => buildOriginBanner(sheetWMm, sheetHMm, 'guide'),
               })
             : null;
 

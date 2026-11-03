@@ -28,10 +28,11 @@ export interface PrintSvgAssemblyParams extends PrintSvgParams {
     qrSvgFragment: string;
     /** Chart link the QR encodes; also printed in every sheet's header. */
     chartUrl: string;
-    /** Inner markup only (no outer `<svg>`); nested on the sheet for Inkscape/browser compatibility. */
+    /**
+     * Inner markup only (no outer `<svg>`); nested on the sheet for Inkscape/browser compatibility.
+     * `null` when the logo did not load: the banner then leaves no room for it.
+     */
     logoSvgInner: string | null;
-    logoWidthPx: number;
-    logoHeightPx: number;
 }
 
 /** One printed sheet whose size differs from the chart sheets'. */

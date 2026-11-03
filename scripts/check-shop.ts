@@ -1,7 +1,7 @@
 /**
  * Build guard for print-shop mode: the size catalogue and its frozen link codes, the 36 in walk-in trim
- * cap, the bleed choices and page sizes, outlined text, the compact banner, the board geometry and the
- * rendered sheet SVG.
+ * cap, the bleed choices and page sizes, outlined text, the board geometry and the rendered sheet SVG. The
+ * compact banner is checked with the home banner (`scripts/check-banner.ts`).
  */
 import fs from 'node:fs';
 import {displayAppVersion} from '../src/appVersion.js';
@@ -19,9 +19,7 @@ import {
 import {
     CHARUCO_SQUARE_MM_MIN,
     MM_ORIGIN_BANNER_BELOW_GAP_MM,
-    ORIGIN_BANNER_VISUAL_SCALE,
     PIXELS_PER_MM,
-    SKELLY_TOP_HEIGHT_MM,
 } from '../src/print/constants.js';
 import {
     SHOP_MARKER_ROOM_MM,
@@ -33,13 +31,6 @@ import {
     shopValidSquaresMm,
     smallestFittingShopSize,
 } from '../src/print/shopLayout.js';
-import {
-    bannerLogoSizePx,
-    compactBannerHeightMm,
-    compactBannerMinWidthPx,
-    layoutOriginBanner,
-} from '../src/print/originBannerLayout.js';
-import {SKELLY_LOGO_NATURAL_W_OVER_H} from '../src/print/skellyLogo.js';
 import {
     SHOP_CROP_MARK_LENGTH_MM,
     SHOP_CROP_MARK_MARGIN_MM,
@@ -225,73 +216,6 @@ for (const version of ['develop', pkgVersion, process.env.VITE_APP_VERSION?.trim
         if (!canOutlineText(`v${printed}`) || !canOutlineText(`v${printed}`, true)) {
             failures.push(`version "${printed}" has characters with no outline`);
         }
-    }
-}
-
-// Compact banner: one height for every square length, grid and version (the QR sets it), and narrow.
-const VERSIONS = [
-    ...new Set(
-        ['develop', pkgVersion, process.env.VITE_APP_VERSION?.trim()]
-            .filter((v): v is string => Boolean(v))
-            .map(displayAppVersion),
-    ),
-];
-/** One value per distinct printed width: the banner depends on numbers only through their Helvetica widths. */
-function widthRepresentatives(min: number, max: number): number[] {
-    const byWidth = new Map<number, number>();
-    for (let v = max; v >= min; v--) {
-        byWidth.set(helveticaTextWidthPx(String(v), 1000), v);
-    }
-    return [...byWidth.values()];
-}
-const logo = bannerLogoSizePx(SKELLY_TOP_HEIGHT_MM, SKELLY_LOGO_NATURAL_W_OVER_H);
-const bannerHeights = new Set<number>();
-let widestBannerPx = 0;
-let bannerLayouts = 0;
-const gridCounts = widthRepresentatives(BOARD_GRID_MIN, BOARD_GRID_MAX);
-for (const version of VERSIONS) {
-    for (const squareLengthMm of widthRepresentatives(CHARUCO_SQUARE_MM_MIN, SHOP_SQUARE_MM_MAX)) {
-        for (const squaresX of gridCounts) {
-            for (const squaresY of gridCounts.filter((y) => y <= boardGridAxisMax(squaresX))) {
-                const params = {
-                    typeScale: ORIGIN_BANNER_VISUAL_SCALE,
-                    version,
-                    squareLengthMm,
-                    squaresX,
-                    squaresY,
-                    logoWidthPx: logo.widthPx,
-                    logoHeightPx: logo.heightPx,
-                    capHeightEm: GLYPH_CAP_HEIGHT_EM,
-                };
-                bannerHeights.add(Math.round(compactBannerHeightMm(params) * 1e6) / 1e6);
-                widestBannerPx = Math.max(widestBannerPx, compactBannerMinWidthPx(params));
-                bannerLayouts++;
-            }
-        }
-    }
-}
-if (bannerHeights.size !== 1 || ![...bannerHeights].every((h) => near(h, 28.5))) {
-    failures.push(`compact banner heights are ${[...bannerHeights].join(', ')} mm, expected 28.5 mm for every chart`);
-}
-if (widestBannerPx / PIXELS_PER_MM > 110) {
-    failures.push(`compact banner needs ${(widestBannerPx / PIXELS_PER_MM).toFixed(1)} mm, more than 110 mm`);
-}
-{
-    // At its minimum width the banner lays out; one px narrower a chart-info line would wrap.
-    const params = {
-        typeScale: ORIGIN_BANNER_VISUAL_SCALE,
-        version: VERSIONS[0]!,
-        squareLengthMm: 260,
-        squaresX: 20,
-        squaresY: 25,
-        logoWidthPx: logo.widthPx,
-        logoHeightPx: logo.heightPx,
-    };
-    const minPx = compactBannerMinWidthPx(params);
-    const at = (w: number) =>
-        layoutOriginBanner({...params, paperWMm: 0, paperHMm: 0, variant: 'compact', box: {leftPx: 100, rightPx: 100 + w, topPx: 50}});
-    if (!at(minPx) || at(minPx - 1) || at(minPx)!.instLines.length !== 0) {
-        failures.push(`compact banner minimum width ${minPx} px is not the narrowest box it fits`);
     }
 }
 
@@ -508,6 +432,5 @@ if (failures.length > 0) {
     process.exit(1);
 }
 console.log(
-    `check:shop: ${SHOP_SIZES.length} sizes, cap, bleeds, outlined text OK; ${layoutChecks} layouts; ${sheetsRendered} sheets; ` +
-        `compact banner ${[...bannerHeights][0]} mm high, at most ${(widestBannerPx / PIXELS_PER_MM).toFixed(1)} mm wide (${bannerLayouts} charts)`,
+    `check:shop: ${SHOP_SIZES.length} sizes, cap, bleeds, outlined text OK; ${layoutChecks} layouts; ${sheetsRendered} sheets`,
 );

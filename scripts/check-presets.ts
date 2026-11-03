@@ -3,8 +3,10 @@
  * square length that does so, and that square must meet the distance's minimum square length. Every
  * stop of the sheets stepper, for every paper, grid and distance, must print exactly the page count it
  * names, at or above the distance minimum, ending at one square per sheet. Every preset and every grid
- * the X / Y sliders allow must fit the 250-marker dictionary.
+ * the X / Y sliders allow must fit the 250-marker dictionary. Tiling reserves the origin banner for the
+ * version the build prints.
  */
+import './useBuildAppVersion.js';
 import {
     BOARD_GRID_MAX,
     BOARD_GRID_MIN,

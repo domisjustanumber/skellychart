@@ -3,7 +3,7 @@
  * (tiling math is in `tiling.ts`; this module adds UI presets and snapping).
  */
 import {buildPageSpecs, type TilingInfo} from './tiling.js';
-import {CHARUCO_SQUARE_MM_MAX, CHARUCO_SQUARE_MM_MIN} from './constants.js';
+import {BOARD_GRID_MAX, BOARD_GRID_MIN, CHARUCO_SQUARE_MM_MAX, CHARUCO_SQUARE_MM_MIN} from './constants.js';
 import {gridFeasibility, printedLayout} from './feasibilityRules.js';
 import {charucoBoardPixelLayout, charucoCropXRange, charucoCropYRange} from '../charuco/board.js';
 
@@ -214,8 +214,7 @@ export function squareLengthTierBandEdgeFractions(maxMm: number = CHARUCO_SQUARE
     };
 }
 
-export const BOARD_GRID_MIN = 2;
-export const BOARD_GRID_MAX = 40;
+export {BOARD_GRID_MAX, BOARD_GRID_MIN};
 
 /** Markers the dictionary holds (DICT_4X4_250); a board needs one per white square. */
 export const BOARD_MARKERS_MAX = 250;

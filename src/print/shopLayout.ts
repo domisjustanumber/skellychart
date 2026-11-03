@@ -17,16 +17,13 @@ import {
 } from './charucoLayout.js';
 import {
     CHARUCO_SQUARE_MM_MIN,
-    ORIGIN_BANNER_VISUAL_SCALE,
     ORIGIN_CORNER_MARKER_SIDE_ROOM_MM,
     ORIGIN_CORNER_MARKER_TOP_ROOM_MM,
     PIXELS_PER_MM,
-    SKELLY_TOP_HEIGHT_MM,
 } from './constants.js';
 import {helveticaTextWidthPx} from './helveticaMetrics.js';
-import {bannerLogoSizePx, compactBannerHeightMm, compactBannerMinWidthPx} from './originBannerLayout.js';
+import {compactBannerHeightMm, compactBannerMinWidthPx} from './originBannerLayout.js';
 import {SHOP_SQUARE_MM_MAX, shopSizeById, shopSizeGroups} from './shopSizes.js';
-import {SKELLY_LOGO_NATURAL_W_OVER_H} from './skellyLogo.js';
 import {paperOrientationPreferenceTieBreak} from './tiling.js';
 
 /** White quiet zone inside the trim on every side (mm): a quarter square, at least 10 mm, at most 25 mm. */
@@ -49,16 +46,7 @@ export function shopBannerSizeMm(
     if (hit) {
         return hit;
     }
-    const logo = bannerLogoSizePx(SKELLY_TOP_HEIGHT_MM, SKELLY_LOGO_NATURAL_W_OVER_H);
-    const params = {
-        typeScale: ORIGIN_BANNER_VISUAL_SCALE,
-        version,
-        squareLengthMm: squareMm,
-        squaresX,
-        squaresY,
-        logoWidthPx: logo.widthPx,
-        logoHeightPx: logo.heightPx,
-    };
+    const params = {version, squareLengthMm: squareMm, squaresX, squaresY, hasLogo: true};
     const size = {
         heightMm: compactBannerHeightMm(params),
         minWidthMm: compactBannerMinWidthPx(params) / PIXELS_PER_MM,

@@ -2,8 +2,8 @@
  * Print-shop size catalogue: the fixed sizes walk-in chains sell rigid boards in (the only trims shop mode
  * offers), the 36 in walk-in trim cap, the bleed choices and the page size they give. Pure: no DOM.
  *
- * Shop sizes are never added to `PAPER_OPTIONS`: the banner generator iterates over those papers, and
- * `originBannerReserveMm()` throws on any width it does not know.
+ * Shop sizes are never added to `PAPER_OPTIONS`: those are the home printer's papers, which tiling, the
+ * presets and `npm run check:banner` sweep.
  */
 import {
     SHOP_SIZE_LINK_CODES,

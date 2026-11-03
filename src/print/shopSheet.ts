@@ -8,17 +8,11 @@
 import {APP_VERSION_DISPLAY} from '../appVersion.js';
 import {renderCharucoBoardSvgFragment, type CharucoGeometry} from '../charuco/board.js';
 import {buildCharucoDocumentationUrl, type ShopPrintOptions, type ShopSizeChoice} from './charucoDocUrl.js';
-import {
-    CHARUCO_MARKER_LENGTH_RATIO,
-    getCharucoPrintSourceUrl,
-    ORIGIN_BANNER_VISUAL_SCALE,
-    PIXELS_PER_MM,
-    QR_SIZE_MM,
-} from './constants.js';
+import {CHARUCO_MARKER_LENGTH_RATIO, getCharucoPrintSourceUrl, PIXELS_PER_MM} from './constants.js';
 import {GLYPH_CAP_HEIGHT_EM} from './glyphOutlines.generated.js';
 import {helveticaTextWidthPx} from './helveticaMetrics.js';
 import {interpolate, pdfLabels} from './labels.js';
-import {layoutOriginBanner} from './originBannerLayout.js';
+import {BANNER_QR_PX, layoutOriginBanner} from './originBannerLayout.js';
 import {outlineText} from './outlineText.js';
 import {generateQrSvgFragment} from './qrSvg.js';
 import type {ShopLayout} from './shopLayout.js';
@@ -88,8 +82,6 @@ export interface ShopSheetParams {
     /** Chart link the QR encodes (with the shop `t` field). */
     qrSvgFragment: string;
     logoSvgInner: string;
-    logoWidthPx: number;
-    logoHeightPx: number;
     version?: string;
 }
 
@@ -131,18 +123,12 @@ export function renderShopSheetSvg(p: ShopSheetParams): ShopSheetSvg {
         capHeightEm: GLYPH_CAP_HEIGHT_EM,
         paperWMm: 0,
         paperHMm: 0,
-        typeScale: ORIGIN_BANNER_VISUAL_SCALE,
         version,
         squareLengthMm: squareMm,
         squaresX,
         squaresY,
-        logoWidthPx: p.logoWidthPx,
-        logoHeightPx: p.logoHeightPx,
-        ppm,
+        hasLogo: true,
     });
-    if (!banner) {
-        throw new Error('The compact banner does not fit this board.');
-    }
 
     const geom: CharucoGeometry = {
         squaresX,
@@ -162,7 +148,7 @@ export function renderShopSheetSvg(p: ShopSheetParams): ShopSheetSvg {
             ppm,
             outlineText,
         ),
-        `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" x="${banner.bannerLeft}" y="${banner.bannerTitleTop}" width="${p.logoWidthPx}" height="${p.logoHeightPx}" viewBox="0 0 ${SKELLY_LOGO_VIEWBOX_W} ${SKELLY_LOGO_VIEWBOX_H}" preserveAspectRatio="xMidYMin meet" overflow="hidden">${p.logoSvgInner}</svg>`,
+        `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" x="${banner.bannerLeft}" y="${banner.bannerTitleTop}" width="${banner.logoWidthPx}" height="${banner.logoHeightPx}" viewBox="0 0 ${SKELLY_LOGO_VIEWBOX_W} ${SKELLY_LOGO_VIEWBOX_H}" preserveAspectRatio="xMidYMin meet" overflow="hidden">${p.logoSvgInner}</svg>`,
         `<svg x="${banner.qrX}" y="${banner.bannerTitleTop}" width="${banner.qrSizePx}" height="${banner.qrSizePx}" overflow="hidden">${p.qrSvgFragment}</svg>`,
         `<svg x="${boardX}" y="${boardY}" width="${boardW}" height="${boardH}" viewBox="0 0 ${boardW} ${boardH}" overflow="hidden">` +
             `<rect width="${boardW}" height="${boardH}" fill="#fff"/>` +
@@ -236,7 +222,6 @@ export async function renderShopPrintSvg(params: {
     options: ShopPrintOptions;
     documentationSourceUrl?: string;
 }): Promise<ShopSheetSvg & {chartUrl: string}> {
-    const ppm = PIXELS_PER_MM;
     const chartUrl = buildCharucoDocumentationUrl(
         params.documentationSourceUrl ?? getCharucoPrintSourceUrl(),
         params.squaresX,
@@ -244,18 +229,16 @@ export async function renderShopPrintSvg(params: {
         params.squareMm,
         {kind: 'shop', size: params.size, options: params.options},
     );
-    const qrSvgFragment = await generateQrSvgFragment(chartUrl, Math.round(QR_SIZE_MM * ppm));
-    const logo = await resolveLogoForPrint(ppm);
-    if (!logo.logoSvgInner) {
+    const qrSvgFragment = await generateQrSvgFragment(chartUrl, BANNER_QR_PX);
+    const logoSvgInner = await resolveLogoForPrint();
+    if (!logoSvgInner) {
         throw new Error('The FreeMoCap logo did not load, so the print-shop file was not made. Reload the page and try again.');
     }
     return {
         ...renderShopSheetSvg({
             ...params,
             qrSvgFragment,
-            logoSvgInner: logo.logoSvgInner,
-            logoWidthPx: logo.widthPx,
-            logoHeightPx: logo.heightPx,
+            logoSvgInner,
         }),
         chartUrl,
     };

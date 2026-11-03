@@ -7,10 +7,15 @@ import {resolveQrLinkSourceUrl, resolveQrLinkSourceUrlFor, type QrLinkTarget} fr
  */
 
 /**
- * Baseline of the header line on chart sheets without the banner (mm from the top edge). Its font box
- * (ascent to descent) runs about 8.0–11.2 mm down, inside the safe top margin (`sheetGeometry.ts`) and
- * above {@link MM_HEADER_CONTENT_TOP_MM}. The bottom edge is no place for it: HP DeskJets lose the last
- * 12.7 mm.
+ * Type size (px at {@link PIXELS_PER_MM}) of the header line and the tape labels on chart sheets. It is
+ * their own size, not the banner's, so banner type edits never move the header.
+ */
+export const SHEET_HEADER_FONT_PX = 34;
+/**
+ * Baseline of the header line on chart sheets without the banner (mm from the top edge). At
+ * {@link SHEET_HEADER_FONT_PX} its ink (cap height to descenders) runs about 8.5–11.2 mm down, inside the
+ * safe top margin (`sheetGeometry.ts`) and above {@link MM_HEADER_CONTENT_TOP_MM}; `npm run check:banner`
+ * checks both. The bottom edge is no place for it: HP DeskJets lose the last 12.7 mm.
  */
 export const MM_SHEET_HEADER_BASELINE_MM = 10.6;
 /** Top of the board region below the header line (mm from the top edge). */
@@ -19,7 +24,8 @@ export const MM_HEADER_CONTENT_TOP_MM = 12.5;
 export const MM_SHEET_HEADER_GAP_MM = 5;
 /**
  * Band (mm) between the board and the safe margin at a seam, cut away during assembly: it holds only the
- * tape label ({@link MM_TAPE_LABEL_INSET_FROM_JOIN_MM} plus the label's own height).
+ * tape label ({@link MM_TAPE_LABEL_INSET_FROM_JOIN_MM} plus the label's own height at
+ * {@link SHEET_HEADER_FONT_PX}).
  */
 export const MM_SEAM_LABEL_BAND_MM = 6;
 export const MM_TAPE_LABEL_INSET_FROM_JOIN_MM = 2.5;
@@ -43,22 +49,10 @@ export const ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM = 0.35;
 /** Square length range (mm) of the Square length slider, and of the layouts it can choose. */
 export const CHARUCO_SQUARE_MM_MIN = 10;
 export const CHARUCO_SQUARE_MM_MAX = 225;
+/** Squares per axis range of the X and Y sliders. */
+export const BOARD_GRID_MIN = 2;
+export const BOARD_GRID_MAX = 40;
 
-/** Smallest banner type scale (fraction of normal) the renderer may step down to so the banner fits its reserve. */
-export const ORIGIN_BANNER_MIN_TYPE_FRACTION = 0.7;
-
-/**
- * Key of the generated origin-banner heights (`originBannerStrip.ts`): the banner's width (mm), i.e. the
- * sheet width less its left and right safe margins, to 0.1 mm.
- */
-export function bannerWidthKey(bannerWMm: number): string {
-    return String(Math.round(bannerWMm * 10) / 10);
-}
-
-/** Extra inset (mm) below the safe top margin before banner content; 0 = flush to the margin. */
-export const ORIGIN_BANNER_CONTENT_TOP_MM = 0;
-/** Extra inset (mm) inside the left/right safe margins before banner content; 0 = flush to the margins. */
-export const ORIGIN_BANNER_CONTENT_SIDE_MM = 0;
 export const MM_ORIGIN_BANNER_BELOW_GAP_MM =
     Math.round((5 * ORIGIN_BANNER_VISUAL_SCALE + Number.EPSILON) * 10) / 10;
 /** Gap between the board's origin corner and the corner marker's axes (mm). */

@@ -40,8 +40,8 @@ export const SKELLY_TOP_HEIGHT_MM = 16 + ORIGIN_BANNER_VERTICAL_BUMP_MM;
 /** Scale vs legacy ~17 mm QR row (typography and vertical padding). */
 export const ORIGIN_BANNER_VISUAL_SCALE = QR_SIZE_MM / ORIGIN_BANNER_QR_BASELINE_MM;
 /**
- * Push banner `<text>` down slightly (mm). Nested SVGs anchor by viewport top; `hanging` baseline
- * leaves Latin caps visually higher than logo/QR tops — this aligns type with graphics.
+ * Push the banner text's cap tops down slightly (mm) from the logo/QR tops (nested SVGs anchor by their
+ * viewport top), so the type lines up with the graphics.
  */
 export const ORIGIN_BANNER_TEXT_BASELINE_OFFSET_MM = 0.35;
 

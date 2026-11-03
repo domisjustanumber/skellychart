@@ -9,6 +9,7 @@ import {
     ORIGIN_MARKER_AXIS_Y_RGB,
     PIXELS_PER_MM,
 } from './constants.js';
+import {HELVETICA_CAP_HEIGHT_EM, HELVETICA_X_HEIGHT_EM} from './helveticaMetrics.js';
 import type {OutlineTextOptions} from './outlineText.js';
 import {rgbCss} from './svgUtils.js';
 
@@ -18,6 +19,19 @@ import {rgbCss} from './svgUtils.js';
  * installed (Arial on Windows; Liberation Sans, Arimo or Nimbus Sans on Linux and ChromeOS).
  */
 export const FONT = "Helvetica, Arial, 'Liberation Sans', Arimo, 'Nimbus Sans', sans-serif";
+
+/**
+ * The baseline `y` of `fontPx` text whose cap top is at `top`. Sheets set baselines from Helvetica's metrics
+ * rather than with `dominant-baseline`, which svg2pdf ignores and browsers resolve from the installed font.
+ */
+export function capTopToBaseline(top: number, fontPx: number): number {
+    return +(top + HELVETICA_CAP_HEIGHT_EM * fontPx).toFixed(3);
+}
+
+/** The baseline `y` of `fontPx` text whose x-height middle is at `centre` (like `dominant-baseline="middle"`). */
+export function centreToBaseline(centre: number, fontPx: number): number {
+    return +(centre + (HELVETICA_X_HEIGHT_EM / 2) * fontPx).toFixed(3);
+}
 
 /**
  * Draws one line of text in place of a `<text>` element: print-shop sheets pass `outlineText`, so their
@@ -65,8 +79,8 @@ export function svgCornerMarker(ppm: number, cx: number, cy: number, emitText?: 
     const labels = emitText
         ? emitText('x', {...xLabel, fontPx, anchor: 'middle', baseline: 'middle', fill: colX}) +
           emitText('y', {...yLabel, fontPx, anchor: 'middle', baseline: 'middle', fill: colY})
-        : `<text x="${xLabel.x}" y="${xLabel.y}" fill="${colX}" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle" dominant-baseline="middle">x</text>` +
-          `<text x="${yLabel.x}" y="${yLabel.y}" fill="${colY}" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle" dominant-baseline="middle">y</text>`;
+        : `<text x="${xLabel.x}" y="${centreToBaseline(xLabel.y, fontPx)}" fill="${colX}" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle">x</text>` +
+          `<text x="${yLabel.x}" y="${centreToBaseline(yLabel.y, fontPx)}" fill="${colY}" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle">y</text>`;
     return (
         `<g stroke-linecap="square" stroke-linejoin="miter">` +
         `<line x1="${ix}" y1="${iy}" x2="${ix + hx}" y2="${iy}" stroke="${colX}" stroke-width="${lw}"/>` +

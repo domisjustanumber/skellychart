@@ -4,8 +4,9 @@
  * for any purpose). Helvetica is a PDF standard font, so these are the widths Save as PDF draws with,
  * and Arial (the usual stand-in where Helvetica is not installed) shares them.
  *
- * All chart text (banner, header, tape labels, assembly guide) is measured here rather than with a
- * browser canvas, whose result depends on the fonts installed, so it lays out identically on every device.
+ * All chart text (banner, header, tape labels, assembly guide) is measured and placed with these metrics
+ * rather than with a browser canvas or `dominant-baseline`, whose results depend on the fonts installed,
+ * so it lays out identically on every device and in Print and Save as PDF alike.
  */
 
 /** Widths for U+0020–U+007E, indexed by code point − 0x20. */
@@ -76,8 +77,11 @@ export function helveticaTextWidthPx(text: string, fontPx: number, bold = false)
     return (units * fontPx) / 1000;
 }
 
-/** Helvetica cap height (em), from the AFM's `CapHeight 718`: where a `hanging` baseline sits. */
+/** Helvetica cap height (em), from the AFM's `CapHeight 718` (Helvetica-Bold's is the same). */
 export const HELVETICA_CAP_HEIGHT_EM = 0.718;
+
+/** Helvetica x-height (em), from the AFM's `XHeight 523`. */
+export const HELVETICA_X_HEIGHT_EM = 0.523;
 
 /** Helvetica ascent and descent (em), from the AFM's `Ascender 718` and `Descender -207`. */
 export const HELVETICA_ASCENT_EM = 0.718;

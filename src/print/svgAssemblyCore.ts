@@ -16,7 +16,7 @@ import {paperById} from './papers.js';
 import {perfLog, perfNote} from './perfDebug.js';
 import {boardRegionMm, originMarkerRoomMm, type SafeRectPx, type SeamSides, seamSides, sheetSafeRectPx} from './sheetGeometry.js';
 import type {PrintSvgAssemblyParams, PrintSvgResult} from './svgAssemblyTypes.js';
-import {FONT, printedBoard, svgCornerMarker} from './svgPrimitives.js';
+import {capTopToBaseline, centreToBaseline, FONT, printedBoard, svgCornerMarker} from './svgPrimitives.js';
 import {escapeXml, rgbCss, svgRootOuterSizeAttrs, svgSheetRoot} from './svgUtils.js';
 import type {PageSpec, TilingInfo} from './tiling.js';
 import {IS_DEV} from '../env.js';
@@ -149,7 +149,7 @@ function svgVerticalTapeLabel(
     const cy = py + rh / 2;
     const angle = (side === 'left' ? -90 : 90) + 180;
     return (
-        `<text transform="rotate(${angle} ${cx} ${cy})" x="${cx}" y="${cy}" fill="#000" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle" dominant-baseline="middle">${escapeXml(text)}</text>`
+        `<text transform="rotate(${angle} ${cx} ${cy})" x="${cx}" y="${centreToBaseline(cy, fontPx)}" fill="#000" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle">${escapeXml(text)}</text>`
     );
 }
 
@@ -172,9 +172,9 @@ function svgHorizontalTapeLabel(
         const rh = Math.ceil((HELVETICA_ASCENT_EM + HELVETICA_DESCENT_EM) * fontPx);
         const cx = px + w / 2;
         const cy = meetY - gapPx - rh / 2;
-        return `<text transform="rotate(180 ${cx} ${cy})" x="${cx}" y="${cy}" fill="#000" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle" dominant-baseline="middle">${escapeXml(text)}</text>`;
+        return `<text transform="rotate(180 ${cx} ${cy})" x="${cx}" y="${centreToBaseline(cy, fontPx)}" fill="#000" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle">${escapeXml(text)}</text>`;
     }
-    return `<text x="${px}" y="${meetY + gapPx}" fill="#000" font-size="${fontPx}" font-family="${FONT}" dominant-baseline="hanging">${escapeXml(text)}</text>`;
+    return `<text x="${px}" y="${capTopToBaseline(meetY + gapPx, fontPx)}" fill="#000" font-size="${fontPx}" font-family="${FONT}">${escapeXml(text)}</text>`;
 }
 
 export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams): Promise<PrintSvgResult> {

@@ -8,7 +8,7 @@ import {PIXELS_PER_MM} from './constants.js';
 import {pdfLabels} from './labels.js';
 import {layoutOriginBanner, type OriginBannerLayout} from './originBannerLayout.js';
 import {SKELLY_LOGO_VIEWBOX_H, SKELLY_LOGO_VIEWBOX_W} from './skellyLogo.js';
-import {FONT, type SvgTextEmitter} from './svgPrimitives.js';
+import {capTopToBaseline, FONT, type SvgTextEmitter} from './svgPrimitives.js';
 import {escapeXml} from './svgUtils.js';
 
 /** The chart and artwork a home banner is drawn from; its layout depends only on these and the sheet. */
@@ -33,7 +33,7 @@ function svgTextBlock(lines: string[], x: number, yStart: number, lineLead: numb
             tspans.push(`<tspan x="${x}" dy="${lineLead}">${inner}</tspan>`);
         }
     }
-    return `<text x="${x}" y="${yStart}" fill="#000" font-size="${fontPx}" font-family="${FONT}"${weight} dominant-baseline="hanging">${tspans.join('')}</text>`;
+    return `<text x="${x}" y="${capTopToBaseline(yStart, fontPx)}" fill="#000" font-size="${fontPx}" font-family="${FONT}"${weight}>${tspans.join('')}</text>`;
 }
 
 /**
@@ -53,9 +53,9 @@ function svgCharucoBoardInfoBlock(b: OriginBannerLayout, emitText?: SvgTextEmitt
     }
     const bodyTspans = boardInfoLines.map(({text, right, y}) => {
         const inner = text === '' ? '&#xa0;' : escapeXml(text);
-        return `<tspan x="${right}" y="${y}" font-size="${bodyFontPx}" font-weight="normal">${inner}</tspan>`;
+        return `<tspan x="${right}" y="${capTopToBaseline(y, bodyFontPx)}" font-size="${bodyFontPx}" font-weight="normal">${inner}</tspan>`;
     });
-    return `<text x="${x}" y="${yStart}" fill="#000" font-size="${titleFontPx}" font-family="${FONT}" text-anchor="end" dominant-baseline="hanging"><tspan font-weight="bold">${escapeXml(boardTitle)}</tspan>${bodyTspans.join('')}</text>${box}`;
+    return `<text x="${x}" y="${capTopToBaseline(yStart, titleFontPx)}" fill="#000" font-size="${titleFontPx}" font-family="${FONT}" text-anchor="end"><tspan font-weight="bold">${escapeXml(boardTitle)}</tspan>${bodyTspans.join('')}</text>${box}`;
 }
 
 /**

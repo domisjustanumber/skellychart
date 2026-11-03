@@ -12,18 +12,12 @@
  * Sheets name Helvetica first, so svg2pdf draws the PDF standard Helvetica, the face the banner is
  * wrapped with (Print uses Helvetica or a same-width stand-in such as Arial).
  *
- * Known svg2pdf gaps the sheets work around:
- * - `dominant-baseline` is ignored, so {@link normaliseTextBaselines} rewrites it as explicit y
- *   offsets measured in the browser font, matching where print places each line.
- * - Percentage width/height on nested `<svg>` elements is read as user units, so the sheet SVG
- *   leaves nested sizes unset (see `qrSvg.ts`).
+ * svg2pdf reads percentage width/height on nested `<svg>` elements as user units, so the sheet SVG
+ * leaves nested sizes unset (see `qrSvg.ts`).
  */
 
 import type {jsPDFOptions} from 'jspdf';
 import {yieldToMain} from './yieldToMain.js';
-
-/** Canvas font size used to measure baseline offsets as fractions of an em. */
-const BASELINE_MEASURE_PX = 100;
 
 export interface PdfSvgPage {
     /** Complete page SVG from {@link renderCharucoPrintSvg}. */
@@ -46,66 +40,6 @@ function parseSvgPage(svg: string): Element {
         throw new Error('Could not render a chart sheet for the PDF.');
     }
     return root;
-}
-
-/** Distance (in em) from the alphabetic baseline down to where the browser draws `baseline`. */
-function baselineShiftEm(
-    ctx: CanvasRenderingContext2D,
-    baseline: string,
-    fontFamily: string,
-    fontWeight: string,
-): number {
-    ctx.font = `${fontWeight} ${BASELINE_MEASURE_PX}px ${fontFamily}`;
-    const m = ctx.measureText('H');
-    switch (baseline) {
-        case 'hanging':
-            return (m.hangingBaseline ?? 0.8 * m.fontBoundingBoxAscent) / BASELINE_MEASURE_PX;
-        case 'middle':
-            return ctx.measureText('x').actualBoundingBoxAscent / 2 / BASELINE_MEASURE_PX;
-        case 'ideographic':
-            return -m.fontBoundingBoxDescent / BASELINE_MEASURE_PX;
-        default:
-            return 0;
-    }
-}
-
-function numAttr(el: Element, name: string, fallback: number): number {
-    const v = parseFloat(el.getAttribute(name) ?? '');
-    return Number.isFinite(v) ? v : fallback;
-}
-
-/**
- * svg2pdf draws every line on its alphabetic baseline. Move each `dominant-baseline` text down by
- * the browser's own offset for that baseline so lines land where print puts them; tspans with a
- * different font size get the difference as extra `dy`.
- */
-function normaliseTextBaselines(root: Element): void {
-    const texts = Array.from(root.querySelectorAll('text[dominant-baseline]'));
-    const ctx = texts.length > 0 ? document.createElement('canvas').getContext('2d') : null;
-    if (!ctx) {
-        return;
-    }
-    for (const text of texts) {
-        const em = baselineShiftEm(
-            ctx,
-            text.getAttribute('dominant-baseline') ?? '',
-            text.getAttribute('font-family') ?? 'sans-serif',
-            text.getAttribute('font-weight') ?? '',
-        );
-        const textSize = numAttr(text, 'font-size', 16);
-        text.setAttribute('y', String(numAttr(text, 'y', 0) + em * textSize));
-        let prevSize = textSize;
-        for (const tspan of Array.from(text.querySelectorAll('tspan'))) {
-            const size = numAttr(tspan, 'font-size', textSize);
-            if (tspan.hasAttribute('y')) {
-                tspan.setAttribute('y', String(numAttr(tspan, 'y', 0) + em * size));
-            } else if (size !== prevSize) {
-                tspan.setAttribute('dy', String(numAttr(tspan, 'dy', 0) + em * (size - prevSize)));
-            }
-            prevSize = size;
-        }
-        text.removeAttribute('dominant-baseline');
-    }
 }
 
 function pageOrientation(widthMm: number, heightMm: number): 'portrait' | 'landscape' {
@@ -220,7 +154,6 @@ export async function buildPdfBlobFromSvgPages(
         if (shop && root.querySelector(SHOP_FORBIDDEN_ELEMENTS)) {
             throw new Error('The print-shop sheet contains text or images; it must be paths only.');
         }
-        normaliseTextBaselines(root);
         await svg2pdf(root, doc, {
             x: 0,
             y: 0,

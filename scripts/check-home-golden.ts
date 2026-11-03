@@ -93,6 +93,12 @@ for (const c of cases) {
         console.error(`${c.key}: home output contains the print-shop rich-black fill rgb(0,0,1)`);
         process.exit(1);
     }
+    // svg2pdf ignores `dominant-baseline` and browsers resolve it from the installed font, so every line must
+    // carry an explicit baseline (`capTopToBaseline`, `centreToBaseline`) for Print and Save as PDF to agree.
+    if ([guide?.svg ?? '', ...svgs].some((svg) => svg.includes('dominant-baseline'))) {
+        console.error(`${c.key}: home output uses dominant-baseline`);
+        process.exit(1);
+    }
     actual[`${c.key} (${svgs.length} sheet${svgs.length === 1 ? '' : 's'}${guide ? ' + guide' : ''})`] =
         hash.digest('hex');
 }

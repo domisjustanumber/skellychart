@@ -17,7 +17,7 @@ import {originBannerSvg, type OriginBannerInputs} from './originBannerSvg.js';
 import {paperById, type PaperId} from './papers.js';
 import {sheetSafeRectPx} from './sheetGeometry.js';
 import type {PrintSheetSvg} from './svgAssemblyTypes.js';
-import {FONT, printedBoard, type PrintedBoard, svgCornerMarker} from './svgPrimitives.js';
+import {capTopToBaseline, FONT, printedBoard, type PrintedBoard, svgCornerMarker} from './svgPrimitives.js';
 import {escapeXml, svgRootOuterSizeAttrs, svgSheetRoot} from './svgUtils.js';
 import {buildPageSpecs, type TilingInfo} from './tiling.js';
 
@@ -225,7 +225,7 @@ export function svgAssemblyGuideSheet(o: {
     const parts: string[] = [
         '<rect width="100%" height="100%" fill="#fff"/>',
         ...g.banner.parts,
-        `<text x="${g.left}" y="${g.titleTop}" fill="#000" font-size="${titleFontPx}" font-family="${FONT}" font-weight="bold" dominant-baseline="hanging">${escapeXml(pdfLabels.assemblyGuideTitle)}</text>`,
+        `<text x="${g.left}" y="${capTopToBaseline(g.titleTop, titleFontPx)}" fill="#000" font-size="${titleFontPx}" font-family="${FONT}" font-weight="bold">${escapeXml(pdfLabels.assemblyGuideTitle)}</text>`,
         `<svg x="${bx}" y="${by}" width="${dw}" height="${dh}" viewBox="0 0 ${fullWPx} ${fullHPx}" overflow="hidden">` +
             `<rect width="${fullWPx}" height="${fullHPx}" fill="#fff"/>` +
             renderCharucoBoardSvgFragment(fullWPx, fullHPx, geom) +
@@ -239,15 +239,16 @@ export function svgAssemblyGuideSheet(o: {
 
     const textTop = Math.round(by + dh + gapPx);
     const tspans = g.text.lines.flatMap((l) => {
+        const y = capTopToBaseline(textTop + l.y, bodyFontPx);
         const out: string[] = [];
         if (l.label) {
-            out.push(`<tspan x="${g.left}" y="${textTop + l.y}">${escapeXml(l.label)}</tspan>`);
+            out.push(`<tspan x="${g.left}" y="${y}">${escapeXml(l.label)}</tspan>`);
         }
-        out.push(`<tspan x="${g.left + l.indent}" y="${textTop + l.y}">${escapeXml(l.text)}</tspan>`);
+        out.push(`<tspan x="${g.left + l.indent}" y="${y}">${escapeXml(l.text)}</tspan>`);
         return out;
     });
     parts.push(
-        `<text fill="#000" font-size="${bodyFontPx}" font-family="${FONT}" dominant-baseline="hanging">${tspans.join('')}</text>`,
+        `<text fill="#000" font-size="${bodyFontPx}" font-family="${FONT}">${tspans.join('')}</text>`,
     );
 
     return {

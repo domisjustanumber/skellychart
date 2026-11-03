@@ -157,7 +157,7 @@ function svgSheetBlocks(
     const sw = at.strokePx;
     for (const b of blocks) {
         const [cr, cg, cb] = sheetColorRgb(b.sheetIndex, tiling.pageCount);
-        const fill = at.tint ?`fill="rgb(${cr},${cg},${cb})" fill-opacity="0.3"` : 'fill="none"';
+        const fill = at.tint ? `fill="rgb(${cr},${cg},${cb})" fill-opacity="0.3"` : 'fill="none"';
         parts.push(
             `<rect x="${b.x + sw / 2}" y="${b.y + sw / 2}" width="${Math.max(0, b.w - sw)}" height="${Math.max(0, b.h - sw)}" ${fill} stroke="rgb(${cr},${cg},${cb})" stroke-width="${sw}"/>`,
         );
@@ -218,9 +218,9 @@ export function svgAssembledChartWithSheetNumbers(chart: PrintedChart, shownPxPe
 /**
  * Assembly guide sheet for a multi-sheet chart: the full chart, never rotated against the guide's text (x
  * runs along its lines), with a colour-coded block per chart sheet as in the on-screen preview (numbered
- * when the numbers are big enough to read), then how to put it together. The origin banner sits above it (so the guide needs no header line). It
- * prints on the chart sheets' own paper, drawn turned on the sheet when that shows the chart larger, so the
- * whole job is one page size.
+ * when the numbers are big enough to read), then how to put it together. The origin banner sits above it
+ * (so the guide needs no header line). It prints on the chart sheets' own paper, drawn turned on the sheet
+ * when that shows the chart larger, so the whole job is one page size.
  */
 export function svgAssemblyGuideSheet(o: {
     paperId: PaperId;

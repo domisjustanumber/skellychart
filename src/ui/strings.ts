@@ -94,6 +94,8 @@ export const S = {
     scanCardTitle: 'You scanned a FreeMoCap calibration chart: {{squaresX}} × {{squaresY}} squares, {{mm}} mm.',
     scanCardMeasure:
         'Measure across as many squares as your ruler spans (at least 2), from an edge to the same edge, divide by the count, and write the result in the box on the chart.',
+    scanCardMeasureNoBox:
+        'Measure across as many squares as your ruler spans (at least 2), from an edge to the same edge, divide by the count, and write the result on the chart.',
     scanCardFlat: 'Keep the board flat and out of direct sun.',
     scanCardDocs: 'How to calibrate your cameras with it',
     scanCardPrintAnother: 'Print another',
@@ -158,7 +160,7 @@ export const S = {
     qrShopTooLarge: 'This chart is too large for any print-shop board, so it is shown for your own printer.',
     previewTitle: 'Preview',
     fullChartHint:
-        'The assembly guide prints first: its numbered, colour-coded blocks show how each printed sheet maps onto the full chart. Print every sheet, cut away the dashed seam lines, then butt the matching numbered edges together in order. Instructions are also on the printed chart.',
+        'The assembly guide prints first: its colour-coded blocks show how each printed sheet maps onto the full chart. Print every sheet, cut away the dashed seam lines, then butt the matching numbered edges together in order. Instructions are also on the printed chart.',
     loadingPreviews: 'Loading previews',
     truncatedPreview:
         'Showing first {{shown}} of {{total}} sheets in the preview. Use Print or Save as PDF to output every sheet.',

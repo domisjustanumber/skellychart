@@ -64,8 +64,11 @@ export function scheduleAddressBarSync(): void {
     }, PREVIEW_DEBOUNCE_IDLE_MS);
 }
 
-/** The chart a scanned QR code described; the scan card shows once per tab. */
-let scannedChart: {squaresX: number; squaresY: number; squareMm: number; shop: boolean} | null = null;
+/**
+ * The chart a scanned QR code described; the scan card shows once per tab. A chart printed with the banner
+ * off may have no measured-length box (a single sheet has none), so the card does not point to one.
+ */
+let scannedChart: {squaresX: number; squaresY: number; squareMm: number; shop: boolean; banner: boolean} | null = null;
 
 /** The scan card for the scanned chart, hidden once closed; its two actions close it and call `setMode`. */
 export function renderScanCard(setMode: (mode: PrintMode) => void): void {
@@ -123,7 +126,7 @@ export function renderScanCard(setMode: (mode: PrintMode) => void): void {
     dismiss.setAttribute('aria-label', S.scanCardDismiss);
     card.replaceChildren(
         title,
-        p(S.scanCardMeasure),
+        p(scannedChart.banner ? S.scanCardMeasure : S.scanCardMeasureNoBox),
         ...(scannedChart.shop ? [p(S.scanCardFlat)] : []),
         docs,
         actions,
@@ -160,6 +163,7 @@ export function applyQrQueryFromLocation(): void {
                 squaresY: parsed.squaresY,
                 squareMm: parsed.squareLengthMm,
                 shop: parsed.printMode === 'shop',
+                banner: parsed.banner,
             };
             history.replaceState({...(history.state as object | null), skScanSeen: true}, '');
         }

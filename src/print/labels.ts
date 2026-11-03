@@ -13,12 +13,19 @@ export function interpolate(template: string, vars: Record<string, string | numb
 export const pdfLabels = {
     tapeJoinNearPage: 'Cut the dashed line away and butt this edge up against page {{page}}',
     assemblyGuideTitle: 'Assembly guide',
-    /** Below the full chart on the guide sheet. Numbered lines wrap with a hanging indent. */
-    assemblyGuideBody: `After this guide, the chart prints on {{pages}} pages, {{cols}} across and {{rows}} down. Each numbered block above shows where that page goes in the finished chart.
+    /**
+     * Below the full chart on the guide sheet, with `{{blocks}}` replaced by {@link assemblyGuideBlocksNumbered},
+     * or by {@link assemblyGuideBlocksUnnumbered} when the blocks are too small to number. Numbered lines wrap
+     * with a hanging indent.
+     */
+    assemblyGuideBody: `After this guide, the chart prints on {{pages}} pages, {{cols}} across and {{rows}} down. {{blocks}}
 1. Lay the pages out as shown, with page 1 at the top left. Its red and green corner marker shows the chart's x and y directions.
 2. On each page, cut the dashed line away along every edge that joins another page.
 3. Butt each cut edge up against the page named beside it, keeping the squares lined up across every seam.
 4. Glue the pages flat onto a rigid board with spray adhesive or a glue stick, so the chart cannot bend. Do not use tape - the reflections may cause errors when detecting the chart.`,
+    assemblyGuideBlocksNumbered: 'Each numbered block above shows where that page goes in the finished chart.',
+    assemblyGuideBlocksUnnumbered:
+        "Each coloured block above is one page, too small to number here: each page's header names its row and column, so lay the pages out by row and column.",
     /** Header line in the top margin of each sheet without the banner: brand and chart link on the left. */
     sheetHeaderBrand: 'FreeMoCap · {{url}}',
     /** Header middle; dropped when the line would not fit. */

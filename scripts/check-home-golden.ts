@@ -51,7 +51,8 @@ for (const paper of PAPERS) {
         cases.push({key: `${paper.id} ${distance}`, paperId: paper.id, ...plan, squareMm});
     }
 }
-// Multi-sheet charts with an assembly guide, both orientations, partial edge sheets and the marker limit.
+// Multi-sheet charts with an assembly guide, both orientations, partial edge sheets and the marker limit,
+// then the guide's page numbers just above and just below their smallest readable size.
 for (const [paperId, squaresX, squaresY, squareMm] of [
     ['a4', 12, 9, 50],
     ['letter', 9, 12, 50],
@@ -59,6 +60,8 @@ for (const [paperId, squaresX, squaresY, squareMm] of [
     ['tabloid', 20, 25, 44],
     ['letter', 40, 12, 30],
     ['a3', 2, 2, 225],
+    ['letter', 2, 39, 189],
+    ['letter', 2, 40, 189],
 ] as const) {
     cases.push({key: `${paperId} ${squaresX}x${squaresY} ${squareMm}mm`, paperId, squaresX, squaresY, squareMm});
 }

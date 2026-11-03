@@ -1,6 +1,7 @@
 /**
  * A multi-sheet chart's assembly guide sheet, and the assembled chart with its numbered sheets that the
- * on-screen scale preview shows. Both draw the same numbered, colour-coded sheet blocks.
+ * on-screen scale preview shows. Both draw the same colour-coded sheet blocks, numbered unless the guide's
+ * numbers would be too small to read.
  */
 import {
     charucoBoardPixelLayout,
@@ -28,6 +29,11 @@ const GUIDE_NUMBER_MAX_BLOCK_FRACTION = 0.5;
  * shared page-number size, so a sliver at the chart's edge doesn't shrink every other number.
  */
 const GUIDE_NUMBER_FULL_BLOCK_FRACTION = 0.75;
+/**
+ * Smallest page number the printed guide draws (font size, px at {@link PIXELS_PER_MM}): 21 px is 1.75 mm,
+ * about 5 pt. Below it the guide leaves its blocks unnumbered and its text points to the sheet headers.
+ */
+const GUIDE_NUMBER_MIN_PX = 21;
 /** Black outline round the guide's white page numbers (em). */
 const GUIDE_NUMBER_STROKE_EM = 0.18;
 /**
@@ -79,27 +85,21 @@ function wrapGuideBody(body: string, fontPx: number, lineLead: number, maxW: num
 }
 
 /**
- * A numbered, colour-coded block per chart sheet over a board laid out on a `boardWPx`×`boardHPx` canvas
- * and drawn at (`at.x`, `at.y`), scaled by `at.scale`: outlined in the sheet's colour and, with `at.tint`,
- * washed with it. Every page number gets one size, the largest that fits every full-size block; a smaller
- * block's number shrinks to fit it, so no number is left out. A single-sheet chart has no blocks.
+ * Each chart sheet's block over a board laid out on a `boardWPx`×`boardHPx` canvas and drawn at (`at.x`,
+ * `at.y`), scaled by `at.scale`.
  */
-function svgSheetBlocks(
+function sheetBlocks(
     squaresX: number,
     squaresY: number,
     tiling: TilingInfo,
     boardWPx: number,
     boardHPx: number,
-    at: {x: number; y: number; scale: number; strokePx: number; tint: boolean},
-): string[] {
-    const parts: string[] = [];
-    if (tiling.pageCount <= 1) {
-        return parts;
-    }
+    at: {x: number; y: number; scale: number},
+) {
     const layout = charucoBoardPixelLayout(boardWPx, boardHPx, squaresX, squaresY);
     const dw = boardWPx * at.scale;
     const dh = boardHPx * at.scale;
-    const blocks = buildPageSpecs(squaresX, squaresY, tiling).map((page) => {
+    return buildPageSpecs(squaresX, squaresY, tiling).map((page) => {
         const [l, r] = charucoCropXRange(page.gx0, page.gx1, layout);
         const [t, b] = charucoCropYRange(page.gy0, page.gy1, layout);
         return {
@@ -111,6 +111,42 @@ function svgSheetBlocks(
             label: String(page.sheetIndex),
         };
     });
+}
+
+/** Largest page number that fits a block's middle, outline included. */
+function blockNumberFit(b: ReturnType<typeof sheetBlocks>[number]): number {
+    const inkW = helveticaTextWidthPx(b.label, 1, true) + GUIDE_NUMBER_STROKE_EM;
+    const inkH = HELVETICA_BOLD_DIGIT_HEIGHT_EM + GUIDE_NUMBER_STROKE_EM;
+    return Math.min((b.w * GUIDE_NUMBER_MAX_BLOCK_FRACTION) / inkW, (b.h * GUIDE_NUMBER_MAX_BLOCK_FRACTION) / inkH);
+}
+
+/** The one size every page number gets: the largest that fits every full-size block. */
+function sheetNumberPx(blocks: ReturnType<typeof sheetBlocks>): number {
+    // Widths follow the column and heights the row, so the block in the widest column and tallest row is
+    // always full-size.
+    const fullW = GUIDE_NUMBER_FULL_BLOCK_FRACTION * Math.max(...blocks.map((b) => b.w));
+    const fullH = GUIDE_NUMBER_FULL_BLOCK_FRACTION * Math.max(...blocks.map((b) => b.h));
+    return Math.min(...blocks.filter((b) => b.w >= fullW && b.h >= fullH).map(blockNumberFit));
+}
+
+/**
+ * A colour-coded block per chart sheet ({@link sheetBlocks}): outlined in the sheet's colour and, with
+ * `at.tint`, washed with it. With `at.numbered`, every page number gets {@link sheetNumberPx}; a smaller
+ * block's number shrinks to fit it, so no number is left out. A single-sheet chart has no blocks.
+ */
+function svgSheetBlocks(
+    squaresX: number,
+    squaresY: number,
+    tiling: TilingInfo,
+    boardWPx: number,
+    boardHPx: number,
+    at: {x: number; y: number; scale: number; strokePx: number; tint: boolean; numbered: boolean},
+): string[] {
+    const parts: string[] = [];
+    if (tiling.pageCount <= 1) {
+        return parts;
+    }
+    const blocks = sheetBlocks(squaresX, squaresY, tiling, boardWPx, boardHPx, at);
     const sw = at.strokePx;
     for (const b of blocks) {
         const [cr, cg, cb] = sheetColorRgb(b.sheetIndex, tiling.pageCount);
@@ -120,18 +156,12 @@ function svgSheetBlocks(
         );
     }
 
-    const fit = (b: (typeof blocks)[number]) => {
-        const inkW = helveticaTextWidthPx(b.label, 1, true) + GUIDE_NUMBER_STROKE_EM;
-        const inkH = HELVETICA_BOLD_DIGIT_HEIGHT_EM + GUIDE_NUMBER_STROKE_EM;
-        return Math.min((b.w * GUIDE_NUMBER_MAX_BLOCK_FRACTION) / inkW, (b.h * GUIDE_NUMBER_MAX_BLOCK_FRACTION) / inkH);
-    };
-    // Widths follow the column and heights the row, so the block in the widest column and tallest row is
-    // always full-size.
-    const fullW = GUIDE_NUMBER_FULL_BLOCK_FRACTION * Math.max(...blocks.map((b) => b.w));
-    const fullH = GUIDE_NUMBER_FULL_BLOCK_FRACTION * Math.max(...blocks.map((b) => b.h));
-    const fs = Math.min(...blocks.filter((b) => b.w >= fullW && b.h >= fullH).map(fit));
+    if (!at.numbered) {
+        return parts;
+    }
+    const fs = sheetNumberPx(blocks);
     blocks.forEach((b) => {
-        const bfs = Math.min(fs, fit(b));
+        const bfs = Math.min(fs, blockNumberFit(b));
         const cx = Math.round(b.x + b.w / 2);
         const baseline = Math.round(b.y + b.h / 2 + (HELVETICA_BOLD_DIGIT_HEIGHT_EM * bfs) / 2);
         const font = `font-size="${bfs}" font-family="${FONT}" font-weight="bold" text-anchor="middle"`;
@@ -163,15 +193,15 @@ export function svgAssembledChartWithSheetNumbers(chart: PrintedChart): string {
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fullWPx} ${fullHPx}" width="${fullWPx}" height="${fullHPx}">` +
         `<rect width="${fullWPx}" height="${fullHPx}" fill="#fff"/>` +
         renderCharucoBoardSvgFragment(fullWPx, fullHPx, geom) +
-        svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, {x: 0, y: 0, scale: 1, strokePx: sw, tint: false}).join('') +
+        svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, {x: 0, y: 0, scale: 1, strokePx: sw, tint: false, numbered: true}).join('') +
         `</svg>`
     );
 }
 
 /**
  * Assembly guide sheet for a multi-sheet chart: the full chart, never rotated against the guide's text (x
- * runs along its lines), with a numbered, colour-coded block per chart sheet as in the on-screen preview,
- * then how to put it together. The origin banner sits above it (so the guide needs no header line). It
+ * runs along its lines), with a colour-coded block per chart sheet as in the on-screen preview (numbered
+ * when the numbers are big enough to read), then how to put it together. The origin banner sits above it (so the guide needs no header line). It
  * prints on the chart sheets' own paper, drawn turned on the sheet when that shows the chart larger, so the
  * whole job is one page size.
  */
@@ -193,11 +223,13 @@ export function svgAssemblyGuideSheet(o: {
     const gapPx = Math.round(GUIDE_GAP_MM * ppm);
     const markerRoomPx = Math.round(GUIDE_CORNER_MARKER_ROOM_MM * ppm);
     const titleFontPx = Math.round(1.4 * bodyFontPx);
-    const body = interpolate(pdfLabels.assemblyGuideBody, {
-        pages: tiling.pageCount,
-        cols: tiling.npx,
-        rows: tiling.npy,
-    });
+    const bodyFor = (numbered: boolean) =>
+        interpolate(pdfLabels.assemblyGuideBody, {
+            pages: tiling.pageCount,
+            cols: tiling.npx,
+            rows: tiling.npy,
+            blocks: numbered ? pdfLabels.assemblyGuideBlocksNumbered : pdfLabels.assemblyGuideBlocksUnnumbered,
+        });
 
     // A guide drawn turned on the sheet has its top along a portrait sheet's left edge or a landscape
     // sheet's right edge, and keeps the sheet's margins, seen from the guide.
@@ -206,7 +238,7 @@ export function svgAssemblyGuideSheet(o: {
     const turnedMargins = sheetPortrait
         ? {top: m.left, right: m.top, bottom: m.right, left: m.bottom}
         : {top: m.right, right: m.bottom, bottom: m.left, left: m.top};
-    const layoutFor = (turned: boolean) => {
+    const layoutFor = (turned: boolean, body: string) => {
         const [wMm, hMm] = turned ? [o.paperHMm, o.paperWMm] : [o.paperWMm, o.paperHMm];
         const {left, top, right, bottom} = sheetSafeRectPx(wMm, hMm, ppm, turned ? turnedMargins : m);
         const innerW = right - left;
@@ -219,16 +251,25 @@ export function svgAssemblyGuideSheet(o: {
         const fitScale = Math.min(areaW / fullWPx, areaH / fullHPx);
         return {turned, wMm, hMm, left, right, text, banner, titleTop, boardTop, fitScale};
     };
-    const candidates = [layoutFor(false)];
-    if (Math.abs(o.paperWMm - o.paperHMm) >= 0.01) {
-        candidates.push(layoutFor(true));
-    }
-    // Pick by the uncapped fit, so a small chart still gets the orientation that matches its shape.
-    const g = candidates.reduce((best, c) => (c.fitScale > best.fitScale ? c : best));
+    const pickLayout = (numbered: boolean) => {
+        const body = bodyFor(numbered);
+        const candidates = [layoutFor(false, body)];
+        if (Math.abs(o.paperWMm - o.paperHMm) >= 0.01) {
+            candidates.push(layoutFor(true, body));
+        }
+        // Pick by the uncapped fit, so a small chart still gets the orientation that matches its shape.
+        const chosen = candidates.reduce((best, c) => (c.fitScale > best.fitScale ? c : best));
+        return {...chosen, numbered, scale: Math.min(chosen.fitScale, GUIDE_MAX_BOARD_SCALE)};
+    };
+    // Page numbers too small to read are left out, and the text points to the sheet headers instead. That
+    // text is longer, so the board only shrinks further and the numbers stay out.
+    const numberedLayout = pickLayout(true);
+    const numberPx = sheetNumberPx(sheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, {x: 0, y: 0, scale: numberedLayout.scale}));
+    const g = numberPx >= GUIDE_NUMBER_MIN_PX ? numberedLayout : pickLayout(false);
     if (!(g.fitScale > 0)) {
         throw new Error('The assembly guide does not fit on this paper size.');
     }
-    const scale = Math.min(g.fitScale, GUIDE_MAX_BOARD_SCALE);
+    const {scale} = g;
 
     const dw = fullWPx * scale;
     const dh = fullHPx * scale;
@@ -247,7 +288,7 @@ export function svgAssemblyGuideSheet(o: {
     ];
 
     parts.push(
-        ...svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, {x: bx, y: by, scale, strokePx: Math.max(2, Math.round(0.4 * ppm)), tint: true}),
+        ...svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, {x: bx, y: by, scale, strokePx: Math.max(2, Math.round(0.4 * ppm)), tint: true, numbered: g.numbered}),
     );
     parts.push(svgCornerMarker(ppm, bx, by));
 

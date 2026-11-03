@@ -304,8 +304,7 @@ function hasPrintableLayout(): boolean {
     if (state.mode === 'shop') {
         return shopLayoutNow() !== null;
     }
-    const t = effectiveTiling();
-    return t !== null && t.pageCount >= 1;
+    return effectiveTiling() !== null;
 }
 
 /** The square slider's end: print-shop boards go up to {@link SHOP_SQUARE_MM_MAX}. */
@@ -534,12 +533,12 @@ function wirePageStepButton(btn: HTMLElement, which: 'fewer' | 'more'): void {
         stop();
         repeated = false;
         btn.setPointerCapture(e.pointerId);
-        // Keeps the preview on the short interactive debounce while held (cleared on window pointerup).
-        rangePointerHeld = true;
         delayTimer = window.setTimeout(() => {
             readout.setAttribute('aria-live', 'off');
             repeatTimer = window.setInterval(() => {
                 repeated = true;
+                // Keeps the preview on the short interactive debounce while repeating (cleared on window pointerup).
+                rangePointerHeld = true;
                 if (!stepPages(which)) {
                     stop();
                 }
@@ -547,7 +546,8 @@ function wirePageStepButton(btn: HTMLElement, which: 'fewer' | 'more'): void {
         }, 400);
     });
     btn.addEventListener('pointerup', stop);
-    for (const type of ['pointercancel', 'lostpointercapture', 'blur']) {
+    // Not lostpointercapture: a normal release fires it before its click, which must still be swallowed.
+    for (const type of ['pointercancel', 'blur']) {
         btn.addEventListener(type, () => {
             stop();
             // No click follows a cancelled hold, so nothing is left to swallow.
@@ -631,8 +631,8 @@ let previewTimer: ReturnType<typeof setTimeout> | null = null;
 let previewAbort: AbortController | null = null;
 /** Bumped when a new preview run starts so stale async completions do not clear the busy UI. */
 let previewGeneration = 0;
-/** Prevents a second PDF export while one is running (e.g. after a slider drag re-runs syncUi). */
-let pdfExportInProgress = false;
+/** Set while a PDF export runs; the Save button then cancels it instead of starting another. */
+let pdfExportAbort: AbortController | null = null;
 
 let syncUiRafId: number | null = null;
 /** Cached so we don't rebuild selects on every drag frame (expensive and blocks paint). */
@@ -748,7 +748,24 @@ function syncAddressBarChartQuery(): void {
     if (next === cur) {
         return;
     }
-    window.history.replaceState(history.state, '', next);
+    try {
+        window.history.replaceState(history.state, '', next);
+    } catch {
+        // Rate-limited (WebKit throws past 100 calls in 30 s); the next change writes it again.
+    }
+}
+
+let addressBarTimer: number | null = null;
+
+/** Trailing debounce for {@link syncAddressBarChartQuery}, so a slider drag does not rewrite the URL every frame. */
+function scheduleAddressBarSync(): void {
+    if (addressBarTimer !== null) {
+        window.clearTimeout(addressBarTimer);
+    }
+    addressBarTimer = window.setTimeout(() => {
+        addressBarTimer = null;
+        syncAddressBarChartQuery();
+    }, PREVIEW_DEBOUNCE_IDLE_MS);
 }
 
 /** Advanced settings fold out on narrow screens only; on desktop they stay open (see style.css). */
@@ -887,7 +904,6 @@ function syncUi(options: SyncUiOptions = {}): void {
         byId('print-save-heading').textContent = S.printSave;
         byId('preview-title').textContent = S.previewTitle;
         byId('fullChartHint').textContent = S.fullChartHint;
-        (byId('btnPdf') as HTMLButtonElement).textContent = S.printCharts;
         setPrintAdviceElement(byId('printAdvice'));
     }
 
@@ -987,19 +1003,7 @@ function syncUi(options: SyncUiOptions = {}): void {
     );
     byId('layoutSummary').textContent = summary;
 
-    const btnPdf = byId('btnPdf') as HTMLButtonElement;
-    const btnSavePdf = byId('btnSavePdf') as HTMLButtonElement;
-    const exportDisabled = !hasPrintableLayout();
-    btnPdf.disabled = exportDisabled;
-    btnSavePdf.disabled = exportDisabled || pdfExportInProgress;
-    // Print shop: the PDF is the deliverable, so Print goes and the download becomes the main action.
-    const shop = state.mode === 'shop';
-    btnPdf.classList.toggle('hidden', shop);
-    btnSavePdf.classList.toggle('btn-primary', shop);
-    btnSavePdf.classList.toggle('btn-secondary', !shop);
-    if (!pdfExportInProgress) {
-        btnSavePdf.textContent = shop ? S.shopDownload : S.savePdfFiles;
-    }
+    syncExportButtons();
 
     if (!lite) {
         syncThemeToggle();
@@ -1015,11 +1019,39 @@ function syncUi(options: SyncUiOptions = {}): void {
             );
         }
     }
-    syncAddressBarChartQuery();
     if (import.meta.env.DEV) {
         syncDevQrLinkTargetUi();
     }
     schedulePreview(previewDelayMs);
+    scheduleAddressBarSync();
+}
+
+/** Whether {@link runBusy} has a job running on `btn`. */
+function isBusy(btn: HTMLButtonElement): boolean {
+    return btn.dataset.busy !== undefined;
+}
+
+/**
+ * Print and Save are enabled when there is something to print. A busy button keeps its job's label; busy
+ * Print stays disabled, while busy Save stays enabled because clicking it cancels the export.
+ */
+function syncExportButtons(): void {
+    const btnPdf = byId('btnPdf') as HTMLButtonElement;
+    const btnSavePdf = byId('btnSavePdf') as HTMLButtonElement;
+    const exportDisabled = !hasPrintableLayout();
+    btnPdf.disabled = exportDisabled || isBusy(btnPdf);
+    btnSavePdf.disabled = exportDisabled && !isBusy(btnSavePdf);
+    // Print shop: the PDF is the deliverable, so Print goes and the download becomes the main action.
+    const shop = state.mode === 'shop';
+    btnPdf.classList.toggle('hidden', shop);
+    btnSavePdf.classList.toggle('btn-primary', shop);
+    btnSavePdf.classList.toggle('btn-secondary', !shop);
+    if (!isBusy(btnPdf)) {
+        btnPdf.textContent = S.printCharts;
+    }
+    if (!isBusy(btnSavePdf)) {
+        btnSavePdf.textContent = shop ? S.shopDownload : S.savePdfFiles;
+    }
 }
 
 /** Mode toggle, which board-size control shows, and the print-shop size, unit, bleed and crop-mark controls. */
@@ -1366,7 +1398,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
         return;
     }
 
-    if (!tiling || tiling.pageCount < 1) {
+    if (!tiling) {
         statusEl.textContent = '';
         panelPreview.setAttribute('aria-busy', 'false');
         fullBlock.classList.add('hidden');
@@ -1480,7 +1512,6 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                 img.className = 'thumb-img';
                 img.src = guideImage;
                 img.alt = S.assemblyGuideLabel;
-                img.style.border = '1px solid var(--border)';
                 wrap.append(cap, img);
                 thumbs.appendChild(wrap);
             }
@@ -1500,8 +1531,6 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                 if (layoutN > 1 && totalPages > 1) {
                     // Same palette as the full-chart blocks so each thumbnail matches its block's colour.
                     img.style.border = `2px solid ${charucoPagePreviewBorderColor(i + 1, layoutN, false)}`;
-                } else {
-                    img.style.border = '1px solid var(--border)';
                 }
                 wrap.appendChild(img);
                 thumbs.appendChild(wrap);
@@ -1578,7 +1607,6 @@ async function runShopPreview(signal: AbortSignal, runId: number): Promise<void>
         img.className = 'thumb-img';
         img.src = sheetImage;
         img.alt = shopSummaryText(layout);
-        img.style.border = '1px solid var(--border)';
         wrap.appendChild(img);
         thumbs.appendChild(wrap);
         await awaitPreviewImagesDecodedAndPaint(thumbs);
@@ -1657,27 +1685,63 @@ function shopExportAllowed(): boolean {
     return false;
 }
 
+/**
+ * Runs an export with `btn` busy (spinner and `busyLabel`); the task may relabel it to show progress.
+ * {@link syncExportButtons} leaves a busy button's label alone, and gets the button back in `finally`.
+ * A cancelled export ends quietly; any other failure is shown.
+ */
+async function runBusy(
+    btn: HTMLButtonElement,
+    busyLabel: string,
+    task: (setLabel: (label: string) => void) => Promise<void>,
+): Promise<void> {
+    if (isBusy(btn)) {
+        return;
+    }
+    btn.dataset.busy = '';
+    btn.classList.add('btn--busy');
+    btn.textContent = busyLabel;
+    syncExportButtons();
+    try {
+        await task((label) => {
+            btn.textContent = label;
+        });
+    } catch (e) {
+        if ((e as Error).name !== 'AbortError') {
+            showErr(e instanceof Error ? e.message : String(e));
+        }
+    } finally {
+        delete btn.dataset.busy;
+        btn.classList.remove('btn--busy');
+        syncExportButtons();
+    }
+}
+
+/** {@link runBusy} on the Save button, which reads Cancel meanwhile: clicking it aborts `signal`. */
+async function runPdfExport(
+    task: (signal: AbortSignal, setLabel: (label: string) => void) => Promise<void>,
+): Promise<void> {
+    const abort = new AbortController();
+    pdfExportAbort = abort;
+    await runBusy(byId('btnSavePdf') as HTMLButtonElement, S.cancelPdfExport, (setLabel) => task(abort.signal, setLabel));
+    pdfExportAbort = null;
+}
+
 async function saveShopPdf(): Promise<void> {
     const layout = shopLayoutNow();
     if (!layout || !state.shopSizeId) {
-        showErr(S.layoutCannotFit);
         return;
     }
     if (!shopExportAllowed()) {
         return;
     }
-    pdfExportInProgress = true;
-    const btnSave = byId('btnSavePdf') as HTMLButtonElement;
-    btnSave.disabled = true;
-    btnSave.classList.add('btn--busy');
-    btnSave.textContent = S.preparingPdfExport;
     // Snapshot the board so control changes during the export cannot mismatch the file and its name.
     const board = {squaresX: state.squaresX, squaresY: state.squaresY, squareMm: state.squareMm};
     const size = {id: state.shopSizeId, unit: state.shopUnit};
     const options = shopOptions();
     const prefix = exportBasenamePrefix();
-    await yieldToMain();
-    try {
+    await runPdfExport(async (signal) => {
+        await yieldToMain();
         const {renderShopPrintSvg, SHOP_CMYK_BY_RGB, shopPdfProperties} = await import('./print/shopSheet.js');
         const sheet = await renderShopPrintSvg({...board, layout, size, options});
         const blob = await buildPdfBlobFromSvgPages(
@@ -1690,21 +1754,16 @@ async function saveShopPdf(): Promise<void> {
                     cmykByRgb: SHOP_CMYK_BY_RGB,
                     ...shopPdfProperties({...board, layout, size, chartUrl: sheet.chartUrl}),
                 },
+                signal,
             },
         );
         downloadBlob(blob, `${prefix}.pdf`);
-    } catch (e) {
-        showErr(e instanceof Error ? e.message : String(e));
-    } finally {
-        pdfExportInProgress = false;
-        btnSave.classList.remove('btn--busy');
-        btnSave.textContent = state.mode === 'shop' ? S.shopDownload : S.savePdfFiles;
-        btnSave.disabled = !hasPrintableLayout();
-    }
+    });
 }
 
 async function savePdfFile(): Promise<void> {
-    if (pdfExportInProgress) {
+    if (pdfExportAbort) {
+        pdfExportAbort.abort();
         return;
     }
     showErr(null);
@@ -1714,16 +1773,8 @@ async function savePdfFile(): Promise<void> {
     }
     const tiling = effectiveTiling();
     if (!tiling) {
-        showErr(S.layoutCannotFit);
         return;
     }
-    pdfExportInProgress = true;
-    const btnSave = byId('btnSavePdf') as HTMLButtonElement;
-    const idleLabel = S.savePdfFiles;
-    btnSave.disabled = true;
-    btnSave.classList.add('btn--busy');
-    btnSave.textContent = S.preparingPdfExport;
-
     // Snapshot the chart before yielding so slider/paper changes during the export cannot
     // produce a PDF that differs from the filename or the layout we measured.
     const paperId = state.paperId;
@@ -1735,9 +1786,8 @@ async function savePdfFile(): Promise<void> {
     const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
     const px = gridX;
     const py = gridY;
-    await yieldToMain();
-
-    try {
+    await runPdfExport(async (signal, setLabel) => {
+        await yieldToMain();
         const pages = buildPageSpecs(px, py, tiling).pages;
         const {pages: svgs, guide} = await renderCharucoPrintSvg({
             paperId,
@@ -1749,6 +1799,7 @@ async function savePdfFile(): Promise<void> {
             markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
             tiling,
             pages,
+            signal,
             // Keep the busy label/spinner alive while many sheets are assembled.
             cooperativeYield: true,
         });
@@ -1758,20 +1809,16 @@ async function savePdfFile(): Promise<void> {
                 ...svgs.map((svg) => ({svg, widthMm: paperWMm, heightMm: paperHMm})),
             ],
             ({current, total}) => {
-                btnSave.textContent = interpolate(S.preparingPdfPage, {current, total});
+                setLabel(interpolate(S.cancelPdfExportPage, {current, total}));
             },
+            {signal},
         );
         downloadBlob(blob, `${prefix}.pdf`);
-    } catch (e) {
-        showErr(e instanceof Error ? e.message : String(e));
-    } finally {
-        pdfExportInProgress = false;
-        btnSave.classList.remove('btn--busy');
-        btnSave.textContent = idleLabel;
-        const t = effectiveTiling();
-        btnSave.disabled = !t || t.pageCount < 1;
-    }
+    });
 }
+
+/** The last print job's hidden iframe (see {@link printHtmlDocumentInHiddenIframe}). */
+let printFrame: HTMLIFrameElement | null = null;
 
 function printHtmlDocumentInHiddenIframe(html: string): void {
     const iframe = document.createElement('iframe');
@@ -1786,6 +1833,8 @@ function printHtmlDocumentInHiddenIframe(html: string): void {
         border: '0',
         visibility: 'hidden',
     });
+    printFrame?.remove();
+    printFrame = null;
     document.body.appendChild(iframe);
 
     const printWin = iframe.contentWindow;
@@ -1796,24 +1845,14 @@ function printHtmlDocumentInHiddenIframe(html: string): void {
         return;
     }
 
+    // Kept until the next print: where print() returns before the dialog closes, removing it would pull
+    // the document out from under an open dialog.
+    printFrame = iframe;
     printDoc.open();
     printDoc.write(html);
     printDoc.close();
 
-    let fallbackCleanup: number | undefined;
-    const tearDown = (): void => {
-        if (fallbackCleanup !== undefined) {
-            window.clearTimeout(fallbackCleanup);
-            fallbackCleanup = undefined;
-        }
-        if (iframe.isConnected) {
-            iframe.remove();
-        }
-    };
-
     const invokePrint = (): void => {
-        printWin.addEventListener('afterprint', tearDown, {once: true});
-        fallbackCleanup = window.setTimeout(tearDown, 120_000);
         printWin.focus();
         printWin.print();
     };
@@ -1833,26 +1872,23 @@ async function openPrintDialog(): Promise<void> {
     }
     const tiling = effectiveTiling();
     if (!tiling) {
-        showErr(S.layoutCannotFit);
         return;
     }
-    const btnPdf = byId('btnPdf') as HTMLButtonElement;
-    const idleLabel = S.printCharts;
-    btnPdf.disabled = true;
-    btnPdf.classList.add('btn--busy');
-    btnPdf.textContent = S.preparingPrint;
-    await yieldToMain();
+    await runBusy(byId('btnPdf') as HTMLButtonElement, S.preparingPrint, async () => {
+        // Snapshot the chart before yielding, as Save does, so a control change cannot mix two layouts.
+        const paperId = state.paperId;
+        const squareMm = state.squareMm;
+        const pd = paperDims();
+        const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
+        const {squaresX: px, squaresY: py} = state;
+        const pages = buildPageSpecs(px, py, tiling).pages;
+        await yieldToMain();
 
-    const pd = paperDims();
-    const {paperWMm, paperHMm} = nominalPaperToPdfDimensionsMm(pd.wMm, pd.hMm, tiling);
-    const {squaresX: px, squaresY: py} = state;
-    const pages = buildPageSpecs(px, py, tiling).pages;
-    try {
         const {pages: svgs, guide} = await renderCharucoPrintSvg({
-            paperId: state.paperId,
+            paperId,
             squaresX: px,
             squaresY: py,
-            squareLengthMm: state.squareMm,
+            squareLengthMm: squareMm,
             paperWMm,
             paperHMm,
             markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
@@ -1860,43 +1896,38 @@ async function openPrintDialog(): Promise<void> {
             pages,
             cooperativeYield: false,
         });
-        const [pageWCss, pageHCss] = svgRootOuterSizeAttrs(paperWMm, paperHMm, state.paperId);
-        const sheetsHtml = svgs
-            .map((svg) => `<div class="sheet">${stripXmlDeclaration(svg)}</div>`)
-            .join('');
+        const [pageWCss, pageHCss] = svgRootOuterSizeAttrs(paperWMm, paperHMm, paperId);
         // The guide may be turned the other way from the chart sheets, so it prints on its own named page.
         let guideCss = '';
         let guideHtml = '';
         if (guide) {
-            const [guideWCss, guideHCss] = svgRootOuterSizeAttrs(guide.paperWMm, guide.paperHMm, state.paperId);
+            const [guideWCss, guideHCss] = svgRootOuterSizeAttrs(guide.paperWMm, guide.paperHMm, paperId);
             guideCss =
                 `@page guide{size:${guideWCss} ${guideHCss};margin:0}` +
                 `.sheet.sheet--guide{page:guide;width:${guideWCss};height:${guideHCss}}` +
                 `.sheet--guide>svg{width:${guideWCss};height:${guideHCss}}`;
             guideHtml = `<div class="sheet sheet--guide">${stripXmlDeclaration(guide.svg)}</div>`;
         }
-        const html =
+        // Joined once: a many-sheet chart is tens of MB of SVG.
+        const html = [
             `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>` +
-            `<title>ChArUco print</title><style>` +
-            `@page{size:${pageWCss} ${pageHCss};margin:0}` +
-            `*{box-sizing:border-box}` +
-            `html,body{margin:0;padding:0}` +
-            `.sheet{width:${pageWCss};height:${pageHCss};margin:0;` +
-            `page-break-after:always;break-after:page;overflow:hidden}` +
-            `.sheet:last-child{page-break-after:auto;break-after:auto}` +
-            `.sheet>svg{display:block;width:${pageWCss};height:${pageHCss}}` +
-            guideCss +
-            `</style></head><body>${guideHtml}${sheetsHtml}</body></html>`;
+                `<title>ChArUco print</title><style>` +
+                `@page{size:${pageWCss} ${pageHCss};margin:0}` +
+                `*{box-sizing:border-box}` +
+                `html,body{margin:0;padding:0}` +
+                `.sheet{width:${pageWCss};height:${pageHCss};margin:0;` +
+                `page-break-after:always;break-after:page;overflow:hidden}` +
+                `.sheet:last-child{page-break-after:auto;break-after:auto}` +
+                `.sheet>svg{display:block;width:${pageWCss};height:${pageHCss}}` +
+                guideCss +
+                `</style></head><body>`,
+            guideHtml,
+            ...svgs.map((svg) => `<div class="sheet">${stripXmlDeclaration(svg)}</div>`),
+            `</body></html>`,
+        ].join('');
 
         printHtmlDocumentInHiddenIframe(html);
-    } catch (e) {
-        showErr(e instanceof Error ? e.message : String(e));
-    }
-
-    btnPdf.classList.remove('btn--busy');
-    btnPdf.textContent = idleLabel;
-    const t = effectiveTiling();
-    btnPdf.disabled = !t || t.pageCount < 1;
+    });
 }
 
 function clampInt(n: number, lo: number, hi: number): number {
@@ -2233,7 +2264,7 @@ function wireUi(): void {
     for (const btn of themeGroup.querySelectorAll<HTMLButtonElement>('[data-theme-pick]')) {
         btn.addEventListener('click', () => {
             setStoredPreference(btn.dataset.themePick as ThemePreference);
-            applyThemePreference(getStoredPreference(), () => schedulePreview());
+            applyThemePreference(getStoredPreference());
             syncThemeToggle();
         });
     }
@@ -2241,12 +2272,12 @@ function wireUi(): void {
 
 function boot(): void {
     (byId('brandLogo') as HTMLImageElement).src = freemocapLogoUrl;
-    initTheme(() => schedulePreview());
+    initTheme();
     scaleScene = mountScaleScene(byId('scaleScene'), shouldUseImperialWorkingDistanceUnits);
     wireUi();
+    initAdvancedFoldout();
     if (import.meta.env.DEV) {
         initDevQrLinkTargetUi();
-        initAdvancedFoldout();
     }
     applyQrQueryFromLocation();
     syncQrVersionBanner();

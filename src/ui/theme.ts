@@ -24,28 +24,22 @@ export function resolveTheme(p: ThemePreference): 'dark' | 'light' {
     return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-export function applyThemePreference(pref: ThemePreference, onResolvedChange?: () => void): void {
-    const next = resolveTheme(pref);
-    const prev = document.documentElement.dataset.theme;
-    document.documentElement.dataset.theme = next;
+export function applyThemePreference(pref: ThemePreference): void {
+    document.documentElement.dataset.theme = resolveTheme(pref);
     document.documentElement.dataset.themePreference = pref;
-    if (prev !== next) {
-        onResolvedChange?.();
-        window.dispatchEvent(new CustomEvent('skellychart-theme-change'));
-    }
 }
 
 let systemListenerAttached = false;
 
-export function initTheme(onResolvedChange?: () => void): void {
-    applyThemePreference(getStoredPreference(), onResolvedChange);
+export function initTheme(): void {
+    applyThemePreference(getStoredPreference());
     if (systemListenerAttached) {
         return;
     }
     systemListenerAttached = true;
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
         if (getStoredPreference() === 'system') {
-            applyThemePreference('system', onResolvedChange);
+            applyThemePreference('system');
         }
     });
 }

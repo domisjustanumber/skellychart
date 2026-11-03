@@ -173,17 +173,19 @@ function pdfBoxPt(box: PdfBoxMm, pageHMm: number) {
 /**
  * Pack every sheet into a single PDF. The returned blob contains all pages, in print order. With
  * `options.shop`, the PDF is the print-shop file: exactly one page, no fonts, a TrimBox and BleedBox.
+ * Aborting `options.signal` stops it between pages with an `AbortError`.
  */
 export async function buildPdfBlobFromSvgPages(
     pages: readonly PdfSvgPage[],
     onProgress?: PdfExportProgressHandler,
-    options?: {shop?: PdfShopOptions},
+    options?: {shop?: PdfShopOptions; signal?: AbortSignal},
 ): Promise<Blob> {
     const first = pages[0];
     if (!first) {
         throw new Error('No printable pages to export.');
     }
     const shop = options?.shop;
+    const signal = options?.signal;
     if (shop && (pages.length !== 1 || first.widthMm > PDF_PAGE_MAX_MM || first.heightMm > PDF_PAGE_MAX_MM)) {
         throw new Error('A print-shop file is one page of at most 5080 mm.');
     }
@@ -208,6 +210,7 @@ export async function buildPdfBlobFromSvgPages(
         const page = pages[i]!;
         onProgress?.({current: i + 1, total: pages.length});
         await yieldToMain();
+        signal?.throwIfAborted();
 
         if (i > 0) {
             doc.addPage([page.widthMm, page.heightMm], pageOrientation(page.widthMm, page.heightMm));
@@ -240,5 +243,6 @@ export async function buildPdfBlobFromSvgPages(
         });
     }
 
+    signal?.throwIfAborted();
     return doc.output('blob');
 }

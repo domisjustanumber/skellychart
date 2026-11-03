@@ -961,6 +961,7 @@ body {
   display: block;
   margin: 0 auto;
   border-radius: 0;
+  border: 1px solid var(--border);
   background: var(--thumb-bg);
 }
 

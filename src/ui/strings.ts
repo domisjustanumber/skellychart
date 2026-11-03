@@ -103,8 +103,9 @@ export const S = {
     printAdviceHomeEmphasis:
         'If printing at home, use 1:1 or 100% scaling and measure the black square sizes after printing!',
     preparingPrint: 'Preparing print…',
-    preparingPdfExport: 'Preparing PDF…',
-    preparingPdfPage: 'Preparing PDF… ({{current}}/{{total}})',
+    /** The Save button while a PDF is being made: clicking it cancels the export. */
+    cancelPdfExport: 'Cancel (preparing PDF…)',
+    cancelPdfExportPage: 'Cancel (PDF page {{current}} of {{total}})',
     printInitFailed: 'Could not prepare printing in this browser. Try refreshing the page.',
     qrChartNewer:
         'This chart was made by a newer version (v={{theirs}}) than this generator (v={{ours}}). The sheet layout or labels may not match what FreeMoCap produced.',

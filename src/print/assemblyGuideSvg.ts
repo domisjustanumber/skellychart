@@ -16,9 +16,9 @@ import {BANNER_TYPE_PX, wrapHelvetica} from './originBannerLayout.js';
 import {originBannerSvg, type OriginBannerInputs} from './originBannerSvg.js';
 import {paperById, type PaperId} from './papers.js';
 import {sheetSafeMarginsMm, sheetSafeRectPx} from './sheetGeometry.js';
-import {capTopToBaseline, FONT, printedBoard, type PrintedBoard, svgCornerMarker} from './svgPrimitives.js';
+import {FONT, printedBoard, type PrintedBoard, svgCornerMarker, svgTextLines} from './svgPrimitives.js';
 import type {PrintedChart} from './svgAssemblyTypes.js';
-import {escapeXml, svgRootOuterSizeAttrs, svgSheetRoot} from './svgUtils.js';
+import {svgRootOuterSizeAttrs, svgSheetRoot} from './svgUtils.js';
 import {buildPageSpecs, type TilingInfo} from './tiling.js';
 
 /** Largest share of a block's width / height a guide page number may cover, as in the on-screen preview. */
@@ -239,7 +239,7 @@ export function svgAssemblyGuideSheet(o: {
         // Sized explicitly: on a turned guide, % would resolve against the sheet, not the guide.
         `<rect width="${+(g.wMm * ppm).toFixed(3)}" height="${+(g.hMm * ppm).toFixed(3)}" fill="#fff"/>`,
         ...g.banner.parts,
-        `<text x="${g.left}" y="${capTopToBaseline(g.titleTop, titleFontPx)}" fill="#000" font-size="${titleFontPx}" font-family="${FONT}" font-weight="bold">${escapeXml(pdfLabels.assemblyGuideTitle)}</text>`,
+        svgTextLines([{text: pdfLabels.assemblyGuideTitle, x: g.left, y: g.titleTop}], {fontPx: titleFontPx, bold: true}),
         `<svg x="${bx}" y="${by}" width="${dw}" height="${dh}" viewBox="0 0 ${fullWPx} ${fullHPx}" overflow="hidden">` +
             `<rect width="${fullWPx}" height="${fullHPx}" fill="#fff"/>` +
             renderCharucoBoardSvgFragment(fullWPx, fullHPx, geom) +
@@ -252,18 +252,12 @@ export function svgAssemblyGuideSheet(o: {
     parts.push(svgCornerMarker(ppm, bx, by));
 
     const textTop = Math.round(by + dh + gapPx);
-    const tspans = g.text.lines.flatMap((l) => {
-        const y = capTopToBaseline(textTop + l.y, bodyFontPx);
-        const out: string[] = [];
-        if (l.label) {
-            out.push(`<tspan x="${g.left}" y="${y}">${escapeXml(l.label)}</tspan>`);
-        }
-        out.push(`<tspan x="${g.left + l.indent}" y="${y}">${escapeXml(l.text)}</tspan>`);
-        return out;
+    const lines = g.text.lines.flatMap((l) => {
+        const y = textTop + l.y;
+        const line = {text: l.text, x: g.left + l.indent, y};
+        return l.label ? [{text: l.label, x: g.left, y}, line] : [line];
     });
-    parts.push(
-        `<text fill="#000" font-size="${bodyFontPx}" font-family="${FONT}">${tspans.join('')}</text>`,
-    );
+    parts.push(svgTextLines(lines, {fontPx: bodyFontPx}));
 
     let content = parts.join('');
     if (g.turned) {

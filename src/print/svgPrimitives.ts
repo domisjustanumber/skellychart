@@ -1,6 +1,6 @@
 /**
- * Pieces every printed sheet shares: the font stack, the board at print size and the origin corner
- * marker. A leaf module, so the banner, the assembly guide and the chart sheets can all use it.
+ * Pieces every printed sheet shares: the font stack and text lines, the board at print size and the origin
+ * corner marker. A leaf module, so the banner, the assembly guide and the chart sheets can all use it.
  */
 import type {CharucoGeometry} from '../charuco/board.js';
 import {
@@ -12,7 +12,7 @@ import {
 } from './constants.js';
 import {HELVETICA_CAP_HEIGHT_EM, HELVETICA_X_HEIGHT_EM} from './helveticaMetrics.js';
 import type {OutlineTextOptions} from './outlineText.js';
-import {rgbCss} from './svgUtils.js';
+import {escapeXml, rgbCss} from './svgUtils.js';
 
 /**
  * Helvetica is a PDF standard font, so Save as PDF (svg2pdf) draws the face the banner is wrapped with
@@ -39,6 +39,32 @@ export function centreToBaseline(centre: number, fontPx: number): number {
  * text is paths. Home sheets leave it out and keep their `<text>` markup.
  */
 export type SvgTextEmitter = (text: string, opts: OutlineTextOptions) => string;
+
+/** One line for `svgTextLines`: `x` is where it is anchored and `y` its cap top. */
+export interface SvgTextLine {
+    text: string;
+    x: number;
+    y: number;
+}
+
+/**
+ * Lines in one font as a single `<text>`, each a `<tspan>` at its own `x` and baseline. With `emitText`,
+ * each line is drawn by it instead.
+ */
+export function svgTextLines(
+    lines: SvgTextLine[],
+    o: {fontPx: number; bold?: boolean; anchor?: OutlineTextOptions['anchor']},
+    emitText?: SvgTextEmitter,
+): string {
+    const {fontPx, bold = false, anchor} = o;
+    if (emitText) {
+        return lines.map(({text, x, y}) => emitText(text, {x, y, fontPx, bold, anchor, baseline: 'hanging'})).join('');
+    }
+    const weight = bold ? ' font-weight="bold"' : '';
+    const align = anchor ? ` text-anchor="${anchor}"` : '';
+    const tspans = lines.map(({text, x, y}) => `<tspan x="${x}" y="${capTopToBaseline(y, fontPx)}">${escapeXml(text)}</tspan>`);
+    return `<text fill="#000" font-size="${fontPx}" font-family="${FONT}"${weight}${align}>${tspans.join('')}</text>`;
+}
 
 /** The whole board as printed: its geometry, and its size in whole px at `PIXELS_PER_MM`. */
 export interface PrintedBoard {

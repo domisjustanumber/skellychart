@@ -28,8 +28,8 @@ Pricing and specs come from rigid-board products, not paper posters or plan prin
 10. **Quiet zone capped:** E = min(25, max(10, s/4)) mm.
 
 **Accepted from the earlier analysis**
-- **Compact banner:** skelly logo, chart info with the write-in box, and the QR. There is no instructions column. Its height is computed at runtime and never read from `originBannerStrip.generated.ts`. It spans max(board width, banner minimum width).
-- **Shop sizes are never added to `PAPER_OPTIONS`.** `scripts/generate-banner-size.ts` iterates over `PAPER_OPTIONS`, and `originBannerReserveMm()` throws on any width it does not know.
+- **Compact banner:** skelly logo, chart info with the write-in box, and the QR. There is no instructions column. Its height is computed at runtime, like the home banner's. It spans max(board width, banner minimum width).
+- **Shop sizes are never added to `PAPERS`** (`papers.ts`): home paper is tiled under the home banner, and `npm run check:banner` checks that banner on every home paper.
 - **Orientation** is never chosen by hand. It is picked by the deterministic fit and tie-break that home mode uses for paper (`tiling.ts:124-132`), and the summary shows it. The board is never transposed.
 - **Marks and bleed** (see Page geometry):
   - Default: **no crop marks + standard bleed** (3 mm with the mm toggle, ⅛ in = 3.175 mm with the in toggle). Rigid flows want bleed and no marks.
@@ -361,7 +361,7 @@ No free-form entry is needed: every rigid flow found uses one of these, and the 
 ## Pure-vector text approach
 
 - **Font source:** Arimo Regular and Bold v1.33 from googlefonts/Arimo `fonts/ttf`, pinned at commit `4a6255f` (its repo `OFL.txt`: OFL-1.1, no Reserved Font Name). The 2020 v1.33 commit `77fdf7e` has identical outlines, but its repo `LICENSE.txt` is Apache-2.0, so it is not used. The TTFs, `OFL.txt` and a README go in `scripts/fonts/arimo/`, which is dev-only and never bundled. Its outlines and advances match Liberation Sans 2.1.5. Its advances match the Helvetica AFM within 0.5/1000 em for every glyph used.
-- **Generator:** `scripts/generate-glyph-outlines.ts`, using opentype.js 1.3.4 (pinned) as a devDependency. Run it with `npm run generate:glyphs`; `npm run check:glyphs` fails when the generated file is stale, like `check:banner`. It writes `src/print/glyphOutlines.generated.ts`:
+- **Generator:** `scripts/generate-glyph-outlines.ts`, using opentype.js 1.3.4 (pinned) as a devDependency. Run it with `npm run generate:glyphs`; `npm run check:glyphs` fails when the generated file is stale. It writes `src/print/glyphOutlines.generated.ts`:
   - `GLYPH_OUTLINES {normal, bold}`: integer absolute M/L/Q/Z commands at 1000 units/em, y flipped.
   - `GLYPH_CAP_HEIGHT_EM = 0.688` and `GLYPH_X_HEIGHT_EM = 0.528`, measured from 'H' and 'x'.
   - A `/*! @license OFL-1.1 … */` header. `public/licenses/Arimo-OFL.txt` also ships. Vite drops legal comments when minifying, so `vite.config.ts` sets `build.rolldownOptions.output.comments.legal = true` (this keeps the dependencies' notices too, about 6 KB gz).
@@ -595,7 +595,7 @@ It also asserts the writer-to-parser round trip for every size × every bleed in
 
 **11. Version, docs, wiring. Done.** README build-checks and print-shop sections, the skill note, and the main project's memory notes (control priority rules, multi-sheet layout, print-shop mode) record the approved shop exceptions.
 - No version bump (v2 is unpublished). Run `check:banner` to confirm the home banner rows did not change.
-- `.claude/skills/update-banner-size/SKILL.md`: shop banners are sized at runtime, and glyphs must be regenerated (`generate:glyphs`) when the font, the glyph set or `helveticaMetrics.ts` change.
+- The banner-size skill noted that shop banners are sized at runtime, and that glyphs must be regenerated (`generate:glyphs`) when the font, the glyph set or `helveticaMetrics.ts` change. Both banners are now sized at runtime, so the skill and its generated table are gone; the glyph rule is in the README.
 - Add a README section.
 - `build` runs `check:links`, `check:glyphs`, `check:shop` and `check:home-golden` (already wired).
 - Update the "Control priority rules" and "Multi-sheet print layout" memory notes with the approved shop exceptions: always 1 sheet, no guide, and X/Y end-stop at the size limit.

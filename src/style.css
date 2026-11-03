@@ -1,5 +1,5 @@
 /**
- * Colour tokens from freemocap-ui `paperbase-theme.ts`.
+ * Colour tokens from freemocap-ui `paperbase-theme.ts`, only those this page uses.
  * Applied theme is `document.documentElement.dataset.theme` (`dark` | `light`), driven by the
  * header toggle and optional `system` preference (OS sync).
  */
@@ -13,23 +13,19 @@
   --divider: rgba(255, 255, 255, 0.12);
   --primary: #5e92f3;
   --primary-light: #90b4f8;
-  --primary-dark: #163a6d;
-  --secondary: #f50057;
   --action-hover: rgba(255, 255, 255, 0.08);
   --action-selected: rgba(255, 255, 255, 0.16);
   --danger: #f44336;
   --warning-fg: #ffcc80;
   --info: #29b6f6;
-  --success: #4caf50;
   --far-tier: #c66900;
   --close-tier: #26a69a;
-  --surface-2: #0f1419;
+  /* Aliases resolve against whichever theme's base tokens apply, so the light block need not repeat them. */
   --close: var(--close-tier);
   --near: var(--info);
   --far: var(--far-tier);
   --border: var(--divider);
   --primary-hover: var(--primary-light);
-  --secondary-bg: var(--action-hover);
   --thumb-bg: color-mix(in srgb, var(--panel), var(--text) 8%);
   --advanced-bg: color-mix(in srgb, var(--panel), #ffffff 8%);
   /* Floor shadow under the scale-preview people. */
@@ -47,23 +43,13 @@
   --divider: rgba(0, 0, 0, 0.12);
   --primary: #1976d2;
   --primary-light: #4791db;
-  --primary-dark: #115293;
-  --secondary: #f50057;
   --action-hover: rgba(0, 0, 0, 0.04);
   --action-selected: rgba(0, 0, 0, 0.08);
   --danger: #f44336;
   --warning-fg: #c66900;
   --info: #2196f3;
-  --success: #4caf50;
   --far-tier: #c66900;
   --close-tier: #00897b;
-  --surface-2: #f8f9fa;
-  --close: var(--close-tier);
-  --near: var(--info);
-  --far: var(--far-tier);
-  --border: var(--divider);
-  --primary-hover: var(--primary-light);
-  --secondary-bg: var(--action-hover);
   --thumb-bg: color-mix(in srgb, var(--panel), var(--text) 5%);
   --advanced-bg: color-mix(in srgb, var(--panel), #000000 4%);
   --human-shadow: rgba(0, 0, 0, 0.3);
@@ -350,7 +336,6 @@ body {
   border: 1px solid var(--divider);
   border-radius: 6px;
   padding: 1rem 1.1rem;
-  box-shadow: none;
 }
 
 .panel-controls {
@@ -382,7 +367,6 @@ body {
 }
 
 .field label,
-.field > label,
 .field .field-label {
   display: block;
   font-size: 0.8125rem;
@@ -637,7 +621,7 @@ body {
 }
 
 .tier-labels span {
-  padding: 0.2rem 0;
+  padding: 0.125rem 0;
 }
 
 /**
@@ -649,14 +633,20 @@ body {
   --tier-p-near-end: 66%;
   --square-mm-track-h: 10px;
   --square-mm-thumb: 18px;
+  /* Declared here rather than on :root so it resolves the tier stops main.ts sets on this element. */
+  --square-mm-track-bg: linear-gradient(
+    to right,
+    var(--close) 0%,
+    var(--close) var(--tier-p-close-end),
+    var(--near) var(--tier-p-close-end),
+    var(--near) var(--tier-p-near-end),
+    var(--far) var(--tier-p-near-end),
+    var(--far) 100%
+  );
 }
 
 .square-mm-slider-stack .tier-labels {
   margin-top: -0.2rem;
-}
-
-.square-mm-slider-stack .tier-labels span {
-  padding: 0.125rem 0;
 }
 
 .square-mm-slider-stack .slider--square-mm {
@@ -670,18 +660,11 @@ body {
   accent-color: var(--text);
 }
 
+/* The WebKit and Gecko pseudo-elements need separate rules: a browser drops a rule naming one it lacks. */
 .square-mm-slider-stack .slider--square-mm::-webkit-slider-runnable-track {
   height: var(--square-mm-track-h);
   border-radius: 999px;
-  background: linear-gradient(
-    to right,
-    var(--close) 0%,
-    var(--close) var(--tier-p-close-end),
-    var(--near) var(--tier-p-close-end),
-    var(--near) var(--tier-p-near-end),
-    var(--far) var(--tier-p-near-end),
-    var(--far) 100%
-  );
+  background: var(--square-mm-track-bg);
 }
 
 .square-mm-slider-stack .slider--square-mm::-webkit-slider-thumb {
@@ -699,15 +682,7 @@ body {
 .square-mm-slider-stack .slider--square-mm::-moz-range-track {
   height: var(--square-mm-track-h);
   border-radius: 999px;
-  background: linear-gradient(
-    to right,
-    var(--close) 0%,
-    var(--close) var(--tier-p-close-end),
-    var(--near) var(--tier-p-close-end),
-    var(--near) var(--tier-p-near-end),
-    var(--far) var(--tier-p-near-end),
-    var(--far) 100%
-  );
+  background: var(--square-mm-track-bg);
 }
 
 .square-mm-slider-stack .slider--square-mm::-moz-range-progress {
@@ -834,7 +809,6 @@ body {
 
 .preview-status:empty {
   margin: 0;
-  min-height: 0;
 }
 
 @keyframes ui-busy-spin {
@@ -897,7 +871,7 @@ body {
   }
 }
 
-.preview-busy-msg--dots::after {
+.preview-busy-msg::after {
   content: '';
   display: inline-block;
   width: 2.75ch;
@@ -921,16 +895,7 @@ body {
   font-weight: 500;
   color: var(--muted);
   text-align: center;
-  border-radius: 0;
   background: color-mix(in srgb, var(--muted) 8%, transparent);
-}
-
-.thumb-grid-loading.thumb-grid-loading--busy .preview-busy-ring {
-  margin-inline: auto;
-}
-
-.thumb-grid-loading.thumb-grid-loading--busy .preview-busy-msg {
-  margin: 0;
 }
 
 .thumb-grid {
@@ -955,7 +920,6 @@ body {
   height: auto;
   display: block;
   margin: 0 auto;
-  border-radius: 0;
   border: 1px solid var(--border);
   background: var(--thumb-bg);
 }

@@ -41,7 +41,7 @@ function setPreviewBusyMarkup(root: HTMLElement, message: string): void {
     spin.className = 'preview-busy-ring';
     spin.setAttribute('aria-hidden', 'true');
     const label = document.createElement('span');
-    label.className = 'preview-busy-msg preview-busy-msg--dots';
+    label.className = 'preview-busy-msg';
     label.textContent = message;
     root.append(spin, label);
 }
@@ -50,7 +50,7 @@ function setThumbGridPlaceholder(message: string): void {
     const thumbs = byId('thumbGrid');
     thumbs.innerHTML = '';
     const box = document.createElement('div');
-    box.className = 'thumb-grid-loading thumb-grid-loading--busy';
+    box.className = 'thumb-grid-loading';
     setPreviewBusyMarkup(box, message);
     thumbs.appendChild(box);
 }

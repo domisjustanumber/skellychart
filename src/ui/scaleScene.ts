@@ -24,17 +24,21 @@ export interface ScaleSceneChart {
  */
 type DrawnChart = Omit<ScaleSceneChart, 'svg'> & {href: string};
 
-/** 6 ft and 5 ft exactly, so both rulers read round figures in either unit. */
-const PEOPLE_HEIGHTS_MM = [1828.8, 1524] as const;
+/**
+ * The taller person on the left, the shorter on the right: 6 ft and 5 ft exactly, so both rulers read
+ * round figures in either unit.
+ */
+const PEOPLE = [
+    {heightMm: 1828.8, side: -1},
+    {heightMm: 1524, side: 1},
+] as const;
 
 /**
- * Frame of the person drawing (`scaleFigure.svg`, viewBox 400×1000), as fractions of their height: the
- * image spans ±FIGURE_FRAME_HALF_W across and FIGURE_FRAME_Y0..Y1 up from the floor, with the soles at 0
- * and the top of the head at 1.
+ * Frame of the person drawing (`scaleFigure.svg`, viewBox 400×1000), as a fraction of their height: the
+ * image spans ±FIGURE_FRAME_HALF_W across, with the soles at the floor and the top of the head at their
+ * height.
  */
 const FIGURE_FRAME_HALF_W = 0.2;
-const FIGURE_FRAME_Y0 = 0;
-const FIGURE_FRAME_Y1 = 1;
 /** Half the person's width (fraction of height), hands included: the SVG reaches x 33–367 of 400. */
 const FIGURE_HALF_W = 0.17;
 /** Gap between the two people (mm). */
@@ -68,13 +72,20 @@ const SCENE_DEFS =
     `</radialGradient>` +
     `</defs>`;
 
-export function formatHeightMetric(mm: number): string {
+function formatHeightMetric(mm: number): string {
     return interpolate(S.heightCm, {cm: Math.round(mm / 10)});
 }
 
-export function formatHeightImperial(mm: number): string {
+function formatHeightImperial(mm: number): string {
     const inches = Math.round(mm / MM_PER_INCH);
     return interpolate(S.heightFtIn, {ft: Math.floor(inches / 12), in: inches % 12});
+}
+
+/** A height in cm and in feet and inches, the reader's own unit first. */
+function heightLabels(mm: number, imperialFirst: boolean): [string, string] {
+    const metric = formatHeightMetric(mm);
+    const imperial = formatHeightImperial(mm);
+    return imperialFirst ? [imperial, metric] : [metric, imperial];
 }
 
 /**
@@ -102,26 +113,27 @@ function rulerTicks(x: number, heightMm: number, scale: number): string {
     return out.join('');
 }
 
-/** Scene markup for a container `availW` px wide. */
-function sceneMarkup(availW: number, chart: DrawnChart | null, imperialFirst: boolean): string {
-    const halfW = PEOPLE_HEIGHTS_MM.map((h) => FIGURE_HALF_W * h);
-    const people = [
-        {heightMm: PEOPLE_HEIGHTS_MM[0], cx: -(PEOPLE_GAP_MM / 2 + halfW[0]!), halfW: halfW[0]!, side: -1 as const},
-        {heightMm: PEOPLE_HEIGHTS_MM[1], cx: PEOPLE_GAP_MM / 2 + halfW[1]!, halfW: halfW[1]!, side: 1 as const},
-    ];
+/** Scene markup for a container `availW` px wide, at most `maxH` px tall. */
+function sceneMarkup(availW: number, maxH: number, chart: DrawnChart | null, imperialFirst: boolean): string {
+    const people = PEOPLE.map(({heightMm, side}) => {
+        const halfW = FIGURE_HALF_W * heightMm;
+        return {heightMm, side, halfW, cx: side * (PEOPLE_GAP_MM / 2 + halfW)};
+    });
     const chartBox = chart
         ? {
               x: -chart.widthMm / 2,
               y: -(Math.max(0, CHART_CENTRE_MM - chart.heightMm / 2) + chart.heightMm),
               w: chart.widthMm,
               h: chart.heightMm,
+              href: chart.href,
+              isSheet: chart.isSheet,
           }
         : null;
 
     // Scene extent (mm) before the px margins for rulers and labels.
-    let left = people[0]!.cx - people[0]!.halfW;
-    let right = people[1]!.cx + people[1]!.halfW;
-    let top = -Math.max(...PEOPLE_HEIGHTS_MM);
+    let left = Math.min(...people.map((p) => p.cx - p.halfW));
+    let right = Math.max(...people.map((p) => p.cx + p.halfW));
+    let top = -Math.max(...people.map((p) => p.heightMm));
     if (chartBox) {
         left = Math.min(left, chartBox.x);
         right = Math.max(right, chartBox.x + chartBox.w);
@@ -129,7 +141,6 @@ function sceneMarkup(availW: number, chart: DrawnChart | null, imperialFirst: bo
     }
     const contentW = right - left;
     const contentH = -top;
-    const maxH = Math.min(MAX_H_PX, window.innerHeight * 0.45);
     const scale = Math.max(
         1e-6,
         Math.min((availW - 2 * MARGIN_SIDE_PX) / contentW, (maxH - MARGIN_TOP_PX - MARGIN_BOTTOM_PX) / contentH),
@@ -143,8 +154,8 @@ function sceneMarkup(availW: number, chart: DrawnChart | null, imperialFirst: bo
         .map((p) => {
             const h = p.heightMm;
             return (
-                `<image href="${figureUrl}" x="${n(p.cx - FIGURE_FRAME_HALF_W * h)}" y="${n(-FIGURE_FRAME_Y1 * h)}" ` +
-                `width="${n(2 * FIGURE_FRAME_HALF_W * h)}" height="${n((FIGURE_FRAME_Y1 - FIGURE_FRAME_Y0) * h)}" preserveAspectRatio="none"/>`
+                `<image href="${figureUrl}" x="${n(p.cx - FIGURE_FRAME_HALF_W * h)}" y="${n(-h)}" ` +
+                `width="${n(2 * FIGURE_FRAME_HALF_W * h)}" height="${n(h)}" preserveAspectRatio="none"/>`
             );
         })
         .join('');
@@ -158,10 +169,10 @@ function sceneMarkup(availW: number, chart: DrawnChart | null, imperialFirst: bo
         }),
         peopleMarkup,
     );
-    if (chart && chartBox) {
+    if (chartBox) {
         // A multi-sheet chart (the board alone) sits on a thin white rim; a sheet has its own paper margin.
         // A chart standing on the floor keeps its rim and shadow above the floor line.
-        const rim = chart.isSheet ? 0 : px(CHART_RIM_PX);
+        const rim = chartBox.isSheet ? 0 : px(CHART_RIM_PX);
         const onFloor = chartBox.y + chartBox.h >= -1e-6;
         const back = {
             x: chartBox.x - rim,
@@ -173,7 +184,7 @@ function sceneMarkup(availW: number, chart: DrawnChart | null, imperialFirst: bo
         parts.push(
             `<rect class="ss-chart-shadow" x="${n(back.x + px(1))}" y="${n(back.y + shadowDrop)}" width="${n(back.w)}" height="${n(back.h)}"/>`,
             `<rect class="ss-chart-back" x="${n(back.x)}" y="${n(back.y)}" width="${n(back.w)}" height="${n(back.h)}"/>`,
-            `<image class="ss-chart" href="${chart.href}" x="${n(chartBox.x)}" y="${n(chartBox.y)}" width="${n(chartBox.w)}" height="${n(chartBox.h)}" preserveAspectRatio="none"/>`,
+            `<image class="ss-chart" href="${chartBox.href}" x="${n(chartBox.x)}" y="${n(chartBox.y)}" width="${n(chartBox.w)}" height="${n(chartBox.h)}" preserveAspectRatio="none"/>`,
             `<rect class="ss-chart-edge" x="${n(back.x)}" y="${n(back.y)}" width="${n(back.w)}" height="${n(back.h)}" vector-effect="non-scaling-stroke"/>`,
         );
     }
@@ -191,9 +202,7 @@ function sceneMarkup(availW: number, chart: DrawnChart | null, imperialFirst: bo
             `<path class="ss-ruler" d="${ruler}" vector-effect="non-scaling-stroke"/>`,
             `<line class="ss-head-line" x1="${n(x)}" x2="${n(headX)}" y1="${n(y)}" y2="${n(y)}" vector-effect="non-scaling-stroke"/>`,
         );
-        const metric = formatHeightMetric(p.heightMm);
-        const imperial = formatHeightImperial(p.heightMm);
-        const [first, second] = imperialFirst ? [imperial, metric] : [metric, imperial];
+        const [first, second] = heightLabels(p.heightMm, imperialFirst);
         const textY = y - px(LINE_PX + 4);
         parts.push(
             `<text class="ss-label" x="${n(x)}" y="${n(textY)}" font-size="${n(px(FONT_PX))}" stroke-width="${n(px(3))}" text-anchor="middle">` +
@@ -214,11 +223,11 @@ function sceneMarkup(availW: number, chart: DrawnChart | null, imperialFirst: bo
 }
 
 function sceneAriaLabel(chart: DrawnChart | null, imperialFirst: boolean): string {
-    const both = (mm: number): string =>
-        imperialFirst
-            ? `${formatHeightImperial(mm)} (${formatHeightMetric(mm)})`
-            : `${formatHeightMetric(mm)} (${formatHeightImperial(mm)})`;
-    const people = {tall: both(PEOPLE_HEIGHTS_MM[0]), short: both(PEOPLE_HEIGHTS_MM[1])};
+    const both = (mm: number): string => {
+        const [first, second] = heightLabels(mm, imperialFirst);
+        return `${first} (${second})`;
+    };
+    const people = {tall: both(PEOPLE[0].heightMm), short: both(PEOPLE[1].heightMm)};
     if (!chart) {
         return interpolate(S.scaleSceneAriaNoChart, people);
     }
@@ -241,7 +250,7 @@ export function mountScaleScene(root: HTMLElement, imperialFirst: boolean): {upd
         }
         lastW = w;
         lastWindowH = window.innerHeight;
-        root.innerHTML = sceneMarkup(w, current, imperialFirst);
+        root.innerHTML = sceneMarkup(w, Math.min(MAX_H_PX, lastWindowH * 0.45), current, imperialFirst);
     };
     // The scene's height cap follows the window height, so redraw on either change.
     const redrawIfResized = (): void => {

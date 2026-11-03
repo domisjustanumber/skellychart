@@ -17,21 +17,6 @@
       <stop offset="0.75" stop-color="#555b66" stop-opacity="0.42"/>
       <stop offset="1" stop-color="#555b66" stop-opacity="0.2"/>
     </linearGradient>
-    <linearGradient id="glr" gradientUnits="userSpaceOnUse" x1="212" y1="0" x2="292" y2="0">
-      <stop offset="0" stop-color="#555b66" stop-opacity="0"/>
-      <stop offset="0.72" stop-color="#555b66" stop-opacity="0.48"/>
-      <stop offset="1" stop-color="#555b66" stop-opacity="0.15"/>
-    </linearGradient>
-    <linearGradient id="gll" gradientUnits="userSpaceOnUse" x1="112" y1="0" x2="196" y2="0">
-      <stop offset="0" stop-color="#555b66" stop-opacity="0"/>
-      <stop offset="0.75" stop-color="#555b66" stop-opacity="0.42"/>
-      <stop offset="1" stop-color="#555b66" stop-opacity="0.2"/>
-    </linearGradient>
-    <linearGradient id="gh" gradientUnits="userSpaceOnUse" x1="196" y1="0" x2="246" y2="0">
-      <stop offset="0" stop-color="#555b66" stop-opacity="0"/>
-      <stop offset="0.72" stop-color="#555b66" stop-opacity="0.48"/>
-      <stop offset="1" stop-color="#555b66" stop-opacity="0.15"/>
-    </linearGradient>
     <linearGradient id="gn" gradientUnits="userSpaceOnUse" x1="0" y1="128" x2="0" y2="178">
       <stop offset="0" stop-color="#555b66" stop-opacity="0.55"/>
       <stop offset="1" stop-color="#555b66" stop-opacity="0"/>

@@ -7,15 +7,14 @@
  *   npm run check:home-golden             fail if any chart's SVG changed
  *   npm run check:home-golden -- --update rewrite the golden file (only for a deliberate output change)
  *
- * The real pipeline runs (QR, logo from `public/freemocap-logo.svg`, board, banner, guide). Only the
- * canvas text measure used for tape labels is stubbed, with fixed Helvetica metrics, so the hashes do not
- * depend on the machine's fonts. Outside Vite the version is `0.0.0-dev`.
+ * The real pipeline runs (QR, logo from `public/freemocap-logo.svg`, board, banner, guide); text is
+ * measured with fixed Helvetica metrics, so the hashes do not depend on the machine's fonts. Outside Vite
+ * the version is `0.0.0-dev`.
  */
 import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {helveticaTextWidthPx} from '../src/print/helveticaMetrics.js';
 import type {PaperId} from '../src/print/papers.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -24,22 +23,6 @@ const GOLDEN_NAME = path.relative(ROOT, GOLDEN_FILE);
 const update = process.argv.includes('--update');
 
 process.env.CHARUCO_LOGO_FILE = path.join(ROOT, 'public/freemocap-logo.svg');
-
-/** Deterministic stand-in for the tape labels' canvas measure. */
-const measureContext = {
-    font: '10px sans-serif',
-    measureText(text: string) {
-        const fontPx = Number(/^([\d.]+)px/.exec(this.font)?.[1] ?? 10);
-        return {
-            width: helveticaTextWidthPx(text, fontPx),
-            actualBoundingBoxAscent: 0.75 * fontPx,
-            actualBoundingBoxDescent: 0.25 * fontPx,
-        };
-    },
-};
-(globalThis as {document?: unknown}).document = {
-    createElement: () => ({getContext: () => measureContext}),
-};
 
 const {
     maxSquareMmForGridAndPages,

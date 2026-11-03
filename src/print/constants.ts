@@ -23,7 +23,8 @@ export const MM_SHEET_HEADER_GAP_MM = 5;
 /**
  * Band (mm) between the board and the safe margin at a seam, cut away during assembly: it holds only the
  * tape label ({@link MM_TAPE_LABEL_INSET_FROM_JOIN_MM} plus the label's own height at
- * {@link SHEET_HEADER_FONT_PX}).
+ * {@link SHEET_HEADER_FONT_PX}). That is 30 + 32 of its 72 px, so the top and bottom labels are placed
+ * without a clamp; keep it so if either grows.
  */
 export const MM_SEAM_LABEL_BAND_MM = 6;
 export const MM_TAPE_LABEL_INSET_FROM_JOIN_MM = 2.5;

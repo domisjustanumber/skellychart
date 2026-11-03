@@ -23,6 +23,11 @@ import {buildPageSpecs, type TilingInfo} from './tiling.js';
 
 /** Largest share of a block's width / height a guide page number may cover, as in the on-screen preview. */
 const GUIDE_NUMBER_MAX_BLOCK_FRACTION = 0.5;
+/**
+ * Blocks at least this share of the largest block's width and height count as full-size; only they set the
+ * shared page-number size, so a sliver at the chart's edge doesn't shrink every other number.
+ */
+const GUIDE_NUMBER_FULL_BLOCK_FRACTION = 0.75;
 /** Black outline round the guide's white page numbers (em). */
 const GUIDE_NUMBER_STROKE_EM = 0.18;
 /**
@@ -76,8 +81,8 @@ function wrapGuideBody(body: string, fontPx: number, lineLead: number, maxW: num
 /**
  * A numbered, colour-coded block per chart sheet over a board laid out on a `boardWPx`×`boardHPx` canvas
  * and drawn at (`at.x`, `at.y`), scaled by `at.scale`: outlined in the sheet's colour and, with `at.tint`,
- * washed with it. Every page number gets one size, the largest that fits every block, so no number is left out.
- * A single-sheet chart has no blocks.
+ * washed with it. Every page number gets one size, the largest that fits every full-size block; a smaller
+ * block's number shrinks to fit it, so no number is left out. A single-sheet chart has no blocks.
  */
 function svgSheetBlocks(
     squaresX: number,
@@ -115,20 +120,24 @@ function svgSheetBlocks(
         );
     }
 
-    const fs = Math.min(
-        ...blocks.map((b) => {
-            const inkW = helveticaTextWidthPx(b.label, 1, true) + GUIDE_NUMBER_STROKE_EM;
-            const inkH = HELVETICA_BOLD_DIGIT_HEIGHT_EM + GUIDE_NUMBER_STROKE_EM;
-            return Math.min((b.w * GUIDE_NUMBER_MAX_BLOCK_FRACTION) / inkW, (b.h * GUIDE_NUMBER_MAX_BLOCK_FRACTION) / inkH);
-        }),
-    );
+    const fit = (b: (typeof blocks)[number]) => {
+        const inkW = helveticaTextWidthPx(b.label, 1, true) + GUIDE_NUMBER_STROKE_EM;
+        const inkH = HELVETICA_BOLD_DIGIT_HEIGHT_EM + GUIDE_NUMBER_STROKE_EM;
+        return Math.min((b.w * GUIDE_NUMBER_MAX_BLOCK_FRACTION) / inkW, (b.h * GUIDE_NUMBER_MAX_BLOCK_FRACTION) / inkH);
+    };
+    // Widths follow the column and heights the row, so the block in the widest column and tallest row is
+    // always full-size.
+    const fullW = GUIDE_NUMBER_FULL_BLOCK_FRACTION * Math.max(...blocks.map((b) => b.w));
+    const fullH = GUIDE_NUMBER_FULL_BLOCK_FRACTION * Math.max(...blocks.map((b) => b.h));
+    const fs = Math.min(...blocks.filter((b) => b.w >= fullW && b.h >= fullH).map(fit));
     blocks.forEach((b) => {
+        const bfs = Math.min(fs, fit(b));
         const cx = Math.round(b.x + b.w / 2);
-        const baseline = Math.round(b.y + b.h / 2 + (HELVETICA_BOLD_DIGIT_HEIGHT_EM * fs) / 2);
-        const font = `font-size="${fs}" font-family="${FONT}" font-weight="bold" text-anchor="middle"`;
+        const baseline = Math.round(b.y + b.h / 2 + (HELVETICA_BOLD_DIGIT_HEIGHT_EM * bfs) / 2);
+        const font = `font-size="${bfs}" font-family="${FONT}" font-weight="bold" text-anchor="middle"`;
         // svg2pdf draws text strokes far too wide, so the outline is a ring of black copies under the
         // white digits.
-        const r = (GUIDE_NUMBER_STROKE_EM / 2) * fs;
+        const r = (GUIDE_NUMBER_STROKE_EM / 2) * bfs;
         for (let k = 0; k < 16; k++) {
             const a = (k * Math.PI) / 8;
             parts.push(
@@ -189,7 +198,7 @@ export function svgAssemblyGuideSheet(o: {
     const markerRoomPx = Math.round(GUIDE_CORNER_MARKER_ROOM_MM * ppm);
     const titleFontPx = Math.round(1.4 * bodyFontPx);
     const body = interpolate(pdfLabels.assemblyGuideBody, {
-        sheets: tiling.pageCount,
+        pages: tiling.pageCount,
         cols: tiling.npx,
         rows: tiling.npy,
     });

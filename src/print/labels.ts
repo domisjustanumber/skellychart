@@ -14,7 +14,7 @@ export const pdfLabels = {
     tapeJoinNearPage: 'Cut the dashed line away and butt this edge up against page {{page}}',
     assemblyGuideTitle: 'Assembly guide',
     /** Below the full chart on the guide sheet. Numbered lines wrap with a hanging indent. */
-    assemblyGuideBody: `This chart prints on {{sheets}} pages, {{cols}} across and {{rows}} down. Each numbered block above shows where that page goes in the finished chart.
+    assemblyGuideBody: `After this guide, the chart prints on {{pages}} pages, {{cols}} across and {{rows}} down. Each numbered block above shows where that page goes in the finished chart.
 1. Lay the pages out as shown, with page 1 at the top left. Its red and green corner marker shows the chart's x and y directions.
 2. On each page, cut the dashed line away along every edge that joins another page.
 3. Butt each cut edge up against the page named beside it, keeping the squares lined up across every seam.

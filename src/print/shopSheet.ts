@@ -8,7 +8,7 @@
 import {APP_VERSION_DISPLAY} from '../appVersion.js';
 import {renderCharucoBoardSvgFragment} from '../charuco/board.js';
 import {buildCharucoDocumentationUrl, type ShopPrintOptions, type ShopSizeChoice} from './charucoDocUrl.js';
-import {CHARUCO_MARKER_LENGTH_RATIO, PIXELS_PER_MM} from './constants.js';
+import {PIXELS_PER_MM} from './constants.js';
 import {GLYPH_CAP_HEIGHT_EM} from './glyphOutlines.generated.js';
 import {helveticaTextWidthPx} from './helveticaMetrics.js';
 import {interpolate, pdfLabels} from './labels.js';
@@ -129,7 +129,7 @@ export function renderShopSheetSvg(p: ShopSheetParams): ShopSheetSvg {
         squaresY,
     });
 
-    const {geom} = printedBoard(squaresX, squaresY, squareMm, CHARUCO_MARKER_LENGTH_RATIO);
+    const {geom} = printedBoard(squaresX, squaresY, squareMm);
     const trimParts = [
         ...svgOriginBannerParts(banner, p, outlineText),
         `<svg x="${boardX}" y="${boardY}" width="${boardW}" height="${boardH}" viewBox="0 0 ${boardW} ${boardH}" overflow="hidden">` +

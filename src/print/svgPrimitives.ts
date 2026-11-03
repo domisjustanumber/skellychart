@@ -4,6 +4,7 @@
  */
 import type {CharucoGeometry} from '../charuco/board.js';
 import {
+    CHARUCO_MARKER_LENGTH_RATIO,
     ORIGIN_CORNER_MARKER_PAD_MM,
     ORIGIN_MARKER_AXIS_X_RGB,
     ORIGIN_MARKER_AXIS_Y_RGB,
@@ -46,15 +47,10 @@ export interface PrintedBoard {
     hPx: number;
 }
 
-export function printedBoard(
-    squaresX: number,
-    squaresY: number,
-    squareLengthMm: number,
-    markerLengthRatio: number,
-): PrintedBoard {
+export function printedBoard(squaresX: number, squaresY: number, squareLengthMm: number): PrintedBoard {
     const ppm = PIXELS_PER_MM;
     return {
-        geom: {squaresX, squaresY, squareLength: squareLengthMm, markerLength: squareLengthMm * markerLengthRatio},
+        geom: {squaresX, squaresY, squareLength: squareLengthMm, markerLength: squareLengthMm * CHARUCO_MARKER_LENGTH_RATIO},
         wPx: Math.max(1, Math.floor(squaresX * squareLengthMm * ppm)),
         hPx: Math.max(1, Math.floor(squaresY * squareLengthMm * ppm)),
     };

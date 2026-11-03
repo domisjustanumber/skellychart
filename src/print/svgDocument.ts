@@ -4,9 +4,9 @@ import {buildCharucoDocumentationUrl} from './charucoDocUrl.js';
 import {generateQrSvgFragment} from './qrSvg.js';
 import {perfAsync} from './perfDebug.js';
 import {renderCharucoPrintSvgCore} from './svgAssemblyCore.js';
-import type {PrintSvgParams, PrintSvgResult} from './svgAssemblyTypes.js';
+import type {PrintedChart, PrintSvgOptions, PrintSvgResult} from './svgAssemblyTypes.js';
 
-export type {PrintSvgParams} from './svgAssemblyTypes.js';
+export type {PrintedChart} from './svgAssemblyTypes.js';
 
 /** The logo's inner markup, loaded once per runtime (browser tab or Node process). */
 let memoLogoSvgInner: Promise<string | null> | undefined;
@@ -63,25 +63,31 @@ export function resolveLogoForPrint(): Promise<string | null> {
     return memoLogoSvgInner;
 }
 
-export async function renderCharucoPrintSvg(params: PrintSvgParams): Promise<PrintSvgResult> {
+export async function renderCharucoPrintSvg(chart: PrintedChart, options: PrintSvgOptions = {}): Promise<PrintSvgResult> {
     const docUrl = buildCharucoDocumentationUrl(
         resolveQrLinkSourceUrl(),
-        params.squaresX,
-        params.squaresY,
-        params.squareLengthMm,
-        params.paperId,
+        chart.squaresX,
+        chart.squaresY,
+        chart.squareMm,
+        chart.paperId,
     );
     const qrSvgFragment = generateQrSvgFragment(docUrl);
     const logoSvgInner = await perfAsync('Logo SVG inner fragment (cached after first fetch)', () => resolveLogoForPrint());
 
     return perfAsync('renderCharucoPrintSvgCore (board + all sheets)', () =>
         renderCharucoPrintSvgCore({
-            ...params,
+            ...options,
+            chart,
             qrSvgFragment,
             chartUrl: docUrl,
             logoSvgInner,
         }),
     );
+}
+
+/** Every page of a render in print order: the assembly guide (multi-sheet charts), then the chart sheets. */
+export function printOrder(r: PrintSvgResult): string[] {
+    return [...(r.guide ? [r.guide] : []), ...r.sheets];
 }
 
 if (typeof window !== 'undefined') {

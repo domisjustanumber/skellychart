@@ -1,7 +1,7 @@
 import {APP_VERSION} from './appVersion.js';
 import {IS_DEV} from './env.js';
 import freemocapLogoUrl from './freemocapLogoUrl.js';
-import {renderCharucoPrintSvg} from './print/svgDocument.js';
+import {printOrder, renderCharucoPrintSvg, type PrintedChart} from './print/svgDocument.js';
 import {svgAssembledChartWithSheetNumbers} from './print/assemblyGuideSvg.js';
 import {
     BOARD_GRID_MAX,
@@ -29,9 +29,9 @@ import {
 } from './print/charucoLayout.js';
 import {isPaperId, paperById, PAPERS, type PaperId} from './print/papers.js';
 import {gridFeasibility} from './print/feasibilityRules.js';
-import {buildPageSpecs, printedSheetCount} from './print/tiling.js';
+import {printedSheetCount} from './print/tiling.js';
 import {perfLog} from './print/perfDebug.js';
-import {CHARUCO_MARKER_LENGTH_RATIO, PIXELS_PER_MM} from './print/constants.js';
+import {PIXELS_PER_MM} from './print/constants.js';
 import {compareChartVersions, parseChartVersion} from './print/chartVersion.js';
 import {rgbCss, svgRootOuterSizeAttrs} from './print/svgUtils.js';
 import {
@@ -217,9 +217,10 @@ function setThumbGridPlaceholder(message: string): void {
     thumbs.appendChild(box);
 }
 
-function resetPreviewVisualsEmpty(): void {
-    // The hint describes the printed sheets, so it must not outlive them (e.g. after a render error).
+/** Empties the preview: no sheets, so nothing that describes them (e.g. after a render error). */
+function clearPreview(): void {
     byId('fullChartHint').classList.add('hidden');
+    byId('previewTruncated').classList.add('hidden');
     byId('thumbGrid').innerHTML = '';
     scaleScene?.update(null);
 }
@@ -263,6 +264,18 @@ function applyAutoPreset(): void {
 function effectiveTiling() {
     const pd = paperDims();
     return printedLayout(state.squaresX, state.squaresY, state.squareMm, pd.wMm, pd.hMm);
+}
+
+/**
+ * The home chart as the controls set it now, or `null` when it does not print. Preview, Print and Save
+ * take one before their first await and read only it, so a control change mid-render cannot mix two
+ * charts (or a file name from another).
+ */
+function snapshotChart(): PrintedChart | null {
+    const tiling = effectiveTiling();
+    return tiling
+        ? {paperId: state.paperId, squaresX: state.squaresX, squaresY: state.squaresY, squareMm: state.squareMm, tiling}
+        : null;
 }
 
 /** The print-shop board as laid out on its size, or `null` (home mode, or it does not fit). */
@@ -611,9 +624,8 @@ function showErr(msg: string | null): void {
 let scaleScene: ReturnType<typeof mountScaleScene> | null = null;
 
 let previewTimer: ReturnType<typeof setTimeout> | null = null;
+/** The running preview's; a new run aborts it, so a stale run sees its signal aborted. */
 let previewAbort: AbortController | null = null;
-/** Bumped when a new preview run starts so stale async completions do not clear the busy UI. */
-let previewGeneration = 0;
 /** Set while a PDF export runs; the Save button then cancels it instead of starting another. */
 let pdfExportAbort: AbortController | null = null;
 
@@ -627,8 +639,6 @@ let suppressDistanceSelectUiClamp = false;
 let syncedTierBandKey = '';
 /** While true, previews use a shorter debounce; range `pointerdown`/`pointerup` maintain this. */
 let rangePointerHeld = false;
-/** Last preview timer delay chosen (for perf logging). */
-let lastScheduledPreviewDelayMs = PREVIEW_DEBOUNCE_IDLE_MS;
 
 type SyncUiOptions = {
     /**
@@ -1280,7 +1290,7 @@ function schedulePreview(delayOverride?: number): void {
         clearTimeout(previewTimer);
     }
     const scheduleBaselineMs = IS_DEV ? performance.now() : undefined;
-    lastScheduledPreviewDelayMs =
+    const delayMs =
         delayOverride !== undefined
             ? delayOverride
             : rangePointerHeld
@@ -1288,8 +1298,8 @@ function schedulePreview(delayOverride?: number): void {
               : PREVIEW_DEBOUNCE_IDLE_MS;
     previewTimer = setTimeout(() => {
         previewTimer = null;
-        void runPreview(scheduleBaselineMs);
-    }, lastScheduledPreviewDelayMs);
+        void runPreview(scheduleBaselineMs, delayMs);
+    }, delayMs);
 }
 
 function waitAnimationFrames(count: number): Promise<void> {
@@ -1308,16 +1318,10 @@ function waitAnimationFrames(count: number): Promise<void> {
     });
 }
 
-function flushPreviewImgLayoutReads(thumbsRoot: HTMLElement): void {
-    for (const img of thumbsRoot.querySelectorAll<HTMLImageElement>('img.thumb-img')) {
-        void img.offsetWidth;
-    }
-}
-
 /**
  * After assigning SVG data URLs to `<img>`, the slow part is often **paint/composite**, which
- * happens *after* `decode()` resolves. We still `decode()` (readiness), force layout reads, then
- * wait **2× requestAnimationFrame** as a rough proxy for “about to paint”.
+ * happens *after* `decode()` resolves. We still `decode()` (readiness), then wait
+ * **2× requestAnimationFrame** as a rough proxy for “about to paint”.
  */
 async function awaitPreviewImagesDecodedAndPaint(thumbsRoot: HTMLElement): Promise<void> {
     const tDecode = IS_DEV ? performance.now() : 0;
@@ -1329,8 +1333,6 @@ async function awaitPreviewImagesDecodedAndPaint(thumbsRoot: HTMLElement): Promi
         perfLog('browser <img> decode()', performance.now() - tDecode, `${pending.length} images`);
     }
 
-    flushPreviewImgLayoutReads(thumbsRoot);
-
     const tRaf = IS_DEV ? performance.now() : 0;
     await waitAnimationFrames(2);
     if (IS_DEV) {
@@ -1338,217 +1340,173 @@ async function awaitPreviewImagesDecodedAndPaint(thumbsRoot: HTMLElement): Promi
     }
 }
 
-async function runPreview(scheduleBaselineMs?: number): Promise<void> {
+/** One preview thumbnail: the sheet image, under its caption when it has one. */
+function thumb(caption: string | null, src: string, alt: string, border?: string): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'thumb-wrap';
+    if (caption !== null) {
+        const cap = document.createElement('p');
+        cap.className = 'cap';
+        cap.textContent = caption;
+        wrap.appendChild(cap);
+    }
+    const img = document.createElement('img');
+    img.className = 'thumb-img';
+    img.src = src;
+    img.alt = alt;
+    if (border) {
+        img.style.border = border;
+    }
+    wrap.appendChild(img);
+    return wrap;
+}
+
+async function runPreview(scheduleBaselineMs?: number, scheduledDelayMs?: number): Promise<void> {
     previewAbort?.abort();
     previewAbort = new AbortController();
     const signal = previewAbort.signal;
-    const runId = ++previewGeneration;
 
-    const endPreviewBusyIfCurrent = (): void => {
-        if (runId !== previewGeneration) {
-            return;
-        }
-        byId('panelPreview').setAttribute('aria-busy', 'false');
-    };
-
-    const tiling = effectiveTiling();
     const statusEl = byId('previewStatus') as HTMLParagraphElement;
     const panelPreview = byId('panelPreview');
-    const fullBlock = byId('fullPreviewBlock');
-    const thumbs = byId('thumbGrid');
-    const trunc = byId('previewTruncated');
 
     if (state.mode === 'shop') {
-        await runShopPreview(signal, runId);
-        endPreviewBusyIfCurrent();
+        await runShopPreview(signal);
+        if (!signal.aborted) {
+            panelPreview.setAttribute('aria-busy', 'false');
+        }
         return;
     }
 
-    if (!tiling) {
+    const chart = snapshotChart();
+    if (!chart) {
         statusEl.textContent = '';
         panelPreview.setAttribute('aria-busy', 'false');
-        fullBlock.classList.add('hidden');
-        resetPreviewVisualsEmpty();
-        trunc.classList.add('hidden');
+        clearPreview();
         return;
     }
+    const {tiling} = chart;
+    const multi = tiling.pageCount > 1;
+    const thumbs = byId('thumbGrid');
+    const trunc = byId('previewTruncated');
 
     panelPreview.setAttribute('aria-busy', 'true');
     statusEl.textContent = '';
     // Assembly instructions only make sense when the chart spans several sheets.
-    fullBlock.classList.toggle('hidden', tiling.pageCount <= 1);
+    byId('fullChartHint').classList.toggle('hidden', !multi);
     setThumbGridPlaceholder(S.loadingPreviews);
     await yieldToMain();
 
     try {
         const previewWallStart = IS_DEV ? performance.now() : 0;
 
-        const {squaresX: px, squaresY: py} = state;
-        const {paperWMm, paperHMm} = tiling;
-
         // Only the thumbnails that are shown are rendered; sheet headers still count every chart sheet.
-        const pages = buildPageSpecs(px, py, tiling).slice(0, MAX_PREVIEW_PAGES);
-        const layoutN = tiling.pageCount;
-
-        let printResult: Awaited<ReturnType<typeof renderCharucoPrintSvg>>;
-        try {
-            printResult = await renderCharucoPrintSvg({
-                paperId: state.paperId,
-                squaresX: px,
-                squaresY: py,
-                squareLengthMm: state.squareMm,
-                markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
-                tiling,
-                pages,
-                betweenSheets: () => yieldToMainUnlessAborted(signal),
-            });
-        } catch (e) {
-            if ((e as Error).name === 'AbortError') {
-                return;
-            }
-            statusEl.textContent = e instanceof Error ? e.message : String(e);
-            resetPreviewVisualsEmpty();
-            return;
-        }
-
+        const printResult = await renderCharucoPrintSvg(chart, {
+            maxSheets: MAX_PREVIEW_PAGES,
+            betweenSheets: () => yieldToMainUnlessAborted(signal),
+        });
         if (signal.aborted) {
             return;
         }
 
-        setThumbGridPlaceholder(S.loadingPreviews);
-        await yieldToMain();
+        const tThumbs = IS_DEV ? performance.now() : 0;
+        const pageImages = printResult.sheets.map((svg) => svgToDataUrl(svg));
+        if (IS_DEV) {
+            perfLog(
+                'preview thumbs (svgToDataUrl × N)',
+                performance.now() - tThumbs,
+                `${pageImages.length} thumbs — each encodes full sheet SVG`,
+            );
+        }
+        // A single sheet is shown as printed; several as the assembled chart with its sheet numbers.
+        scaleScene?.update(
+            multi
+                ? {
+                      svg: svgAssembledChartWithSheetNumbers(chart),
+                      widthMm: chart.squaresX * chart.squareMm,
+                      heightMm: chart.squaresY * chart.squareMm,
+                      isSheet: false,
+                  }
+                : {svg: printResult.sheets[0]!, widthMm: tiling.paperWMm, heightMm: tiling.paperHMm, isSheet: true},
+        );
 
-        try {
-            const tThumbs = IS_DEV ? performance.now() : 0;
-            const pageImages = printResult.pages.map((svg) => svgToDataUrl(svg));
-            if (IS_DEV) {
+        const truncated = tiling.pageCount > MAX_PREVIEW_PAGES;
+        trunc.classList.toggle('hidden', !truncated);
+        if (truncated) {
+            // Counts printed sheets, like the sheets stepper: the guide thumbnail is one of them.
+            trunc.textContent = interpolate(S.truncatedPreview, {
+                shown: pageImages.length + (multi ? 1 : 0),
+                total: printedSheetCount(tiling.pageCount),
+            });
+        }
+        thumbs.innerHTML = '';
+        if (printResult.guide) {
+            // The assembly guide prints first and is unnumbered.
+            thumbs.appendChild(thumb(S.assemblyGuideLabel, svgToDataUrl(printResult.guide), S.assemblyGuideLabel));
+        }
+        pageImages.forEach((src, i) => {
+            const label = interpolate(S.pageLabel, {n: i + 1});
+            // A single sheet is the whole chart, so it has no page caption. Several share the full-chart
+            // blocks' palette, so each thumbnail matches its block's colour.
+            thumbs.appendChild(
+                multi
+                    ? thumb(label, src, label, `2px solid ${rgbCss(sheetColorRgb(i + 1, tiling.pageCount))}`)
+                    : thumb(null, src, label),
+            );
+        });
+        await awaitPreviewImagesDecodedAndPaint(thumbs);
+        if (signal.aborted) {
+            return;
+        }
+        if (IS_DEV) {
+            perfLog('runPreview JS through paint proxy', performance.now() - previewWallStart, '');
+            if (scheduleBaselineMs !== undefined) {
                 perfLog(
-                    'preview thumbs (svgToDataUrl × N)',
-                    performance.now() - tThumbs,
-                    `${pageImages.length} thumbs — each encodes full sheet SVG`,
+                    'wall: schedulePreview → paint proxy',
+                    performance.now() - scheduleBaselineMs,
+                    `debounce target ${scheduledDelayMs}ms`,
                 );
             }
-            const guideImage = printResult.guide ? svgToDataUrl(printResult.guide) : null;
-            // A single sheet is shown as printed; several as the assembled chart with its sheet numbers.
-            const sceneChart =
-                layoutN <= 1
-                    ? {href: pageImages[0]!, widthMm: paperWMm, heightMm: paperHMm, isSheet: true}
-                    : {
-                          href: svgToDataUrl(
-                              svgAssembledChartWithSheetNumbers(px, py, state.squareMm, CHARUCO_MARKER_LENGTH_RATIO, tiling),
-                          ),
-                          widthMm: px * state.squareMm,
-                          heightMm: py * state.squareMm,
-                          isSheet: false,
-                      };
-            const truncated = layoutN > MAX_PREVIEW_PAGES;
-            if (signal.aborted) {
-                return;
-            }
-
-            byId('fullChartHint').classList.remove('hidden');
-            scaleScene?.update(sceneChart);
-
-            trunc.classList.toggle('hidden', !truncated);
-            if (truncated) {
-                // Counts printed sheets, like the sheets stepper: the guide thumbnail is one of them.
-                trunc.textContent = interpolate(S.truncatedPreview, {
-                    shown: pageImages.length + (guideImage ? 1 : 0),
-                    total: printedSheetCount(layoutN),
-                });
-            }
-            thumbs.innerHTML = '';
-            // A single sheet is the whole chart, so it has no page caption.
-            const singlePage = layoutN <= 1;
-            if (guideImage) {
-                // The assembly guide prints first and is unnumbered.
-                const wrap = document.createElement('div');
-                wrap.className = 'thumb-wrap';
-                const cap = document.createElement('p');
-                cap.className = 'cap';
-                cap.textContent = S.assemblyGuideLabel;
-                const img = document.createElement('img');
-                img.className = 'thumb-img';
-                img.src = guideImage;
-                img.alt = S.assemblyGuideLabel;
-                wrap.append(cap, img);
-                thumbs.appendChild(wrap);
-            }
-            pageImages.forEach((src, i) => {
-                const wrap = document.createElement('div');
-                wrap.className = 'thumb-wrap';
-                if (!singlePage) {
-                    const cap = document.createElement('p');
-                    cap.className = 'cap';
-                    cap.textContent = interpolate(S.pageLabel, {n: i + 1});
-                    wrap.appendChild(cap);
-                }
-                const img = document.createElement('img');
-                img.className = 'thumb-img';
-                img.src = src;
-                img.alt = interpolate(S.pageLabel, {n: i + 1});
-                if (!singlePage) {
-                    // Same palette as the full-chart blocks so each thumbnail matches its block's colour.
-                    img.style.border = `2px solid ${rgbCss(sheetColorRgb(i + 1, layoutN))}`;
-                }
-                wrap.appendChild(img);
-                thumbs.appendChild(wrap);
-            });
-            await awaitPreviewImagesDecodedAndPaint(thumbs);
-            if (signal.aborted || runId !== previewGeneration) {
-                return;
-            }
-            if (IS_DEV) {
-                perfLog('runPreview JS through paint proxy', performance.now() - previewWallStart, '');
-                if (scheduleBaselineMs !== undefined) {
-                    perfLog(
-                        'wall: schedulePreview → paint proxy',
-                        performance.now() - scheduleBaselineMs,
-                        `debounce target ${lastScheduledPreviewDelayMs}ms`,
-                    );
-                }
-            }
-            statusEl.textContent = '';
-        } catch (e) {
-            if ((e as Error).name === 'AbortError') {
-                return;
-            }
-            statusEl.textContent = e instanceof Error ? e.message : String(e);
-            resetPreviewVisualsEmpty();
         }
+        statusEl.textContent = '';
+    } catch (e) {
+        if ((e as Error).name === 'AbortError') {
+            return;
+        }
+        statusEl.textContent = e instanceof Error ? e.message : String(e);
+        clearPreview();
     } finally {
-        endPreviewBusyIfCurrent();
+        if (!signal.aborted) {
+            panelPreview.setAttribute('aria-busy', 'false');
+        }
     }
 }
 
 /** Print-shop preview: the one board, exactly the SVG the PDF is made from (page, bleed, marks and slug). */
-async function runShopPreview(signal: AbortSignal, runId: number): Promise<void> {
+async function runShopPreview(signal: AbortSignal): Promise<void> {
     const statusEl = byId('previewStatus') as HTMLParagraphElement;
     const panelPreview = byId('panelPreview');
     const thumbs = byId('thumbGrid');
-    byId('fullPreviewBlock').classList.add('hidden');
+    byId('fullChartHint').classList.add('hidden');
     byId('previewTruncated').classList.add('hidden');
     const layout = shopLayoutNow();
     if (!layout || !state.shopSizeId) {
         statusEl.textContent = '';
-        resetPreviewVisualsEmpty();
+        clearPreview();
         return;
     }
+    // Snapshot the board before yielding, as the home preview does, so a control change cannot mix two.
+    const board = {squaresX: state.squaresX, squaresY: state.squaresY, squareMm: state.squareMm};
+    const size = {id: state.shopSizeId, unit: state.shopUnit};
+    const options = shopOptions();
+    const alt = shopSummaryText(layout);
     panelPreview.setAttribute('aria-busy', 'true');
     statusEl.textContent = '';
     setThumbGridPlaceholder(S.loadingPreviews);
     await yieldToMain();
     try {
         const {renderShopPrintSvg} = await import('./print/shopSheet.js');
-        const sheet = await renderShopPrintSvg({
-            squaresX: state.squaresX,
-            squaresY: state.squaresY,
-            squareMm: state.squareMm,
-            layout,
-            size: {id: state.shopSizeId, unit: state.shopUnit},
-            options: shopOptions(),
-        });
-        if (signal.aborted || runId !== previewGeneration) {
+        const sheet = await renderShopPrintSvg({...board, layout, size, options});
+        if (signal.aborted) {
             return;
         }
         const sheetImage = svgToDataUrl(sheet.svg);
@@ -1558,21 +1516,14 @@ async function runShopPreview(signal: AbortSignal, runId: number): Promise<void>
         const trimmed =
             `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${t.x * ppm} ${t.y * ppm} ${t.w * ppm} ${t.h * ppm}">` +
             `<image href="${sheetImage}" width="${sheet.mediaMm.w * ppm}" height="${sheet.mediaMm.h * ppm}"/></svg>`;
-        scaleScene?.update({href: svgToDataUrl(trimmed), widthMm: t.w, heightMm: t.h, isSheet: true});
+        scaleScene?.update({svg: trimmed, widthMm: t.w, heightMm: t.h, isSheet: true});
         thumbs.innerHTML = '';
-        const wrap = document.createElement('div');
-        wrap.className = 'thumb-wrap';
-        const img = document.createElement('img');
-        img.className = 'thumb-img';
-        img.src = sheetImage;
-        img.alt = shopSummaryText(layout);
-        wrap.appendChild(img);
-        thumbs.appendChild(wrap);
+        thumbs.appendChild(thumb(null, sheetImage, alt));
         await awaitPreviewImagesDecodedAndPaint(thumbs);
     } catch (e) {
-        if (runId === previewGeneration) {
+        if (!signal.aborted) {
             statusEl.textContent = e instanceof Error ? e.message : String(e);
-            resetPreviewVisualsEmpty();
+            clearPreview();
         }
     }
 }
@@ -1606,24 +1557,22 @@ function bleedFileToken(bleedMm: number): string {
         : `bleed${+bleedMm.toFixed(3)}mm`;
 }
 
-function exportBasenamePrefix(): string {
-    if (state.mode === 'shop' && state.shopSizeId) {
-        const parts = [
-            'skellychart-printshop',
-            state.shopSizeId,
-            `${state.squaresX}x${state.squaresY}`,
-            `${state.squareMm}mm`,
-            bleedFileToken(bleedMmForUnit(state.shopBleed, state.shopUnit)),
-            ...(state.shopCropMarks ? ['crop'] : []),
-        ];
-        return parts.join('-').replace(/[^\w.-]+/g, '_');
-    }
+/** PDF file name (no extension) of the print-shop board as the controls set it. */
+function shopExportBasename(shopSizeId: ShopSizeId): string {
     const parts = [
-        'skellychart',
-        state.paperId,
+        'skellychart-printshop',
+        shopSizeId,
         `${state.squaresX}x${state.squaresY}`,
         `${state.squareMm}mm`,
+        bleedFileToken(bleedMmForUnit(state.shopBleed, state.shopUnit)),
+        ...(state.shopCropMarks ? ['crop'] : []),
     ];
+    return parts.join('-').replace(/[^\w.-]+/g, '_');
+}
+
+/** PDF file name (no extension) of a home chart. */
+function chartExportBasename(chart: PrintedChart): string {
+    const parts = ['skellychart', chart.paperId, `${chart.squaresX}x${chart.squaresY}`, `${chart.squareMm}mm`];
     return parts.join('-').replace(/[^\w.-]+/g, '_');
 }
 
@@ -1698,7 +1647,7 @@ async function saveShopPdf(): Promise<void> {
     const board = {squaresX: state.squaresX, squaresY: state.squaresY, squareMm: state.squareMm};
     const size = {id: state.shopSizeId, unit: state.shopUnit};
     const options = shopOptions();
-    const prefix = exportBasenamePrefix();
+    const prefix = shopExportBasename(state.shopSizeId);
     await runPdfExport(async (signal) => {
         await yieldToMain();
         const {renderShopPrintSvg, SHOP_CMYK_BY_RGB, shopPdfProperties} = await import('./print/shopSheet.js');
@@ -1730,42 +1679,27 @@ async function savePdfFile(): Promise<void> {
         await saveShopPdf();
         return;
     }
-    const tiling = effectiveTiling();
-    if (!tiling) {
-        return;
-    }
     // Snapshot the chart before yielding so slider/paper changes during the export cannot
     // produce a PDF that differs from the filename or the layout we measured.
-    const paperId = state.paperId;
-    const squareMm = state.squareMm;
-    const gridX = state.squaresX;
-    const gridY = state.squaresY;
-    const prefix = exportBasenamePrefix();
-    const {paperWMm, paperHMm} = tiling;
-    const px = gridX;
-    const py = gridY;
+    const chart = snapshotChart();
+    if (!chart) {
+        return;
+    }
+    const {paperWMm, paperHMm} = chart.tiling;
     await runPdfExport(async (signal, setLabel) => {
         await yieldToMain();
-        const pages = buildPageSpecs(px, py, tiling);
-        const {pages: svgs, guide} = await renderCharucoPrintSvg({
-            paperId,
-            squaresX: px,
-            squaresY: py,
-            squareLengthMm: squareMm,
-            markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
-            tiling,
-            pages,
+        const r = await renderCharucoPrintSvg(chart, {
             // Keep the busy label/spinner alive while many sheets are assembled.
             betweenSheets: () => yieldToMainUnlessAborted(signal),
         });
         const blob = await buildPdfBlobFromSvgPages(
-            [...(guide ? [guide] : []), ...svgs].map((svg) => ({svg, widthMm: paperWMm, heightMm: paperHMm})),
+            printOrder(r).map((svg) => ({svg, widthMm: paperWMm, heightMm: paperHMm})),
             ({current, total}) => {
                 setLabel(interpolate(S.cancelPdfExportPage, {current, total}));
             },
             {signal},
         );
-        downloadBlob(blob, `${prefix}.pdf`);
+        downloadBlob(blob, `${chartExportBasename(chart)}.pdf`);
     });
 }
 
@@ -1822,29 +1756,17 @@ async function openPrintDialog(): Promise<void> {
     if (state.mode === 'shop') {
         return;
     }
-    const tiling = effectiveTiling();
-    if (!tiling) {
+    // Snapshot the chart before yielding, as Save does, so a control change cannot mix two layouts.
+    const chart = snapshotChart();
+    if (!chart) {
         return;
     }
     await runBusy(byId('btnPdf') as HTMLButtonElement, S.preparingPrint, async () => {
-        // Snapshot the chart before yielding, as Save does, so a control change cannot mix two layouts.
-        const paperId = state.paperId;
-        const squareMm = state.squareMm;
-        const {paperWMm, paperHMm} = tiling;
-        const {squaresX: px, squaresY: py} = state;
-        const pages = buildPageSpecs(px, py, tiling);
         await yieldToMain();
 
-        const {pages: svgs, guide} = await renderCharucoPrintSvg({
-            paperId,
-            squaresX: px,
-            squaresY: py,
-            squareLengthMm: squareMm,
-            markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
-            tiling,
-            pages,
-        });
-        const [pageWCss, pageHCss] = svgRootOuterSizeAttrs(paperWMm, paperHMm, paperById(paperId).units);
+        const r = await renderCharucoPrintSvg(chart);
+        const {paperWMm, paperHMm} = chart.tiling;
+        const [pageWCss, pageHCss] = svgRootOuterSizeAttrs(paperWMm, paperHMm, paperById(chart.paperId).units);
         // Joined once: a many-sheet chart is tens of MB of SVG. The guide is on the chart sheets' paper, so
         // one @page covers the whole job.
         const html = [
@@ -1858,7 +1780,7 @@ async function openPrintDialog(): Promise<void> {
                 `.sheet:last-child{page-break-after:auto;break-after:auto}` +
                 `.sheet>svg{display:block;width:${pageWCss};height:${pageHCss}}` +
                 `</style></head><body>`,
-            ...[...(guide ? [guide] : []), ...svgs].map((svg) => `<div class="sheet">${stripXmlDeclaration(svg)}</div>`),
+            ...printOrder(r).map((svg) => `<div class="sheet">${stripXmlDeclaration(svg)}</div>`),
             `</body></html>`,
         ].join('');
 

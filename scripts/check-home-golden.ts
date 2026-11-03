@@ -30,8 +30,6 @@ const {
     resolveDistancePrintPlan,
 } = await import('../src/print/charucoLayout.js');
 const {PAPERS, paperById} = await import('../src/print/papers.js');
-const {CHARUCO_MARKER_LENGTH_RATIO} = await import('../src/print/constants.js');
-const {buildPageSpecs} = await import('../src/print/tiling.js');
 const {renderCharucoPrintSvg} = await import('../src/print/svgDocument.js');
 
 interface GoldenCase {
@@ -72,14 +70,12 @@ for (const c of cases) {
     if (!tiling) {
         throw new Error(`${c.key}: does not print`);
     }
-    const {pages: svgs, guide} = await renderCharucoPrintSvg({
+    const {sheets: svgs, guide} = await renderCharucoPrintSvg({
         paperId: c.paperId,
         squaresX: c.squaresX,
         squaresY: c.squaresY,
-        squareLengthMm: c.squareMm,
-        markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
+        squareMm: c.squareMm,
         tiling,
-        pages: buildPageSpecs(c.squaresX, c.squaresY, tiling),
     });
     // The logo markup keeps the file's line endings, which Git checks out as CRLF on Windows and LF elsewhere.
     const lf = (svg: string) => svg.replace(/\r\n?/g, '\n');

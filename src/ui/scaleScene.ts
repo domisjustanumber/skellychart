@@ -9,12 +9,19 @@ import {interpolate, S} from './strings.js';
 
 /** A chart drawn in the scene: an SVG image shown `widthMm`×`heightMm`. */
 export interface ScaleSceneChart {
-    href: string;
+    /** The image's SVG markup. */
+    svg: string;
     widthMm: number;
     heightMm: number;
     /** True when the image is a whole printed sheet (paper included) rather than the board alone. */
     isSheet: boolean;
 }
+
+/**
+ * The chart as drawn: its SVG as a blob URL, made once per chart, so a redraw on resize only puts a short
+ * link in the markup (a multi-sheet chart's SVG can be many MB).
+ */
+type DrawnChart = Omit<ScaleSceneChart, 'svg'> & {href: string};
 
 /** 6 ft and 5 ft exactly, so both rulers read round figures in either unit. */
 const PEOPLE_HEIGHTS_MM = [1828.8, 1524] as const;
@@ -97,7 +104,7 @@ function rulerTicks(x: number, heightMm: number, scale: number): string {
 }
 
 /** Scene markup for a container `availW` px wide. */
-function sceneMarkup(availW: number, chart: ScaleSceneChart | null, imperialFirst: boolean): string {
+function sceneMarkup(availW: number, chart: DrawnChart | null, imperialFirst: boolean): string {
     const halfW = PEOPLE_HEIGHTS_MM.map((h) => FIGURE_HALF_W * h);
     const people = [
         {heightMm: PEOPLE_HEIGHTS_MM[0], cx: -(PEOPLE_GAP_MM / 2 + halfW[0]!), halfW: halfW[0]!, side: -1 as const},
@@ -207,7 +214,7 @@ function sceneMarkup(availW: number, chart: ScaleSceneChart | null, imperialFirs
     );
 }
 
-function sceneAriaLabel(chart: ScaleSceneChart | null, imperialFirst: boolean): string {
+function sceneAriaLabel(chart: DrawnChart | null, imperialFirst: boolean): string {
     const both = (mm: number): string =>
         imperialFirst
             ? `${formatHeightImperial(mm)} (${formatHeightMetric(mm)})`
@@ -228,7 +235,7 @@ function sceneAriaLabel(chart: ScaleSceneChart | null, imperialFirst: boolean): 
  * show, or `null` for the people alone.
  */
 export function mountScaleScene(root: HTMLElement, imperialFirst: () => boolean): {update(chart: ScaleSceneChart | null): void} {
-    let current: ScaleSceneChart | null = null;
+    let current: DrawnChart | null = null;
     let lastW = -1;
     let lastWindowH = -1;
     const draw = (): void => {
@@ -251,7 +258,16 @@ export function mountScaleScene(root: HTMLElement, imperialFirst: () => boolean)
     draw();
     return {
         update(chart) {
-            current = chart;
+            // The scene owns each blob URL; the old image is replaced by the draw straight after.
+            if (current) {
+                URL.revokeObjectURL(current.href);
+            }
+            if (chart) {
+                const {svg, ...size} = chart;
+                current = {...size, href: URL.createObjectURL(new Blob([svg], {type: 'image/svg+xml'}))};
+            } else {
+                current = null;
+            }
             draw();
         },
     };

@@ -17,6 +17,7 @@ import {originBannerSvg, type OriginBannerInputs} from './originBannerSvg.js';
 import {paperById, type PaperId} from './papers.js';
 import {sheetSafeMarginsMm, sheetSafeRectPx} from './sheetGeometry.js';
 import {capTopToBaseline, FONT, printedBoard, type PrintedBoard, svgCornerMarker} from './svgPrimitives.js';
+import type {PrintedChart} from './svgAssemblyTypes.js';
 import {escapeXml, svgRootOuterSizeAttrs, svgSheetRoot} from './svgUtils.js';
 import {buildPageSpecs, type TilingInfo} from './tiling.js';
 
@@ -149,18 +150,13 @@ function svgSheetBlocks(
 }
 
 /**
- * The assembled multi-sheet chart at full size (`squaresX`×`squaresY` squares of `squareLengthMm`) with
- * the guide's numbered sheet outlines, for the on-screen scale preview. Not printed. The board is left
- * untinted (black on white, as printed) so the preview reads as the real chart.
+ * The assembled multi-sheet chart at full size with the guide's numbered sheet outlines, for the
+ * on-screen scale preview. Not printed. The board is left untinted (black on white, as printed) so the
+ * preview reads as the real chart.
  */
-export function svgAssembledChartWithSheetNumbers(
-    squaresX: number,
-    squaresY: number,
-    squareLengthMm: number,
-    markerLengthRatio: number,
-    tiling: TilingInfo,
-): string {
-    const {geom, wPx: fullWPx, hPx: fullHPx} = printedBoard(squaresX, squaresY, squareLengthMm, markerLengthRatio);
+export function svgAssembledChartWithSheetNumbers(chart: PrintedChart): string {
+    const {squaresX, squaresY, tiling} = chart;
+    const {geom, wPx: fullWPx, hPx: fullHPx} = printedBoard(squaresX, squaresY, chart.squareMm);
     // Block outlines stay a visible share of a sheet however large the chart is drawn.
     const sw = Math.max(2, Math.round(Math.min(fullWPx / tiling.npx, fullHPx / tiling.npy) * 0.02));
     return (

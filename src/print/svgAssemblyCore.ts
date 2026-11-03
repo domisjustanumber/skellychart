@@ -18,7 +18,7 @@ import {boardRegionMm, originMarkerRoomMm, type SafeRectPx, type SeamSides, seam
 import type {PrintSvgAssemblyParams, PrintSvgResult} from './svgAssemblyTypes.js';
 import {capTopToBaseline, centreToBaseline, FONT, printedBoard, svgCornerMarker} from './svgPrimitives.js';
 import {escapeXml, rgbCss, svgRootOuterSizeAttrs, svgSheetRoot} from './svgUtils.js';
-import type {PageSpec, TilingInfo} from './tiling.js';
+import {buildPageSpecs, type PageSpec, type TilingInfo} from './tiling.js';
 import {IS_DEV} from '../env.js';
 
 function joinDashGapPpm(ppm: number): [number, number] {
@@ -179,11 +179,12 @@ function svgHorizontalTapeLabel(
 
 export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams): Promise<PrintSvgResult> {
     const ppm = PIXELS_PER_MM;
-    const {paperId, squaresX, squaresY, squareLengthMm, markerLengthRatio, tiling, pages, qrSvgFragment, logoSvgInner, chartUrl} =
-        params;
+    const {chart, maxSheets, qrSvgFragment, logoSvgInner, chartUrl} = params;
+    const {paperId, squaresX, squaresY, squareMm: squareLengthMm, tiling} = chart;
     const {paperWMm, paperHMm} = tiling;
+    const pages = buildPageSpecs(squaresX, squaresY, tiling).slice(0, maxSheets);
 
-    const board = printedBoard(squaresX, squaresY, squareLengthMm, markerLengthRatio);
+    const board = printedBoard(squaresX, squaresY, squareLengthMm);
     const {geom, wPx: fullWPx, hPx: fullHPx} = board;
     perfNote('Board per sheet', `only each sheet's own squares (${fullWPx}×${fullHPx}px board, ${pages.length} sheets)`);
 
@@ -319,5 +320,5 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
             ? svgAssemblyGuideSheet({paperId, paperWMm, paperHMm, board, tiling, banner: bannerInputs})
             : null;
 
-    return {pages: pageSvgs, guide};
+    return {sheets: pageSvgs, guide};
 }

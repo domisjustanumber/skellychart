@@ -30,15 +30,8 @@ export interface PrintSvgAssemblyParams extends PrintSvgParams {
     logoSvgInner: string | null;
 }
 
-/** One printed sheet whose size differs from the chart sheets'. */
-export interface PrintSheetSvg {
-    svg: string;
-    paperWMm: number;
-    paperHMm: number;
-}
-
 export interface PrintSvgResult {
     pages: string[];
-    /** Assembly guide printed before the chart sheets; `null` for a single-sheet chart. */
-    guide: PrintSheetSvg | null;
+    /** Assembly guide printed before the chart sheets, on the same paper; `null` for a single-sheet chart. */
+    guide: string | null;
 }

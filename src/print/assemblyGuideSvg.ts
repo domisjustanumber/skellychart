@@ -15,8 +15,7 @@ import {interpolate, pdfLabels} from './labels.js';
 import {BANNER_TYPE_PX, wrapHelvetica} from './originBannerLayout.js';
 import {originBannerSvg, type OriginBannerInputs} from './originBannerSvg.js';
 import {paperById, type PaperId} from './papers.js';
-import {sheetSafeRectPx} from './sheetGeometry.js';
-import type {PrintSheetSvg} from './svgAssemblyTypes.js';
+import {sheetSafeMarginsMm, sheetSafeRectPx} from './sheetGeometry.js';
 import {capTopToBaseline, FONT, printedBoard, type PrintedBoard, svgCornerMarker} from './svgPrimitives.js';
 import {escapeXml, svgRootOuterSizeAttrs, svgSheetRoot} from './svgUtils.js';
 import {buildPageSpecs, type TilingInfo} from './tiling.js';
@@ -174,21 +173,22 @@ export function svgAssembledChartWithSheetNumbers(
 }
 
 /**
- * Assembly guide sheet for a multi-sheet chart: the full chart, never rotated (x runs across), with a
- * numbered, colour-coded block per chart sheet as in the on-screen preview, then how to put it together.
- * The origin banner sits above it (so the guide needs no header line). The paper is turned whichever way
- * shows the chart largest.
+ * Assembly guide sheet for a multi-sheet chart: the full chart, never rotated against the guide's text (x
+ * runs along its lines), with a numbered, colour-coded block per chart sheet as in the on-screen preview,
+ * then how to put it together. The origin banner sits above it (so the guide needs no header line). It
+ * prints on the chart sheets' own paper, drawn turned on the sheet when that shows the chart larger, so the
+ * whole job is one page size.
  */
 export function svgAssemblyGuideSheet(o: {
     paperId: PaperId;
-    /** Chart sheet size (mm); the guide uses the same paper in either orientation. */
+    /** Chart sheet size (mm); the guide prints on it, laid out in either orientation. */
     paperWMm: number;
     paperHMm: number;
     board: PrintedBoard;
     tiling: TilingInfo;
     /** What the origin banner above the guide is drawn from; it is laid out for each orientation tried. */
     banner: OriginBannerInputs;
-}): PrintSheetSvg {
+}): string {
     const {paperId, board, tiling} = o;
     const ppm = PIXELS_PER_MM;
     const {bodyFontPx, bodyLineLead} = BANNER_TYPE_PX;
@@ -203,21 +203,29 @@ export function svgAssemblyGuideSheet(o: {
         rows: tiling.npy,
     });
 
-    const layoutFor = (wMm: number, hMm: number) => {
-        const {left, right, bottom} = sheetSafeRectPx(wMm, hMm, ppm);
+    // A guide drawn turned on the sheet has its top along a portrait sheet's left edge or a landscape
+    // sheet's right edge, and keeps the sheet's margins, seen from the guide.
+    const sheetPortrait = o.paperWMm < o.paperHMm;
+    const m = sheetSafeMarginsMm(o.paperWMm, o.paperHMm);
+    const turnedMargins = sheetPortrait
+        ? {top: m.left, right: m.top, bottom: m.right, left: m.bottom}
+        : {top: m.right, right: m.bottom, bottom: m.left, left: m.top};
+    const layoutFor = (turned: boolean) => {
+        const [wMm, hMm] = turned ? [o.paperHMm, o.paperWMm] : [o.paperWMm, o.paperHMm];
+        const {left, top, right, bottom} = sheetSafeRectPx(wMm, hMm, ppm, turned ? turnedMargins : m);
         const innerW = right - left;
         const text = wrapGuideBody(body, bodyFontPx, bodyLineLead, Math.min(innerW, Math.round(GUIDE_TEXT_MAX_W_MM * ppm)));
-        const banner = originBannerSvg(o.banner, wMm, hMm, 'guide');
+        const banner = originBannerSvg(o.banner, wMm, hMm, 'guide', {leftPx: left, rightPx: right, topPx: top});
         const titleTop = banner.bottom;
         const boardTop = titleTop + titleFontPx + gapPx + markerRoomPx;
         const areaW = innerW - markerRoomPx;
         const areaH = bottom - boardTop - gapPx - text.height;
         const fitScale = Math.min(areaW / fullWPx, areaH / fullHPx);
-        return {wMm, hMm, left, right, text, banner, titleTop, boardTop, fitScale};
+        return {turned, wMm, hMm, left, right, text, banner, titleTop, boardTop, fitScale};
     };
-    const candidates = [layoutFor(o.paperWMm, o.paperHMm)];
+    const candidates = [layoutFor(false)];
     if (Math.abs(o.paperWMm - o.paperHMm) >= 0.01) {
-        candidates.push(layoutFor(o.paperHMm, o.paperWMm));
+        candidates.push(layoutFor(true));
     }
     // Pick by the uncapped fit, so a small chart still gets the orientation that matches its shape.
     const g = candidates.reduce((best, c) => (c.fitScale > best.fitScale ? c : best));
@@ -232,7 +240,8 @@ export function svgAssemblyGuideSheet(o: {
     const bx = Math.round(g.left + markerRoomPx + (g.right - g.left - markerRoomPx - dw) / 2);
     const by = g.boardTop;
     const parts: string[] = [
-        '<rect width="100%" height="100%" fill="#fff"/>',
+        // Sized explicitly: on a turned guide, % would resolve against the sheet, not the guide.
+        `<rect width="${+(g.wMm * ppm).toFixed(3)}" height="${+(g.hMm * ppm).toFixed(3)}" fill="#fff"/>`,
         ...g.banner.parts,
         `<text x="${g.left}" y="${capTopToBaseline(g.titleTop, titleFontPx)}" fill="#000" font-size="${titleFontPx}" font-family="${FONT}" font-weight="bold">${escapeXml(pdfLabels.assemblyGuideTitle)}</text>`,
         `<svg x="${bx}" y="${by}" width="${dw}" height="${dh}" viewBox="0 0 ${fullWPx} ${fullHPx}" overflow="hidden">` +
@@ -260,9 +269,11 @@ export function svgAssemblyGuideSheet(o: {
         `<text fill="#000" font-size="${bodyFontPx}" font-family="${FONT}">${tspans.join('')}</text>`,
     );
 
-    return {
-        svg: svgSheetRoot(g.wMm, g.hMm, svgRootOuterSizeAttrs(g.wMm, g.hMm, paperById(paperId).units), parts.join('')),
-        paperWMm: g.wMm,
-        paperHMm: g.hMm,
-    };
+    let content = parts.join('');
+    if (g.turned) {
+        const w = +(o.paperWMm * ppm).toFixed(3);
+        const h = +(o.paperHMm * ppm).toFixed(3);
+        content = `<g transform="${sheetPortrait ? `translate(0,${h}) rotate(-90)` : `translate(${w},0) rotate(90)`}">${content}</g>`;
+    }
+    return svgSheetRoot(o.paperWMm, o.paperHMm, svgRootOuterSizeAttrs(o.paperWMm, o.paperHMm, paperById(paperId).units), content);
 }

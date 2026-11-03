@@ -85,17 +85,17 @@ for (const c of cases) {
     const lf = (svg: string) => svg.replace(/\r\n?/g, '\n');
     const hash = createHash('sha256');
     if (guide) {
-        hash.update(`guide ${guide.paperWMm}x${guide.paperHMm}\n${lf(guide.svg)}\n`);
+        hash.update(`guide\n${lf(guide)}\n`);
     }
     svgs.forEach((svg, i) => hash.update(`sheet ${i + 1}\n${lf(svg)}\n`));
     // The print-shop rich-black marker must never reach home output (it would print as 0 0 0.004 rg).
-    if ([guide?.svg ?? '', ...svgs].some((svg) => svg.includes('rgb(0,0,1)'))) {
+    if ([guide ?? '', ...svgs].some((svg) => svg.includes('rgb(0,0,1)'))) {
         console.error(`${c.key}: home output contains the print-shop rich-black fill rgb(0,0,1)`);
         process.exit(1);
     }
     // svg2pdf ignores `dominant-baseline` and browsers resolve it from the installed font, so every line must
     // carry an explicit baseline (`capTopToBaseline`, `centreToBaseline`) for Print and Save as PDF to agree.
-    if ([guide?.svg ?? '', ...svgs].some((svg) => svg.includes('dominant-baseline'))) {
+    if ([guide ?? '', ...svgs].some((svg) => svg.includes('dominant-baseline'))) {
         console.error(`${c.key}: home output uses dominant-baseline`);
         process.exit(1);
     }

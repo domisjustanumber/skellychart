@@ -55,7 +55,10 @@ export const BANNER_LOGO_PX = {
 export interface OriginBannerLayoutParams {
     /** `full` (default): home sheets, inside the sheet's safe margins. `compact`: print-shop boards, in {@link box}. */
     variant?: 'full' | 'compact';
-    /** Compact only: the banner's box in px (the shop content block); it replaces the sheet's safe margins. */
+    /**
+     * The banner's box in px, in place of the sheet's safe margins: needed by compact (the shop content
+     * block); a full banner takes one on an assembly guide drawn turned on its sheet.
+     */
     box?: {leftPx: number; rightPx: number; topPx: number};
     /**
      * Full only, and needed there: whose measuring line the instructions carry, `chart` on a single-sheet
@@ -157,7 +160,7 @@ export function layoutOriginBanner(params: OriginBannerLayoutParams): OriginBann
     if (!compact && !params.instructions) {
         throw new Error('A full banner needs its instructions.');
     }
-    const safe = compact ? null : sheetSafeRectPx(paperWMm, paperHMm, ppm);
+    const safe = params.box ? null : sheetSafeRectPx(paperWMm, paperHMm, ppm);
     const marginTopPx = safe ? safe.top : params.box!.topPx;
     const {titleFontPx, bodyFontPx, bodyLineLead, vGap} = BANNER_TYPE_PX;
     const bannerLeft = safe ? safe.left : params.box!.leftPx;

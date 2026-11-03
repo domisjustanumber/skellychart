@@ -6,7 +6,7 @@
 import {APP_VERSION_DISPLAY} from '../appVersion.js';
 import {PIXELS_PER_MM} from './constants.js';
 import {pdfLabels} from './labels.js';
-import {layoutOriginBanner, type OriginBannerLayout} from './originBannerLayout.js';
+import {layoutOriginBanner, type OriginBannerLayout, type OriginBannerLayoutParams} from './originBannerLayout.js';
 import {SKELLY_LOGO_VIEWBOX_H, SKELLY_LOGO_VIEWBOX_W} from './skellyLogo.js';
 import {capTopToBaseline, FONT, type SvgTextEmitter} from './svgPrimitives.js';
 import {escapeXml} from './svgUtils.js';
@@ -87,16 +87,19 @@ export function svgOriginBannerParts(
 
 /**
  * The full origin banner on a home sheet `sheetWMm` × `sheetHMm`, with the measuring line for a
- * single-sheet chart or the assembly guide; `bottom` includes the gap below it.
+ * single-sheet chart or the assembly guide, inside the sheet's safe margins or `box`; `bottom` includes
+ * the gap below it.
  */
 export function originBannerSvg(
     inputs: OriginBannerInputs,
     sheetWMm: number,
     sheetHMm: number,
     instructions: 'chart' | 'guide',
+    box?: OriginBannerLayoutParams['box'],
 ): {parts: string[]; bottom: number} {
     const b = layoutOriginBanner({
         instructions,
+        box,
         paperWMm: sheetWMm,
         paperHMm: sheetHMm,
         version: APP_VERSION_DISPLAY,

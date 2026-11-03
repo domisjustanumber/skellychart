@@ -64,9 +64,16 @@ export interface SafeRectPx {
     bottom: number;
 }
 
-/** {@link sheetSafeMarginsMm} as px coordinates, rounded inwards (Letter and Tabloid are not whole px). */
-export function sheetSafeRectPx(paperWMm: number, paperHMm: number, ppm: number): SafeRectPx {
-    const m = sheetSafeMarginsMm(paperWMm, paperHMm);
+/**
+ * {@link sheetSafeMarginsMm} (or the margins `m`) as px coordinates, rounded inwards (Letter and Tabloid
+ * are not whole px).
+ */
+export function sheetSafeRectPx(
+    paperWMm: number,
+    paperHMm: number,
+    ppm: number,
+    m: EdgesMm = sheetSafeMarginsMm(paperWMm, paperHMm),
+): SafeRectPx {
     return {
         left: Math.ceil(m.left * ppm),
         top: Math.ceil(m.top * ppm),

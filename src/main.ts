@@ -1428,7 +1428,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                     `${pageImages.length} thumbs — each encodes full sheet SVG`,
                 );
             }
-            const guideImage = printResult.guide ? svgToDataUrl(printResult.guide.svg) : null;
+            const guideImage = printResult.guide ? svgToDataUrl(printResult.guide) : null;
             // A single sheet is shown as printed; several as the assembled chart with its sheet numbers.
             const sceneChart =
                 layoutN <= 1
@@ -1759,10 +1759,7 @@ async function savePdfFile(): Promise<void> {
             betweenSheets: () => yieldToMainUnlessAborted(signal),
         });
         const blob = await buildPdfBlobFromSvgPages(
-            [
-                ...(guide ? [{svg: guide.svg, widthMm: guide.paperWMm, heightMm: guide.paperHMm}] : []),
-                ...svgs.map((svg) => ({svg, widthMm: paperWMm, heightMm: paperHMm})),
-            ],
+            [...(guide ? [guide] : []), ...svgs].map((svg) => ({svg, widthMm: paperWMm, heightMm: paperHMm})),
             ({current, total}) => {
                 setLabel(interpolate(S.cancelPdfExportPage, {current, total}));
             },
@@ -1848,18 +1845,8 @@ async function openPrintDialog(): Promise<void> {
             pages,
         });
         const [pageWCss, pageHCss] = svgRootOuterSizeAttrs(paperWMm, paperHMm, paperById(paperId).units);
-        // The guide may be turned the other way from the chart sheets, so it prints on its own named page.
-        let guideCss = '';
-        let guideHtml = '';
-        if (guide) {
-            const [guideWCss, guideHCss] = svgRootOuterSizeAttrs(guide.paperWMm, guide.paperHMm, paperById(paperId).units);
-            guideCss =
-                `@page guide{size:${guideWCss} ${guideHCss};margin:0}` +
-                `.sheet.sheet--guide{page:guide;width:${guideWCss};height:${guideHCss}}` +
-                `.sheet--guide>svg{width:${guideWCss};height:${guideHCss}}`;
-            guideHtml = `<div class="sheet sheet--guide">${stripXmlDeclaration(guide.svg)}</div>`;
-        }
-        // Joined once: a many-sheet chart is tens of MB of SVG.
+        // Joined once: a many-sheet chart is tens of MB of SVG. The guide is on the chart sheets' paper, so
+        // one @page covers the whole job.
         const html = [
             `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>` +
                 `<title>ChArUco print</title><style>` +
@@ -1870,10 +1857,8 @@ async function openPrintDialog(): Promise<void> {
                 `page-break-after:always;break-after:page;overflow:hidden}` +
                 `.sheet:last-child{page-break-after:auto;break-after:auto}` +
                 `.sheet>svg{display:block;width:${pageWCss};height:${pageHCss}}` +
-                guideCss +
                 `</style></head><body>`,
-            guideHtml,
-            ...svgs.map((svg) => `<div class="sheet">${stripXmlDeclaration(svg)}</div>`),
+            ...[...(guide ? [guide] : []), ...svgs].map((svg) => `<div class="sheet">${stripXmlDeclaration(svg)}</div>`),
             `</body></html>`,
         ].join('');
 

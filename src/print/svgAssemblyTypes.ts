@@ -11,6 +11,11 @@ export interface PrintedChart {
     squaresX: number;
     squaresY: number;
     squareMm: number;
+    /**
+     * The banner setting the layout was made with: off, a single-sheet chart has the header line instead
+     * of the origin banner. The chart link records it.
+     */
+    banner: boolean;
     /** The printed layout; its `paperWMm` × `paperHMm` is the chart sheet every page is drawn on. */
     tiling: TilingInfo;
 }

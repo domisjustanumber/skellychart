@@ -5,7 +5,8 @@
  * names, at or above the distance minimum, ending at one square per sheet. Every grid prints every square
  * length up to its largest, with no gaps. Every preset and every grid the X / Y sliders allow must fit the
  * 250-marker dictionary. Tiling reserves the origin banner for the version the build prints, and only on a
- * single-sheet chart. Every paper's link code is a unique single digit.
+ * single-sheet chart. All of that holds with the banner setting on and off; off, no chart reserves the
+ * strip, and none needs more sheets than with it. Every paper's link code is a unique single digit.
  */
 import './useBuildAppVersion.js';
 import {MM_HEADER_CONTENT_TOP_MM, ORIGIN_CORNER_MARKER_TOP_ROOM_MM} from '../src/print/constants.js';
@@ -40,27 +41,35 @@ PAPERS.forEach((paper, i) => {
     }
 });
 
+/** The banner setting, as the failure labels name it. */
+const BANNERS = [
+    [true, 'banner'],
+    [false, 'no banner'],
+] as const;
+
 for (const paper of PAPERS) {
     for (const distance of DISTANCES) {
-        const plan = resolveDistancePrintPlan(distance, paper.id);
-        const label = `${paper.id} ${distance} ${plan.squaresX}×${plan.squaresY} → ${plan.targetPages} page(s)`;
-        if (charucoMarkerCount(plan.squaresX, plan.squaresY) > BOARD_MARKERS_MAX) {
-            failures.push(`${label}: needs more than ${BOARD_MARKERS_MAX} markers`);
+        for (const [banner, bannerLabel] of BANNERS) {
+            const plan = resolveDistancePrintPlan(distance, paper.id);
+            const label = `${paper.id} ${distance} ${bannerLabel} ${plan.squaresX}×${plan.squaresY} → ${plan.targetPages} page(s)`;
+            if (charucoMarkerCount(plan.squaresX, plan.squaresY) > BOARD_MARKERS_MAX) {
+                failures.push(`${label}: needs more than ${BOARD_MARKERS_MAX} markers`);
+            }
+            const squareMm = maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, paper.wMm, paper.hMm, plan.targetPages, banner);
+            if (squareMm === null) {
+                failures.push(`${label}: no square length prints on exactly ${plan.targetPages} page(s)`);
+                continue;
+            }
+            const minMm = workingDistanceMinSquareMm(distance);
+            if (squareMm < minMm) {
+                failures.push(`${label}: ${squareMm} mm is below the ${distance} minimum of ${minMm} mm`);
+            }
+            const printed = printedLayout(plan.squaresX, plan.squaresY, squareMm, paper.wMm, paper.hMm, banner);
+            if (printed?.pageCount !== plan.targetPages) {
+                failures.push(`${label}: ${squareMm} mm prints ${printed?.pageCount ?? 'nothing'}`);
+            }
+            console.log(`${label}: ${squareMm} mm`);
         }
-        const squareMm = maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, paper.wMm, paper.hMm, plan.targetPages);
-        if (squareMm === null) {
-            failures.push(`${label}: no square length prints on exactly ${plan.targetPages} page(s)`);
-            continue;
-        }
-        const minMm = workingDistanceMinSquareMm(distance);
-        if (squareMm < minMm) {
-            failures.push(`${label}: ${squareMm} mm is below the ${distance} minimum of ${minMm} mm`);
-        }
-        const printed = printedLayout(plan.squaresX, plan.squaresY, squareMm, paper.wMm, paper.hMm);
-        if (printed?.pageCount !== plan.targetPages) {
-            failures.push(`${label}: ${squareMm} mm prints ${printed?.pageCount ?? 'nothing'}`);
-        }
-        console.log(`${label}: ${squareMm} mm`);
     }
 }
 
@@ -81,6 +90,11 @@ const noStrip = printedLayout(2, 3, 79, a4.wMm, a4.hMm);
 if (noStrip?.pageCount !== 2 || noStrip.bannerReserveMm !== 0) {
     failures.push(`a4 2×3 at 79 mm prints ${noStrip?.pageCount ?? 'nothing'} sheet(s) with a ${noStrip?.bannerReserveMm} mm banner strip, not 2 with none`);
 }
+// Without the banner it fits one sheet, with no strip.
+const noBanner = printedLayout(2, 3, 79, a4.wMm, a4.hMm, false);
+if (noBanner?.pageCount !== 1 || noBanner.bannerReserveMm !== 0) {
+    failures.push(`a4 2×3 at 79 mm without the banner prints ${noBanner?.pageCount ?? 'nothing'} sheet(s) with a ${noBanner?.bannerReserveMm} mm banner strip, not 1 with none`);
+}
 
 // The X / Y end-stop is exactly the largest count whose board fits the marker dictionary.
 for (let other = BOARD_GRID_MIN; other <= BOARD_GRID_MAX; other++) {
@@ -95,68 +109,77 @@ let stepperChecks = 0;
 for (const paper of PAPERS) {
     for (let sx = BOARD_GRID_MIN; sx <= BOARD_GRID_MAX; sx++) {
         for (let sy = BOARD_GRID_MIN; sy <= boardGridAxisMax(sx); sy++) {
-            // Snapping a square length is a clamp, so every length up to the grid's largest must print. With
-            // the far stepper below (its stops reach the far minimum), snapping never changes a distance band,
-            // which the X / Y, link and paper paths rely on.
-            const {maxSquareMm} = gridFeasibility(sx, sy, paper.wMm, paper.hMm);
-            for (let s = CHARUCO_SQUARE_MM_MIN; s <= CHARUCO_SQUARE_MM_MAX; s++) {
-                const printed = printedLayout(sx, sy, s, paper.wMm, paper.hMm);
-                const prints = printed !== null;
-                if (prints !== (maxSquareMm !== null && s <= maxSquareMm)) {
-                    failures.push(`grid ${paper.id} ${sx}×${sy}: ${s} mm ${prints ? 'prints' : 'does not print'}, but the largest square is ${maxSquareMm} mm`);
-                    break;
-                }
-                // The banner strip is reserved exactly when the chart is a single sheet (it carries the banner).
-                if (printed && (printed.bannerReserveMm > 0) !== (printed.pageCount === 1)) {
-                    failures.push(`grid ${paper.id} ${sx}×${sy}: ${s} mm prints ${printed.pageCount} sheet(s) with a ${printed.bannerReserveMm} mm banner strip`);
-                    break;
-                }
-            }
-            for (const distance of DISTANCES) {
-                const minMm = workingDistanceMinSquareMm(distance);
-                const steps = steppablePageCounts(sx, sy, paper.wMm, paper.hMm, minMm);
-                const label = `stepper ${paper.id} ${sx}×${sy} ${distance}`;
-                if (steps.length === 0) {
-                    failures.push(`${label}: no stops`);
-                    continue;
-                }
-                const offered = gridFeasibility(sx, sy, paper.wMm, paper.hMm)
-                    .steps.filter((s) => s.squareMm >= minMm)
-                    .map((s) => s.pages);
-                if (steps[0]!.pages !== offered[0]) {
-                    failures.push(`${label}: fewest stop is ${steps[0]!.pages}, not the fewest printable ${offered[0]}`);
-                }
-                steps.forEach((step, i) => {
-                    const printed = printedLayout(sx, sy, step.squareMm, paper.wMm, paper.hMm);
-                    if (printed?.pageCount !== step.pages || step.squareMm < minMm) {
-                        failures.push(`${label}: stop ${step.pages} page(s) at ${step.squareMm} mm is not printable here`);
+            for (const [banner, bannerLabel] of BANNERS) {
+                // Snapping a square length is a clamp, so every length up to the grid's largest must print. With
+                // the far stepper below (its stops reach the far minimum), snapping never changes a distance band,
+                // which the X / Y, link and paper paths rely on.
+                const grid = `grid ${paper.id} ${sx}×${sy} ${bannerLabel}`;
+                const {maxSquareMm} = gridFeasibility(sx, sy, paper.wMm, paper.hMm, banner);
+                for (let s = CHARUCO_SQUARE_MM_MIN; s <= CHARUCO_SQUARE_MM_MAX; s++) {
+                    const printed = printedLayout(sx, sy, s, paper.wMm, paper.hMm, banner);
+                    const prints = printed !== null;
+                    if (prints !== (maxSquareMm !== null && s <= maxSquareMm)) {
+                        failures.push(`${grid}: ${s} mm ${prints ? 'prints' : 'does not print'}, but the largest square is ${maxSquareMm} mm`);
+                        break;
                     }
-                    if (i > 0) {
-                        const prev = steps[i - 1]!;
-                        const gain = step.squareMm - prev.squareMm;
-                        const isLast = i === steps.length - 1;
-                        if (step.pages <= prev.pages || gain <= 0) {
-                            failures.push(`${label}: stops not ascending at ${step.pages} page(s)`);
-                        } else if (!isLast && gain < Math.max(1, Math.ceil(0.03 * prev.squareMm))) {
-                            failures.push(`${label}: near-duplicate stop ${step.pages} page(s) (+${gain} mm) not skipped`);
+                    // The banner strip is reserved exactly when the chart is a single sheet that carries the banner.
+                    if (printed && (printed.bannerReserveMm > 0) !== (banner && printed.pageCount === 1)) {
+                        failures.push(`${grid}: ${s} mm prints ${printed.pageCount} sheet(s) with a ${printed.bannerReserveMm} mm banner strip`);
+                        break;
+                    }
+                    // Leaving the banner off only frees room: it prints whatever prints with it, on no more sheets.
+                    const withBanner = banner ? null : printedLayout(sx, sy, s, paper.wMm, paper.hMm);
+                    if (withBanner && (!printed || printed.pageCount > withBanner.pageCount)) {
+                        failures.push(`${grid}: ${s} mm prints ${printed?.pageCount ?? 'nothing'}, but ${withBanner.pageCount} sheet(s) with the banner`);
+                        break;
+                    }
+                }
+                for (const distance of DISTANCES) {
+                    const minMm = workingDistanceMinSquareMm(distance);
+                    const steps = steppablePageCounts(sx, sy, paper.wMm, paper.hMm, minMm, banner);
+                    const label = `stepper ${paper.id} ${sx}×${sy} ${distance} ${bannerLabel}`;
+                    if (steps.length === 0) {
+                        failures.push(`${label}: no stops`);
+                        continue;
+                    }
+                    const offered = gridFeasibility(sx, sy, paper.wMm, paper.hMm, banner)
+                        .steps.filter((s) => s.squareMm >= minMm)
+                        .map((s) => s.pages);
+                    if (steps[0]!.pages !== offered[0]) {
+                        failures.push(`${label}: fewest stop is ${steps[0]!.pages}, not the fewest printable ${offered[0]}`);
+                    }
+                    steps.forEach((step, i) => {
+                        const printed = printedLayout(sx, sy, step.squareMm, paper.wMm, paper.hMm, banner);
+                        if (printed?.pageCount !== step.pages || step.squareMm < minMm) {
+                            failures.push(`${label}: stop ${step.pages} page(s) at ${step.squareMm} mm is not printable here`);
+                        }
+                        if (i > 0) {
+                            const prev = steps[i - 1]!;
+                            const gain = step.squareMm - prev.squareMm;
+                            const isLast = i === steps.length - 1;
+                            if (step.pages <= prev.pages || gain <= 0) {
+                                failures.push(`${label}: stops not ascending at ${step.pages} page(s)`);
+                            } else if (!isLast && gain < Math.max(1, Math.ceil(0.03 * prev.squareMm))) {
+                                failures.push(`${label}: near-duplicate stop ${step.pages} page(s) (+${gain} mm) not skipped`);
+                            }
+                        }
+                        // Stepping from any printable count between stops lands on the neighbouring stops.
+                        const {fewer, more} = pageStepNeighbours(steps, step.pages);
+                        if (fewer !== (steps[i - 1] ?? null) || more !== (steps[i + 1] ?? null)) {
+                            failures.push(`${label}: wrong neighbours at ${step.pages} page(s)`);
+                        }
+                        stepperChecks++;
+                    });
+                    for (const p of offered) {
+                        const {fewer, more} = pageStepNeighbours(steps, p);
+                        if ((fewer && fewer.pages >= p) || (more && more.pages <= p) || (!more && p < steps[steps.length - 1]!.pages)) {
+                            failures.push(`${label}: wrong neighbours from skipped count ${p}`);
                         }
                     }
-                    // Stepping from any printable count between stops lands on the neighbouring stops.
-                    const {fewer, more} = pageStepNeighbours(steps, step.pages);
-                    if (fewer !== (steps[i - 1] ?? null) || more !== (steps[i + 1] ?? null)) {
-                        failures.push(`${label}: wrong neighbours at ${step.pages} page(s)`);
+                    const last = steps[steps.length - 1]!;
+                    if (last.pages !== sx * sy) {
+                        failures.push(`${label}: most is ${last.pages} page(s), not one square per sheet (${sx * sy})`);
                     }
-                    stepperChecks++;
-                });
-                for (const p of offered) {
-                    const {fewer, more} = pageStepNeighbours(steps, p);
-                    if ((fewer && fewer.pages >= p) || (more && more.pages <= p) || (!more && p < steps[steps.length - 1]!.pages)) {
-                        failures.push(`${label}: wrong neighbours from skipped count ${p}`);
-                    }
-                }
-                const last = steps[steps.length - 1]!;
-                if (last.pages !== sx * sy) {
-                    failures.push(`${label}: most is ${last.pages} page(s), not one square per sheet (${sx * sy})`);
                 }
             }
         }

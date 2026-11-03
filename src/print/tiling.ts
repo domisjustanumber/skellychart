@@ -17,7 +17,7 @@ export interface TilingInfo {
     /** The chart sheet (mm) this tiling was computed for, turned the way it prints. */
     paperWMm: number;
     paperHMm: number;
-    /** Banner strip (mm) above the board on a single-sheet chart; 0 otherwise. */
+    /** Banner strip (mm) above the board on a single-sheet chart that carries the banner; 0 otherwise. */
     bannerReserveMm: number;
 }
 
@@ -85,7 +85,8 @@ function tileWithFirstSheetReserve(
 }
 
 /**
- * A chart that fits on one sheet carries the origin banner above the board. A chart that needs several
+ * A chart that fits on one sheet carries the origin banner above the board, unless `banner` is off: then
+ * that sheet has the header line, like every chart sheet, and reserves nothing. A chart that needs several
  * prints the banner on the assembly guide instead, so its first sheet reserves nothing. If the board fits
  * on one sheet only without the banner, it keeps the sheets tiled with the banner's strip reserved, since
  * a single sheet must carry the banner, but prints them without the strip: a first sheet without it is
@@ -97,20 +98,16 @@ function tileOneOrientation(
     squareMm: number,
     paperWMm: number,
     paperHMm: number,
+    banner: boolean,
 ): TilingInfo | null {
-    const withBanner = tileWithFirstSheetReserve(
-        squaresX,
-        squaresY,
-        squareMm,
-        paperWMm,
-        paperHMm,
-        originBannerReserveMm(paperWMm, paperHMm),
-    );
+    const withBanner = banner
+        ? tileWithFirstSheetReserve(squaresX, squaresY, squareMm, paperWMm, paperHMm, originBannerReserveMm(paperWMm, paperHMm))
+        : null;
     if (withBanner?.pageCount === 1) {
         return withBanner;
     }
     const withoutBanner = tileWithFirstSheetReserve(squaresX, squaresY, squareMm, paperWMm, paperHMm, 0);
-    if (withoutBanner && withoutBanner.pageCount > 1) {
+    if (withoutBanner && (withoutBanner.pageCount > 1 || !banner)) {
         return withoutBanner;
     }
     return withBanner && {...withBanner, bannerReserveMm: 0};
@@ -120,7 +117,8 @@ function tileOneOrientation(
  * The layout printed for this board and square length, or `null` if it cannot be printed at all. The
  * board is always exactly `squaresX`×`squaresY` (never transposed); only the paper turns: fewest
  * sheets, then the most squares per sheet (`maxCx * maxCyRest`), then the board's own aspect (wider
- * boards take landscape, taller and square ones portrait).
+ * boards take landscape, taller and square ones portrait). `banner` is the home setting: off, a
+ * single-sheet chart prints without the origin banner, so the board has its strip too.
  */
 export function printedLayout(
     squaresX: number,
@@ -128,9 +126,10 @@ export function printedLayout(
     squareMm: number,
     nominalWMm: number,
     nominalHMm: number,
+    banner: boolean = true,
 ): TilingInfo | null {
-    const portrait = tileOneOrientation(squaresX, squaresY, squareMm, nominalWMm, nominalHMm);
-    const landscape = tileOneOrientation(squaresX, squaresY, squareMm, nominalHMm, nominalWMm);
+    const portrait = tileOneOrientation(squaresX, squaresY, squareMm, nominalWMm, nominalHMm, banner);
+    const landscape = tileOneOrientation(squaresX, squaresY, squareMm, nominalHMm, nominalWMm, banner);
     if (!portrait || !landscape) {
         return portrait ?? landscape;
     }

@@ -30,7 +30,7 @@ export const pdfLabels = {
     sheetHeaderBrand: 'FreeMoCap · {{url}}',
     /** Header middle; dropped when the line would not fit. */
     sheetHeaderChart: '{{squaresX}} x {{squaresY}} squares · {{mm}} mm · {{paper}}',
-    /** Header right: which chart sheet this is. */
+    /** Header right: which chart sheet this is; a one-sheet chart has none. */
     sheetHeaderPage: 'Page {{current}} of {{total}} · row {{row}}, column {{col}}',
     /** Paper names in the header middle, shorter than the paper dropdown's (`S.paper`). */
     sheetHeaderPaper: {a4: 'A4', a3: 'A3', letter: 'Letter', tabloid: 'Tabloid'} satisfies Record<PaperId, string>,

@@ -24,12 +24,13 @@ export interface PageStepperHooks {
 }
 
 /**
- * Stops of the sheets stepper for the current grid, paper and working distance: they end-stop at the
- * distance's minimum square length and never change the distance.
+ * Stops of the sheets stepper for the current grid, paper, banner setting and working distance: they
+ * end-stop at the distance's minimum square length and never change the distance.
  */
 function pageSteps(): PageStep[] {
     const pd = paperDims();
-    return steppablePageCounts(state.squaresX, state.squaresY, pd.wMm, pd.hMm, workingDistanceMinSquareMm(state.distanceId));
+    const minMm = workingDistanceMinSquareMm(state.distanceId);
+    return steppablePageCounts(state.squaresX, state.squaresY, pd.wMm, pd.hMm, minMm, state.banner);
 }
 
 type PageStepTarget = 'fewer' | 'more' | 'fewest' | 'most';
@@ -98,7 +99,7 @@ export function syncPageStepper(tiling: ReturnType<typeof effectiveTiling>): voi
     let hint = '';
     if (tiling && !fewer && count > 1) {
         const pd = paperDims();
-        const fewestAnyDistance = gridFeasibility(state.squaresX, state.squaresY, pd.wMm, pd.hMm).steps[0]?.pages;
+        const fewestAnyDistance = gridFeasibility(state.squaresX, state.squaresY, pd.wMm, pd.hMm, state.banner).steps[0]?.pages;
         hint =
             fewestAnyDistance !== undefined && fewestAnyDistance < count
                 ? interpolate(S.pagesFewestHint, {

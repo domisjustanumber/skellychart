@@ -95,15 +95,19 @@ export function boardGridAxisMax(otherAxisCount: number): number {
     return Math.min(BOARD_GRID_MAX, Math.floor((2 * BOARD_MARKERS_MAX + 1) / otherAxisCount));
 }
 
-/** Largest square length that prints on exactly `pages` sheets, or `null` if no square length does. */
+/**
+ * Largest square length that prints on exactly `pages` sheets, or `null` if no square length does. Here
+ * and below, `banner` is the home setting ({@link printedLayout}).
+ */
 export function maxSquareMmForGridAndPages(
     squaresX: number,
     squaresY: number,
     paperWMm: number,
     paperHMm: number,
     pages: number,
+    banner: boolean = true,
 ): number | null {
-    return gridFeasibility(squaresX, squaresY, paperWMm, paperHMm).maxSquareMmByPageCount.get(pages) ?? null;
+    return gridFeasibility(squaresX, squaresY, paperWMm, paperHMm, banner).maxSquareMmByPageCount.get(pages) ?? null;
 }
 
 /**
@@ -118,8 +122,9 @@ export function steppablePageCounts(
     paperWMm: number,
     paperHMm: number,
     minSquareMm: number = CHARUCO_SQUARE_MM_MIN,
+    banner: boolean = true,
 ): PageStep[] {
-    const all = gridFeasibility(squaresX, squaresY, paperWMm, paperHMm).steps.filter((s) => s.squareMm >= minSquareMm);
+    const all = gridFeasibility(squaresX, squaresY, paperWMm, paperHMm, banner).steps.filter((s) => s.squareMm >= minSquareMm);
     const kept: PageStep[] = [];
     all.forEach((step, i) => {
         const prev = kept[kept.length - 1];
@@ -158,8 +163,9 @@ export function snapSquareMm(
     squaresY: number,
     paperWMm: number,
     paperHMm: number,
+    banner: boolean = true,
 ): number | null {
-    const max = gridFeasibility(squaresX, squaresY, paperWMm, paperHMm).maxSquareMm;
+    const max = gridFeasibility(squaresX, squaresY, paperWMm, paperHMm, banner).maxSquareMm;
     return max === null ? null : Math.min(max, Math.max(CHARUCO_SQUARE_MM_MIN, Math.round(raw)));
 }
 

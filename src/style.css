@@ -453,6 +453,10 @@ body {
   margin: 0.45rem 0 0;
 }
 
+.caption.banner-caption {
+  margin: 0.3rem 0 0;
+}
+
 /* Too narrow for both labels beside the readout: readout on top, buttons side by side. */
 @container (max-width: 26rem) {
   .page-stepper {

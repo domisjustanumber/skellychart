@@ -185,6 +185,7 @@ export function applyQrQueryFromLocation(): void {
         if (parsed.paperId !== null) {
             state.paperId = parsed.paperId;
         }
+        state.banner = parsed.banner;
         if (parsed.printMode === 'shop') {
             applyShopLink(parsed, warnings);
         }
@@ -195,7 +196,7 @@ export function applyQrQueryFromLocation(): void {
             state.squareMm = Math.round(parsed.squareLengthMm);
         }
         const linkedSquareMm = state.squareMm;
-        const snapped = snapSquareMm(state.squareMm, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
+        const snapped = snapSquareMm(state.squareMm, state.squaresX, state.squaresY, pd.wMm, pd.hMm, state.banner);
         if (snapped !== null) {
             state.squareMm = snapped;
         }
@@ -280,13 +281,14 @@ export function syncQrVersionBanner(): void {
 }
 
 /**
- * After a paper change, keep the board the user set (or opened from a link); re-fit only the square
- * length, from the link's own size while it is still pending, so the chart's paper restores it exactly.
+ * After a paper or banner change, keep the board the user set (or opened from a link); re-fit only the
+ * square length, from the link's own size while it is still pending, so the chart's paper restores it
+ * exactly.
  */
 export function refitSquareToPaper(): void {
     const pd = paperDims();
     const wanted = linkSquareMm ?? state.squareMm;
-    const snapped = snapSquareMm(wanted, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
+    const snapped = snapSquareMm(wanted, state.squaresX, state.squaresY, pd.wMm, pd.hMm, state.banner);
     if (snapped !== null) {
         setSquareFollowingBand(snapped);
     }

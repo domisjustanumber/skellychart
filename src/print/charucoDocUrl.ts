@@ -59,9 +59,13 @@ export function shopStandardBleedMm(unit: ShopUnit): number {
     return unit === 'in' ? 25.4 / 8 : 3;
 }
 
-/** A shop board's link target, or a home paper id (`null` writes no paper, as 1.x links did). */
+/**
+ * A shop board's link target, or a home paper id (`null` writes no paper, as 1.x links did). A home
+ * chart's `banner: false` (printed without the origin banner) writes the `n` field; the banner, on by
+ * default, writes nothing.
+ */
 export type LinkTarget =
-    | {kind: 'home'; paperId: PaperId | null}
+    | {kind: 'home'; paperId: PaperId | null; banner?: boolean}
     | {kind: 'shop'; size: ShopSizeChoice; options: ShopPrintOptions};
 
 export interface ParsedCharucoQrQuery {
@@ -74,6 +78,8 @@ export interface ParsedCharucoQrQuery {
     squareLengthMm: number | null;
     /** Paper preset id from the packed `p` code; null for older links and the legacy format. */
     paperId: PaperId | null;
+    /** The home banner setting: false when the packed value has the `n` field, else true. */
+    banner: boolean;
     /** `shop` when the packed value has a `t` field; it wins over `p`. */
     printMode: PrintMode;
     /** The shop trim; null in home mode, or when the size was unreadable (open at the default size). */
@@ -92,7 +98,7 @@ export interface ParsedCharucoQrQuery {
  * This is a frozen link grammar: renaming the dev token would stop dev-printed charts from parsing.
  */
 const PACKED_CHART_RE = new RegExp(
-    String.raw`^(${DEV_APP_VERSION}|${APP_VERSION_SOURCE})w(\d+)h(\d+)s(\d+(?:\.\d+)?)(?:p(\d))?(?:t(.*))?$`,
+    String.raw`^(${DEV_APP_VERSION}|${APP_VERSION_SOURCE})w(\d+)h(\d+)s(\d+(?:\.\d+)?)(?:p(\d))?(n)?(?:t(.*))?$`,
 );
 
 /**
@@ -191,8 +197,8 @@ function shopOptionsLinkValue(options: ShopPrintOptions, unit: ShopUnit): string
 }
 
 /**
- * Current format: one packed `b` param, e.g. `b=2.0.1w12h9s50p0` (`p` = paper code, optional) or
- * `b=2.0.1w12h9s50t1c` (`t` = print-shop trim and options).
+ * Current format: one packed `b` param, e.g. `b=2.0.1w12h9s50p0` (`p` = paper code, optional),
+ * `b=2.0.1w12h9s50p0n` (`n` = no banner) or `b=2.0.1w12h9s50t1c` (`t` = print-shop trim and options).
  * Returns `null` when `b` is absent or does not match the packed grammar, so the
  * caller can decide whether to fall back to legacy params.
  */
@@ -209,7 +215,8 @@ function parsePackedCharucoQrQuery(searchParams: URLSearchParams): ParsedCharuco
         squaresY: Number(m[3]),
         squareLengthMm: Number(m[4]),
         paperId: m[5] === undefined ? null : (PAPERS.find((p) => p.linkCode === Number(m[5]))?.id ?? null),
-        ...parseShopTail(m[6]),
+        banner: m[6] === undefined,
+        ...parseShopTail(m[7]),
     };
 }
 
@@ -247,6 +254,7 @@ function parseLegacyCharucoQrQuery(searchParams: URLSearchParams): ParsedCharuco
         squaresY: parseIntNullable('h'),
         squareLengthMm: parseFloatNullable('s'),
         paperId: null,
+        banner: true,
         ...HOME_LINK_VALUES,
     };
 }
@@ -271,8 +279,9 @@ function linkTargetOf(target: PaperId | null | LinkTarget): LinkTarget {
 
 /**
  * Compact chart spec: `<version>w<squaresX>h<squaresY>s<squareLengthMm>`, then `p<paperCode>` for a
- * home paper (omitted for `null`) or `t<size>[<options>]` for a print-shop board
- * (e.g. `2.0.1w12h9s50p0`, `2.0.1w12h9s50t1c`). A paper id or `null` means a home paper.
+ * home paper (omitted for `null`) and `n` when it has no banner, or `t<size>[<options>]` for a print-shop
+ * board (e.g. `2.0.1w12h9s50p0`, `2.0.1w12h9s50p0n`, `2.0.1w12h9s50t1c`). A paper id or `null` means a
+ * home paper with the banner.
  */
 export function packedChartQueryValue(
     version: string,
@@ -286,7 +295,8 @@ export function packedChartQueryValue(
     if (t.kind === 'shop') {
         return `${core}t${shopSizeLinkValue(t.size)}${shopOptionsLinkValue(t.options, t.size.unit)}`;
     }
-    return t.paperId === null ? core : `${core}p${paperById(t.paperId).linkCode}`;
+    const paper = t.paperId === null ? '' : `p${paperById(t.paperId).linkCode}`;
+    return `${core}${paper}${t.banner === false ? 'n' : ''}`;
 }
 
 /**

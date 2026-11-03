@@ -32,6 +32,9 @@ export const S = {
     workingDistance: 'How far will your subject be from the camera?',
     paperSize: 'Paper size',
     paperOption: '{{paper}} ({{dims}})',
+    banner: 'Banner',
+    bannerCaption:
+        'Logo, instructions and QR code above a one-sheet chart. Turn it off for a one-line header with the chart link, leaving the board more room. A multi-sheet chart always has it on its assembly guide.',
     advanced: 'Advanced settings',
     squareLengthHeading: 'Square length ({{mm}} mm)',
     sheetsOfPaper: 'Sheets of paper',

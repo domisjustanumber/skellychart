@@ -69,7 +69,7 @@ export async function renderCharucoPrintSvg(chart: PrintedChart, options: PrintS
         chart.squaresX,
         chart.squaresY,
         chart.squareMm,
-        chart.paperId,
+        {kind: 'home', paperId: chart.paperId, banner: chart.banner},
     );
     const qrSvgFragment = generateQrSvgFragment(docUrl);
     const logoSvgInner = await perfAsync('Logo SVG inner fragment (cached after first fetch)', () => resolveLogoForPrint());

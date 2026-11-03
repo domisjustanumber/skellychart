@@ -31,9 +31,15 @@ export interface GridFeasibility {
 const cache = new Map<string, GridFeasibility>();
 const CACHE_LIMIT = 512;
 
-/** Every whole-mm square length scanned once for this grid and paper (memoised). */
-export function gridFeasibility(squaresX: number, squaresY: number, paperWMm: number, paperHMm: number): GridFeasibility {
-    const key = `${paperWMm}x${paperHMm}:${squaresX}x${squaresY}`;
+/** Every whole-mm square length scanned once for this grid, paper and banner setting (memoised). */
+export function gridFeasibility(
+    squaresX: number,
+    squaresY: number,
+    paperWMm: number,
+    paperHMm: number,
+    banner: boolean = true,
+): GridFeasibility {
+    const key = `${paperWMm}x${paperHMm}:${squaresX}x${squaresY}:${banner}`;
     const hit = cache.get(key);
     if (hit) {
         return hit;
@@ -41,7 +47,7 @@ export function gridFeasibility(squaresX: number, squaresY: number, paperWMm: nu
     let maxSquareMm: number | null = null;
     const maxSquareMmByPageCount = new Map<number, number>();
     for (let s = CHARUCO_SQUARE_MM_MIN; s <= CHARUCO_SQUARE_MM_MAX; s++) {
-        const t = printedLayout(squaresX, squaresY, s, paperWMm, paperHMm);
+        const t = printedLayout(squaresX, squaresY, s, paperWMm, paperHMm, banner);
         if (t) {
             maxSquareMm = s;
             maxSquareMmByPageCount.set(t.pageCount, s);

@@ -30,6 +30,8 @@ interface AppState {
     mode: PrintMode;
     /** Home paper; kept while in print-shop mode so switching back restores it. */
     paperId: PaperId;
+    /** Home only: whether a single-sheet chart carries the origin banner (else just the header line). */
+    banner: boolean;
     squareMm: number;
     squaresX: number;
     squaresY: number;
@@ -69,6 +71,7 @@ export const state: AppState = {
     distanceId: DEFAULT_WORKING_DISTANCE,
     mode: 'home',
     paperId: defaultPaperId(),
+    banner: true,
     // Placeholders until boot() applies the distance preset (npm run check:presets checks every one prints).
     squareMm: 54,
     squaresX: 5,
@@ -103,7 +106,7 @@ export function applyAutoPreset(): void {
     }
     const plan = autoPlan();
     const pd = paperDims();
-    const maxSq = maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, pd.wMm, pd.hMm, plan.targetPages);
+    const maxSq = maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, pd.wMm, pd.hMm, plan.targetPages, state.banner);
     if (maxSq !== null) {
         state.squaresX = plan.squaresX;
         state.squaresY = plan.squaresY;
@@ -117,7 +120,7 @@ export function applyAutoPreset(): void {
  */
 export function effectiveTiling() {
     const pd = paperDims();
-    return printedLayout(state.squaresX, state.squaresY, state.squareMm, pd.wMm, pd.hMm);
+    return printedLayout(state.squaresX, state.squaresY, state.squareMm, pd.wMm, pd.hMm, state.banner);
 }
 
 /**
@@ -128,7 +131,14 @@ export function effectiveTiling() {
 export function snapshotChart(): PrintedChart | null {
     const tiling = effectiveTiling();
     return tiling
-        ? {paperId: state.paperId, squaresX: state.squaresX, squaresY: state.squaresY, squareMm: state.squareMm, tiling}
+        ? {
+              paperId: state.paperId,
+              squaresX: state.squaresX,
+              squaresY: state.squaresY,
+              squareMm: state.squareMm,
+              banner: state.banner,
+              tiling,
+          }
         : null;
 }
 
@@ -143,11 +153,11 @@ export function shopOptions(): ShopPrintOptions {
     return {bleed: state.shopBleed, cropMarks: state.shopCropMarks, colour: 'colour'};
 }
 
-/** What the chart link and QR describe: the home paper, or the print-shop board and its options. */
-export function linkTarget(): PaperId | LinkTarget {
+/** What the chart link and QR describe: the home paper and banner, or the print-shop board and its options. */
+export function linkTarget(): LinkTarget {
     return state.mode === 'shop' && state.shopSizeId
         ? {kind: 'shop', size: {id: state.shopSizeId, unit: state.shopUnit}, options: shopOptions()}
-        : state.paperId;
+        : {kind: 'home', paperId: state.paperId, banner: state.banner};
 }
 
 /** Whether the current mode has something to print and export. */
@@ -169,7 +179,7 @@ export function snapSquareForMode(raw: number): number | null {
         return state.shopSizeId ? snapShopSquareMm(raw, state.squaresX, state.squaresY, state.shopSizeId) : null;
     }
     const pd = paperDims();
-    return snapSquareMm(raw, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
+    return snapSquareMm(raw, state.squaresX, state.squaresY, pd.wMm, pd.hMm, state.banner);
 }
 
 /** Chart sheets the printed layout uses, excluding the guide sheet; 1 when nothing fits. */

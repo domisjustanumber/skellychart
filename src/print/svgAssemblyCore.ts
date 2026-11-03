@@ -181,9 +181,10 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
     const tapeGapPx = tapeLabelInsetFromJoinPx(ppm);
     // Sheets are numbered row by row from 1, so this is how far the sheet across each seam is.
     const neighbourStep: Record<keyof SeamSides, number> = {left: -1, right: 1, top: -tiling.npx, bottom: tiling.npx};
-    // Only a single-sheet chart carries the banner on the chart itself; tiling reserved its strip. Its
-    // height is whole px at PIXELS_PER_MM; round so float mm never loses a px.
-    const bannerOnChart = tiling.pageCount === 1;
+    // Only a single-sheet chart with the banner setting on carries the banner on the chart itself; tiling
+    // reserved its strip exactly then. Its height is whole px at PIXELS_PER_MM; round so float mm never
+    // loses a px.
+    const bannerOnChart = tiling.bannerReserveMm > 0;
     const originTopReservePx = Math.round(tiling.bannerReserveMm * ppm);
     const bannerInputs: OriginBannerInputs = {squaresX, squaresY, squareLengthMm, logoSvgInner, qrSvgFragment};
 
@@ -223,22 +224,17 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
         if (spec.isOriginPage && originBanner) {
             parts.push(...originBanner.parts);
         } else {
-            parts.push(
-                svgSheetHeader(
-                    headerLeft,
-                    headerMiddle,
-                    interpolate(pdfLabels.sheetHeaderPage, {
-                        current: spec.sheetIndex,
-                        total: tiling.pageCount,
-                        row: spec.row + 1,
-                        col: spec.col + 1,
-                    }),
-                    paperWMm,
-                    safe,
-                    ppm,
-                    SHEET_HEADER_FONT_PX,
-                ),
-            );
+            // A single sheet without the banner is the whole chart, so its header names no page.
+            const page =
+                tiling.pageCount > 1
+                    ? interpolate(pdfLabels.sheetHeaderPage, {
+                          current: spec.sheetIndex,
+                          total: tiling.pageCount,
+                          row: spec.row + 1,
+                          col: spec.col + 1,
+                      })
+                    : '';
+            parts.push(svgSheetHeader(headerLeft, headerMiddle, page, paperWMm, safe, ppm, SHEET_HEADER_FONT_PX));
         }
         const [x0, y0] = pageCoordMap(spec, tiling, paperWMm, paperHMm, tw, th, ppm);
 

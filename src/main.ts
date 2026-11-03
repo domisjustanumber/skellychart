@@ -285,6 +285,8 @@ function initStaticUi(): void {
     }
     byId('lbl-distance').textContent = S.workingDistance;
     byId('lbl-paper').textContent = S.paperSize;
+    byId('lbl-banner').textContent = S.banner;
+    byId('bannerCaption').textContent = S.bannerCaption;
     byId('lbl-shopSize').textContent = S.shopSize;
     byId('shopUnitToggle').setAttribute('aria-label', S.shopUnits);
     byId('lbl-advanced').textContent = S.advanced;
@@ -378,6 +380,7 @@ function syncUi(options: SyncUiOptions = {}): void {
         (byId('distance') as HTMLSelectElement).value = state.distanceId;
     }
     (byId('paper') as HTMLSelectElement).value = state.paperId;
+    (byId('banner') as HTMLInputElement).checked = state.banner;
 
     byId('layoutSummary').textContent =
         state.mode === 'shop'
@@ -417,6 +420,7 @@ function syncModeControls(): void {
     notice.classList.toggle('hidden', modeNotice === null);
 
     byId('paperField').classList.toggle('hidden', shop);
+    byId('bannerField').classList.toggle('hidden', shop);
     byId('pagesGroup').classList.toggle('hidden', shop);
     for (const id of ['shopSizeField', 'shopBleedField', 'shopCropField', 'shopOrder']) {
         byId(id).classList.toggle('hidden', !shop);
@@ -485,17 +489,25 @@ function wireUi(): void {
         }
     });
 
-    (byId('paper') as HTMLSelectElement).addEventListener('change', (e) => {
-        const paperId = (e.target as HTMLSelectElement).value;
-        if (isPaperId(paperId)) {
-            state.paperId = paperId;
-        }
+    // A paper or banner change re-applies an untouched preset; otherwise the board keeps all but its square.
+    const refitToSheets = (): void => {
         if (!state.autoGrid) {
             refitSquareToPaper();
         } else {
             applyAutoPreset();
         }
         syncUi();
+    };
+    (byId('paper') as HTMLSelectElement).addEventListener('change', (e) => {
+        const paperId = (e.target as HTMLSelectElement).value;
+        if (isPaperId(paperId)) {
+            state.paperId = paperId;
+        }
+        refitToSheets();
+    });
+    (byId('banner') as HTMLInputElement).addEventListener('change', (e) => {
+        state.banner = (e.target as HTMLInputElement).checked;
+        refitToSheets();
     });
 
     const sqmmEl = byId('sqmm') as HTMLInputElement;

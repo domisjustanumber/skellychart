@@ -1,8 +1,9 @@
 /**
  * Build guard for the chart link grammar (`src/print/charucoDocUrl.ts`): a golden table of links every
- * generator has printed (legacy params, 1.x, 2.x home `p` and print-shop `t`) with what they must open
- * as, garbled links that must degrade without losing the board, the writer → parser round trip for
- * every standard size × unit × bleed × marks × colour, and the QR version of the longest links.
+ * generator has printed (legacy params, 1.x, 2.x home `p` and `n` and print-shop `t`) with what they must
+ * open as, garbled links that must degrade without losing the board, the writer → parser round trip for
+ * every home paper × banner setting and every standard size × unit × bleed × marks × colour, and the QR
+ * version of the longest links.
  */
 import QRCode from 'qrcode';
 import {
@@ -17,6 +18,7 @@ import {
     type ShopSizeChoice,
     type ShopUnit,
 } from '../src/print/charucoDocUrl.js';
+import {PAPERS} from '../src/print/papers.js';
 
 const SOURCE_URL = 'https://skelly.cam/c/';
 const failures: string[] = [];
@@ -53,10 +55,11 @@ function expect(query: string, wanted: Partial<ParsedCharucoQrQuery>): void {
 }
 
 const board = {squaresX: 12, squaresY: 9, squareLengthMm: 50};
-const home = {printMode: 'home', shopSize: null, shopOptions: null, shopSizeError: false, shopOptionsError: false} as const;
+const home = {banner: true, printMode: 'home', shopSize: null, shopOptions: null, shopSizeError: false, shopOptionsError: false} as const;
 const DEFAULTS: ShopPrintOptions = {bleed: 'std', cropMarks: false, colour: 'colour'};
 const shop = (shopSize: ShopSizeChoice | null, shopOptions: ShopPrintOptions = DEFAULTS) => ({
     ...board,
+    banner: true,
     printMode: 'shop' as const,
     shopSize,
     shopOptions,
@@ -77,6 +80,16 @@ for (const code of [4, 5, 6, 7, 8, 9]) {
     expect(`b=2.0.0w12h9s50p${code}`, {chartVersionRaw: '2.0.0', ...board, paperId: null, ...home});
 }
 expect('b=2.0.0w12h9s50.5p0', {squareLengthMm: 50.5, paperId: 'a4'});
+// A home chart printed without the banner: `n` after the paper (or after the board when no paper).
+expect('b=2.0.0w12h9s50p0n', {chartVersionRaw: '2.0.0', ...board, paperId: 'a4', ...home, banner: false});
+expect('b=2.0.0w12h9s50n', {...board, paperId: null, ...home, banner: false});
+expect('b=developw12h9s50p3n', {chartVersionRaw: 'develop', ...board, paperId: 'tabloid', ...home, banner: false});
+// `n` before the paper or twice is not the grammar: the legacy reader finds no board.
+for (const value of ['2.0.0w12h9s50np0', '2.0.0w12h9s50p0nn']) {
+    expect(`b=${value}`, {squaresX: null, squaresY: null, squareLengthMm: null, paperId: null, ...home});
+}
+// After `t` it is part of the size, so the size is garbled and the board kept.
+expect('b=2.0.0w12h9s50t1n', {...board, banner: true, printMode: 'shop', shopSize: null, shopSizeError: true});
 
 // Print-shop sizes: every standard code, with and without a toggle unit.
 SHOP_SIZE_LINK_CODES.forEach((id, code) => {
@@ -183,18 +196,40 @@ for (const size of roundTripSizes) {
     }
 }
 
-// Home writer is unchanged: a paper id (or a home target) writes only `p`.
+// Home writer: a paper id (or a home target) writes only `p`, and `n` only when the banner is off.
 for (const [target, packed] of [
     ['a4', '2.0.0w12h9s50p0'],
     ['tabloid', '2.0.0w12h9s50p3'],
     [null, '2.0.0w12h9s50'],
     [{kind: 'home', paperId: 'letter'}, '2.0.0w12h9s50p2'],
+    [{kind: 'home', paperId: 'letter', banner: true}, '2.0.0w12h9s50p2'],
+    [{kind: 'home', paperId: 'letter', banner: false}, '2.0.0w12h9s50p2n'],
+    [{kind: 'home', paperId: null, banner: false}, '2.0.0w12h9s50n'],
 ] as const) {
     const got = packedChartQueryValue('2.0.0', 12, 9, 50, target);
     if (got !== packed) {
         failures.push(`home writer for ${JSON.stringify(target)} is ${got}, expected ${packed}`);
     }
     checks++;
+}
+
+// Home writer → parser round trip: every paper (and none), with the banner on and off.
+for (const paperId of [...PAPERS.map((p) => p.id), null]) {
+    for (const banner of [true, false]) {
+        const packed = packedChartQueryValue('2.0.0', 12, 9, 50, {kind: 'home', paperId, banner});
+        const got = parse(`b=${packed}`);
+        if (
+            got.printMode !== 'home' ||
+            got.paperId !== paperId ||
+            got.banner !== banner ||
+            got.squaresX !== 12 ||
+            got.squaresY !== 9 ||
+            got.squareLengthMm !== 50
+        ) {
+            failures.push(`home ${paperId} banner ${banner} → ${packed}: parses back as ${JSON.stringify(got)}`);
+        }
+        checks++;
+    }
 }
 
 // QR versions: default links of 42 B or less are version 3; the longest links stay at version 4.

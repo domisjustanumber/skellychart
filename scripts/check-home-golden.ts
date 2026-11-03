@@ -1,6 +1,7 @@
 /**
- * Guards home ("My printer") output: renders the printed SVGs for every paper × distance preset and a
- * set of multi-sheet charts (with their assembly guides) and compares each chart's SHA-256 with
+ * Guards home ("My printer") output: renders the printed SVGs for every paper × distance preset, the
+ * single-sheet presets again with the banner off, and a set of multi-sheet charts (with their assembly
+ * guides) and compares each chart's SHA-256 with
  * `scripts/home-golden.json`. PDFs cannot be compared (CreationDate and /ID change on every export), but
  * they are built from these SVGs.
  *
@@ -38,6 +39,7 @@ interface GoldenCase {
     squaresX: number;
     squaresY: number;
     squareMm: number;
+    banner: boolean;
 }
 
 const cases: GoldenCase[] = [];
@@ -48,9 +50,22 @@ for (const paper of PAPERS) {
         if (squareMm === null) {
             throw new Error(`${paper.id} ${distance}: preset has no square length`);
         }
-        cases.push({key: `${paper.id} ${distance}`, paperId: paper.id, ...plan, squareMm});
+        cases.push({key: `${paper.id} ${distance}`, paperId: paper.id, ...plan, squareMm, banner: true});
     }
 }
+// The single-sheet presets with the banner off: the header line, and the board in the banner's room.
+for (const paper of PAPERS) {
+    for (const distance of ['close', 'near'] as const) {
+        const plan = resolveDistancePrintPlan(distance, paper.id);
+        const squareMm = maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, paper.wMm, paper.hMm, plan.targetPages, false);
+        if (squareMm === null) {
+            throw new Error(`${paper.id} ${distance} no banner: preset has no square length`);
+        }
+        cases.push({key: `${paper.id} ${distance} no banner`, paperId: paper.id, ...plan, squareMm, banner: false});
+    }
+}
+// Two sheets and a guide with the banner, one sheet without it.
+cases.push({key: 'a4 7x5 34mm no banner', paperId: 'a4', squaresX: 7, squaresY: 5, squareMm: 34, banner: false});
 // Multi-sheet charts with an assembly guide, both orientations, partial edge sheets and the marker limit,
 // then the guide's page numbers just above and just below their smallest readable size.
 for (const [paperId, squaresX, squaresY, squareMm] of [
@@ -63,13 +78,13 @@ for (const [paperId, squaresX, squaresY, squareMm] of [
     ['letter', 2, 39, 189],
     ['letter', 2, 40, 189],
 ] as const) {
-    cases.push({key: `${paperId} ${squaresX}x${squaresY} ${squareMm}mm`, paperId, squaresX, squaresY, squareMm});
+    cases.push({key: `${paperId} ${squaresX}x${squaresY} ${squareMm}mm`, paperId, squaresX, squaresY, squareMm, banner: true});
 }
 
 const actual: Record<string, string> = {};
 for (const c of cases) {
     const paper = paperById(c.paperId);
-    const tiling = printedLayout(c.squaresX, c.squaresY, c.squareMm, paper.wMm, paper.hMm);
+    const tiling = printedLayout(c.squaresX, c.squaresY, c.squareMm, paper.wMm, paper.hMm, c.banner);
     if (!tiling) {
         throw new Error(`${c.key}: does not print`);
     }
@@ -78,6 +93,7 @@ for (const c of cases) {
         squaresX: c.squaresX,
         squaresY: c.squaresY,
         squareMm: c.squareMm,
+        banner: c.banner,
         tiling,
     });
     // The logo markup keeps the file's line endings, which Git checks out as CRLF on Windows and LF elsewhere.

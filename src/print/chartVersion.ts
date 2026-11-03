@@ -21,7 +21,7 @@ const CHART_VERSION_RE =
 /**
  * Parse the version token from a chart link.
  *
- * - Legacy charts use a bare integer: `1` → 1.0.0.
+ * - A bare integer reads as `1` → 1.0.0 (legacy charts' `v=1`, which the link reader now ignores).
  * - Current charts use the app semver: `1.4.2`.
  * - Malformed tokens, including the dev-server literal `develop` (no numeric core), return null
  *   so the link is still usable for board geometry.

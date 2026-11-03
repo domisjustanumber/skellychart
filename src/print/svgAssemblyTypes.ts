@@ -1,8 +1,9 @@
+import type {PaperId} from './papers.js';
 import type {PageSpec, TilingInfo} from './tiling.js';
 
 export interface PrintSvgParams {
-    /** Paper preset (`letter`, `tabloid`, …) — selects inch vs mm for root SVG / print page box only. */
-    paperId: string;
+    /** Paper preset: its units set the root SVG / print page box; its name goes in the sheet header. */
+    paperId: PaperId;
     squaresX: number;
     squaresY: number;
     squareLengthMm: number;
@@ -13,7 +14,6 @@ export interface PrintSvgParams {
     pages: PageSpec[];
     /** Chart sheets in the whole layout, for the header's "Page N of M"; defaults to `pages.length`. */
     totalPages?: number;
-    documentationSourceUrl?: string;
     signal?: AbortSignal;
     /**
      * When unset or true, `renderCharucoPrintSvgCore` awaits {@link yieldToMain} between sheets

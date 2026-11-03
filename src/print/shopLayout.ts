@@ -10,8 +10,8 @@ import {
     boardGridAxisMax,
     BOARD_GRID_MAX,
     BOARD_GRID_MIN,
-    SQUARE_LENGTH_LT_2M_MAX_MM,
-    SQUARE_LENGTH_LT_4M_MAX_MM,
+    workingDistance,
+    workingDistanceBandTopMm,
     workingDistanceMinSquareMm,
     type WorkingDistanceTierId,
 } from './charucoLayout.js';
@@ -226,17 +226,18 @@ export function smallestFittingShopSize(
 export const SHOP_MARKER_ROOM_MM = {left: ORIGIN_CORNER_MARKER_SIDE_ROOM_MM, top: ORIGIN_CORNER_MARKER_TOP_ROOM_MM};
 
 /**
- * Print-shop preset for a working distance: close 7 × 5 and near 5 × 3 at the top of their bands, far 3 × 5
- * at the largest square on the smallest size that takes it at the band minimum; each on its default size.
+ * Print-shop preset for a working distance, on the home preset's grid: close 7 × 5 and near 5 × 3 at the top
+ * of their bands, far 3 × 5 at the largest square on the smallest size that takes it at the band minimum;
+ * each on its default size.
  */
 export function resolveShopDistancePlan(
     tier: WorkingDistanceTierId,
     unit: ShopUnit,
     version: string = APP_VERSION_DISPLAY,
 ): {squaresX: number; squaresY: number; squareMm: number; sizeId: ShopSizeId} | null {
-    const [squaresX, squaresY] = tier === 'far' ? [3, 5] : tier === 'close' ? [7, 5] : [5, 3];
+    const {squaresX, squaresY} = workingDistance(tier);
     if (tier !== 'far') {
-        const squareMm = tier === 'close' ? SQUARE_LENGTH_LT_2M_MAX_MM : SQUARE_LENGTH_LT_4M_MAX_MM;
+        const squareMm = workingDistanceBandTopMm(tier);
         const sizeId = smallestFittingShopSize(squaresX, squaresY, squareMm, unit, version);
         return sizeId ? {squaresX, squaresY, squareMm, sizeId} : null;
     }

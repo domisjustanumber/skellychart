@@ -1,5 +1,7 @@
 /** English on-sheet strings (defaults from freemocap `charuco_pdf_labels.py`). */
 
+import type {PaperId} from './papers.js';
+
 const PLACEHOLDER = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
 
 export function interpolate(template: string, vars: Record<string, string | number>): string {
@@ -23,7 +25,8 @@ export const pdfLabels = {
     sheetHeaderChart: '{{squaresX}} x {{squaresY}} squares · {{mm}} mm · {{paper}}',
     /** Header right: which chart sheet this is. */
     sheetHeaderPage: 'Page {{current}} of {{total}} · row {{row}}, column {{col}}',
-    sheetHeaderPaper: {a4: 'A4', a3: 'A3', letter: 'Letter', tabloid: 'Tabloid'} as Record<string, string>,
+    /** Paper names in the header middle, shorter than the paper dropdown's (`S.paper`). */
+    sheetHeaderPaper: {a4: 'A4', a3: 'A3', letter: 'Letter', tabloid: 'Tabloid'} satisfies Record<PaperId, string>,
     /**
      * Slug below a print-shop board's crop marks (trimmed off), as parts joined by " | "; parts are dropped
      * from the right until the line fits. Outlined text: ASCII plus ×, no `·`.

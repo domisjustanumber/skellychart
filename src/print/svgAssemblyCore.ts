@@ -20,18 +20,20 @@ import {
     PIXELS_PER_MM,
     SHEET_HEADER_FONT_PX,
 } from './constants.js';
-import {charucoPagePrintRgb, computeCharucoPagePreviewRects} from './charucoLayout.js';
+import {sheetColorRgb} from './charucoLayout.js';
 import {helveticaTextWidthPx} from './helveticaMetrics.js';
 import {interpolate, pdfLabels} from './labels.js';
 import {BANNER_TYPE_PX, layoutOriginBanner, type OriginBannerLayout, wrapHelvetica} from './originBannerLayout.js';
-import type {PageSpec, TilingInfo} from './tiling.js';
+import {paperById, type PaperId} from './papers.js';
+import {buildPageSpecs, type PageSpec, type TilingInfo} from './tiling.js';
 import type {PrintSheetSvg, PrintSvgAssemblyParams, PrintSvgResult} from './svgAssemblyTypes.js';
 import type {OutlineTextOptions} from './outlineText.js';
-import {perfDev, perfLog, perfNote} from './perfDebug.js';
+import {perfLog, perfNote} from './perfDebug.js';
 import {boardRegionMm, type EdgesMm, originMarkerRoomMm, sheetSafeMarginsMm} from './sheetGeometry.js';
 import {SKELLY_LOGO_VIEWBOX_H, SKELLY_LOGO_VIEWBOX_W} from './skellyLogo.js';
 import {escapeXml, rgbCss, svgRootOpen, svgRootOuterSizeAttrs, SVG_ROOT_CLOSE} from './svgUtils.js';
 import {yieldToMain} from '../ui/yieldToMain.js';
+import {IS_DEV} from '../env.js';
 
 /**
  * Helvetica is a PDF standard font, so Save as PDF (svg2pdf) draws the face the banner is wrapped with
@@ -242,7 +244,7 @@ export function svgCharucoBoardInfoBlock(
 
 /** Largest share of a block's width / height a guide page number may cover, as in the on-screen preview. */
 const GUIDE_NUMBER_MAX_BLOCK_FRACTION = 0.5;
-/** Black outline round the guide's white page numbers (em), as `.sheet-rect-num` on screen. */
+/** Black outline round the guide's white page numbers (em). */
 const GUIDE_NUMBER_STROKE_EM = 0.18;
 /** Helvetica Bold digit height (em). */
 const GUIDE_DIGIT_HEIGHT_EM = 0.71;
@@ -296,8 +298,9 @@ function wrapGuideBody(body: string, fontPx: number, lineLead: number, maxW: num
 
 /**
  * A numbered, colour-coded block per chart sheet over a board laid out on a `boardWPx`×`boardHPx` canvas
- * and drawn at (`bx`, `by`), `dw`×`dh` px: outlined in the sheet's colour and, with `tint`, washed with it.
- * Every page number gets one size, the largest that fits every block, so no number is left out.
+ * and drawn at (`at.x`, `at.y`), scaled by `at.scale`: outlined in the sheet's colour and, with `at.tint`,
+ * washed with it. Every page number gets one size, the largest that fits every block, so no number is left out.
+ * A single-sheet chart has no blocks.
  */
 function svgSheetBlocks(
     squaresX: number,
@@ -305,27 +308,31 @@ function svgSheetBlocks(
     tiling: TilingInfo,
     boardWPx: number,
     boardHPx: number,
-    bx: number,
-    by: number,
-    dw: number,
-    dh: number,
-    strokePx: number,
-    tint: boolean,
+    at: {x: number; y: number; scale: number; strokePx: number; tint: boolean},
 ): string[] {
     const parts: string[] = [];
-    const rects = computeCharucoPagePreviewRects(squaresX, squaresY, tiling, boardWPx, boardHPx) ?? [];
-    const blocks = rects.map((r) => ({
-        r,
-        x: bx + r.left * dw,
-        y: by + r.top * dh,
-        w: r.width * dw,
-        h: r.height * dh,
-        label: String(r.sheetIndex),
-    }));
-    const sw = strokePx;
+    if (tiling.pageCount <= 1) {
+        return parts;
+    }
+    const layout = charucoBoardPixelLayout(boardWPx, boardHPx, squaresX, squaresY);
+    const dw = boardWPx * at.scale;
+    const dh = boardHPx * at.scale;
+    const blocks = buildPageSpecs(squaresX, squaresY, tiling).map((page) => {
+        const [l, r] = charucoCropXRange(page.gx0, page.gx1, layout);
+        const [t, b] = charucoCropYRange(page.gy0, page.gy1, layout);
+        return {
+            sheetIndex: page.sheetIndex,
+            x: at.x + (l / boardWPx) * dw,
+            y: at.y + (t / boardHPx) * dh,
+            w: ((r - l) / boardWPx) * dw,
+            h: ((b - t) / boardHPx) * dh,
+            label: String(page.sheetIndex),
+        };
+    });
+    const sw = at.strokePx;
     for (const b of blocks) {
-        const [cr, cg, cb] = charucoPagePrintRgb(b.r.sheetIndex, tiling.pageCount);
-        const fill = tint ? `fill="rgb(${cr},${cg},${cb})" fill-opacity="0.3"` : 'fill="none"';
+        const [cr, cg, cb] = sheetColorRgb(b.sheetIndex, tiling.pageCount);
+        const fill = at.tint ?`fill="rgb(${cr},${cg},${cb})" fill-opacity="0.3"` : 'fill="none"';
         parts.push(
             `<rect x="${b.x + sw / 2}" y="${b.y + sw / 2}" width="${Math.max(0, b.w - sw)}" height="${Math.max(0, b.h - sw)}" ${fill} stroke="rgb(${cr},${cg},${cb})" stroke-width="${sw}"/>`,
         );
@@ -383,7 +390,7 @@ export function svgAssembledChartWithSheetNumbers(
         `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${fullWPx} ${fullHPx}" width="${fullWPx}" height="${fullHPx}">` +
         `<rect width="${fullWPx}" height="${fullHPx}" fill="#fff"/>` +
         renderCharucoBoardSvgFragment(fullWPx, fullHPx, geom) +
-        svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, 0, 0, fullWPx, fullHPx, sw, false).join('') +
+        svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, {x: 0, y: 0, scale: 1, strokePx: sw, tint: false}).join('') +
         SVG_ROOT_CLOSE
     );
 }
@@ -395,7 +402,7 @@ export function svgAssembledChartWithSheetNumbers(
  * shows the chart largest.
  */
 function svgAssemblyGuideSheet(o: {
-    paperId: string;
+    paperId: PaperId;
     /** Chart sheet size (mm); the guide uses the same paper in either orientation. */
     paperWMm: number;
     paperHMm: number;
@@ -459,7 +466,9 @@ function svgAssemblyGuideSheet(o: {
             `</svg>`,
     ];
 
-    parts.push(...svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, bx, by, dw, dh, Math.max(2, Math.round(0.4 * ppm)), true));
+    parts.push(
+        ...svgSheetBlocks(squaresX, squaresY, tiling, fullWPx, fullHPx, {x: bx, y: by, scale, strokePx: Math.max(2, Math.round(0.4 * ppm)), tint: true}),
+    );
     parts.push(svgCornerMarker(ppm, bx, by));
 
     const textTop = Math.round(by + dh + gapPx);
@@ -475,7 +484,7 @@ function svgAssemblyGuideSheet(o: {
         `<text fill="#000" font-size="${bodyFontPx}" font-family="${FONT}" dominant-baseline="hanging">${tspans.join('')}</text>`,
     );
 
-    const [wAttr, hAttr] = svgRootOuterSizeAttrs(g.wMm, g.hMm, paperId);
+    const [wAttr, hAttr] = svgRootOuterSizeAttrs(g.wMm, g.hMm, paperById(paperId).units);
     return {
         svg: svgRootOpen(g.wMm * ppm, g.hMm * ppm, wAttr, hAttr) + parts.join('') + SVG_ROOT_CLOSE,
         paperWMm: g.wMm,
@@ -638,7 +647,7 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
     const boardPxLayout = charucoBoardPixelLayout(fullWPx, fullHPx, squaresX, squaresY);
     const pagePxW = Math.max(1, Math.round(paperWMm * ppm));
     const pagePxH = Math.max(1, Math.round(paperHMm * ppm));
-    const [svgWidthAttr, svgHeightAttr] = svgRootOuterSizeAttrs(paperWMm, paperHMm, paperId);
+    const [svgWidthAttr, svgHeightAttr] = svgRootOuterSizeAttrs(paperWMm, paperHMm, paperById(paperId).units);
     const margins = sheetSafeMarginsMm(paperWMm, paperHMm);
     // Tape labels stay inside the safe margins and below the header line.
     const labelBounds: LabelBoundsPx = {
@@ -703,7 +712,7 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
         squaresX,
         squaresY,
         mm: squareLengthMm,
-        paper: pdfLabels.sheetHeaderPaper[paperId] ?? paperId,
+        paper: pdfLabels.sheetHeaderPaper[paperId],
     });
 
     // Tiling reserved the banner's height (`originBannerReserveMm`, laid out by the same
@@ -718,7 +727,7 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
     }
 
     const pageSvgs: string[] = [];
-    const pageLoopT0 = perfDev() ? performance.now() : 0;
+    const pageLoopT0 = IS_DEV ? performance.now() : 0;
 
     for (const spec of pages) {
         abortIfNeeded();
@@ -823,7 +832,7 @@ export async function renderCharucoPrintSvgCore(params: PrintSvgAssemblyParams):
         await yieldStep();
     }
 
-    if (perfDev()) {
+    if (IS_DEV) {
         perfLog('assemble all page SVG strings', performance.now() - pageLoopT0, `${pages.length} pages`);
     }
 

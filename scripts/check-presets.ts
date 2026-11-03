@@ -5,7 +5,7 @@
  * names, at or above the distance minimum, ending at one square per sheet. Every grid prints every square
  * length up to its largest, with no gaps. Every preset and every grid the X / Y sliders allow must fit the
  * 250-marker dictionary. Tiling reserves the origin banner for the version the build prints, and only on a
- * single-sheet chart.
+ * single-sheet chart. Every paper's link code is a unique single digit.
  */
 import './useBuildAppVersion.js';
 import {MM_HEADER_CONTENT_TOP_MM, ORIGIN_CORNER_MARKER_TOP_ROOM_MM} from '../src/print/constants.js';
@@ -17,7 +17,6 @@ import {
     BOARD_MARKERS_MAX,
     CHARUCO_SQUARE_MM_MAX,
     CHARUCO_SQUARE_MM_MIN,
-    PAPER_OPTIONS,
     boardGridAxisMax,
     charucoMarkerCount,
     maxSquareMmForGridAndPages,
@@ -26,14 +25,22 @@ import {
     pageStepNeighbours,
     steppablePageCounts,
     workingDistanceMinSquareMm,
-    type WorkingDistanceTierId,
+    WORKING_DISTANCES,
 } from '../src/print/charucoLayout.js';
 import {gridFeasibility} from '../src/print/feasibilityRules.js';
+import {PAPERS} from '../src/print/papers.js';
 
-const DISTANCES: WorkingDistanceTierId[] = ['close', 'near', 'far'];
+const DISTANCES = WORKING_DISTANCES.map((d) => d.id);
 const failures: string[] = [];
 
-for (const paper of PAPER_OPTIONS) {
+// The link's `p` field is one digit per paper, printed on charts forever.
+PAPERS.forEach((paper, i) => {
+    if (!/^\d$/.test(String(paper.linkCode)) || PAPERS.findIndex((p) => p.linkCode === paper.linkCode) !== i) {
+        failures.push(`${paper.id}: link code ${paper.linkCode} is not a unique single digit`);
+    }
+});
+
+for (const paper of PAPERS) {
     for (const distance of DISTANCES) {
         const plan = resolveDistancePrintPlan(distance, paper.id);
         const label = `${paper.id} ${distance} ${plan.squaresX}×${plan.squaresY} → ${plan.targetPages} page(s)`;
@@ -59,7 +66,7 @@ for (const paper of PAPER_OPTIONS) {
 
 // A multi-sheet chart tiled with the banner's strip reserved prints its first sheet without it, so that
 // sheet's board region (below the header, plus the corner marker's room) must be at least as tall.
-for (const paper of PAPER_OPTIONS) {
+for (const paper of PAPERS) {
     for (const [w, h] of [[paper.wMm, paper.hMm], [paper.hMm, paper.wMm]] as const) {
         const reserveMm = originBannerReserveMm(w, h);
         const neededMm = MM_HEADER_CONTENT_TOP_MM + ORIGIN_CORNER_MARKER_TOP_ROOM_MM - sheetSafeMarginsMm(w, h).top;
@@ -69,7 +76,7 @@ for (const paper of PAPER_OPTIONS) {
     }
 }
 // A4 2×3 at 79 mm fits one sheet only without the banner: two sheets, and no blank strip on the first.
-const a4 = PAPER_OPTIONS.find((p) => p.id === 'a4')!;
+const a4 = PAPERS.find((p) => p.id === 'a4')!;
 const noStrip = printedLayout(2, 3, 79, a4.wMm, a4.hMm);
 if (noStrip?.pageCount !== 2 || noStrip.bannerReserveMm !== 0) {
     failures.push(`a4 2×3 at 79 mm prints ${noStrip?.pageCount ?? 'nothing'} sheet(s) with a ${noStrip?.bannerReserveMm} mm banner strip, not 2 with none`);
@@ -85,7 +92,7 @@ for (let other = BOARD_GRID_MIN; other <= BOARD_GRID_MAX; other++) {
 }
 
 let stepperChecks = 0;
-for (const paper of PAPER_OPTIONS) {
+for (const paper of PAPERS) {
     for (let sx = BOARD_GRID_MIN; sx <= BOARD_GRID_MAX; sx++) {
         for (let sy = BOARD_GRID_MIN; sy <= boardGridAxisMax(sx); sy++) {
             // Snapping a square length is a clamp, so every length up to the grid's largest must print. With

@@ -65,16 +65,16 @@ const shop = (shopSize: ShopSizeChoice | null, shopOptions: ShopPrintOptions = D
 });
 
 // Legacy separate params and 1.x / 2.x home links.
-expect('v=1&w=7&h=5&s=26&cv2=4.10.0%2BDICT_4X4_250%2Bratio%3D0.8', {format: 'legacy', squaresX: 7, squaresY: 5, squareLengthMm: 26, paperId: null, ...home});
-expect('b=1.2.0w12h9s50', {format: 'packed', ...board, paperId: null, ...home});
+expect('v=1&w=7&h=5&s=26&cv2=4.10.0%2BDICT_4X4_250%2Bratio%3D0.8', {chartVersionRaw: null, squaresX: 7, squaresY: 5, squareLengthMm: 26, paperId: null, ...home});
+expect('b=1.2.0w12h9s50', {chartVersionRaw: '1.2.0', ...board, paperId: null, ...home});
 for (const [code, paperId] of [['0', 'a4'], ['1', 'a3'], ['2', 'letter'], ['3', 'tabloid']] as const) {
-    expect(`b=2.0.0w12h9s50p${code}`, {format: 'packed', ...board, paperId, ...home});
+    expect(`b=2.0.0w12h9s50p${code}`, {chartVersionRaw: '2.0.0', ...board, paperId, ...home});
 }
 for (const version of ['develop', '0.0.0-dev', '2.1.0-rc.1']) {
     expect(`b=${version}w12h9s50p0`, {chartVersionRaw: version, ...board, paperId: 'a4', ...home});
 }
 for (const code of [4, 5, 6, 7, 8, 9]) {
-    expect(`b=2.0.0w12h9s50p${code}`, {format: 'packed', ...board, paperId: null, ...home});
+    expect(`b=2.0.0w12h9s50p${code}`, {chartVersionRaw: '2.0.0', ...board, paperId: null, ...home});
 }
 expect('b=2.0.0w12h9s50.5p0', {squareLengthMm: 50.5, paperId: 'a4'});
 

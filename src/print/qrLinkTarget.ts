@@ -1,12 +1,12 @@
 /**
  * Base URL chart QR codes encode.
  *
- * Release builds always use {@link PRODUCTION_PRINT_SOURCE_URL} (CI additionally pins
- * `VITE_CHARUCO_PRINT_SOURCE_URL`, which still takes precedence in `constants.ts`).
+ * Release builds always use {@link PRODUCTION_PRINT_SOURCE_URL}.
  * `npm run dev` defaults to the same production URL so previews, printouts, and exported
  * SVGs look exactly like release output; a dev-only switch can point QR links at the local
  * dev server instead, which is useful for testing query-parameter handling end to end.
  */
+import {IS_DEV} from '../env.js';
 
 export type QrLinkTarget = 'production' | 'local';
 
@@ -19,15 +19,11 @@ export const PRODUCTION_PRINT_SOURCE_URL = 'https://skelly.cam/c/';
 let sessionTarget: QrLinkTarget | null = null;
 
 /**
- * True only in a browser on the dev server. The `typeof` guards keep the print modules
- * importable from Node/tsx (e.g. `scripts/check-app-version.ts`) where neither exists.
+ * True only in a browser on the dev server. The `window` guard keeps the print modules
+ * importable from Node/tsx (e.g. `scripts/check-home-golden.ts`), which has none.
  */
 export function isQrLinkTargetSwitchAvailable(): boolean {
-    return (
-        typeof import.meta.env !== 'undefined' &&
-        import.meta.env.DEV === true &&
-        typeof window !== 'undefined'
-    );
+    return IS_DEV && typeof window !== 'undefined';
 }
 
 export function getQrLinkTarget(): QrLinkTarget {

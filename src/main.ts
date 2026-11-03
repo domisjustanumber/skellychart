@@ -1,4 +1,5 @@
 import {APP_VERSION} from './appVersion.js';
+import {IS_DEV} from './env.js';
 import freemocapLogoUrl from './freemocapLogoUrl.js';
 import {renderCharucoPrintSvg} from './print/svgDocument.js';
 import {svgAssembledChartWithSheetNumbers} from './print/svgAssemblyCore.js';
@@ -9,39 +10,32 @@ import {
     boardGridAxisMax,
     CHARUCO_SQUARE_MM_MAX,
     CHARUCO_SQUARE_MM_MIN,
-    PAPER_OPTIONS,
-    paperById,
-    charucoPagePreviewBorderColor,
-    defaultPaperId,
-    defaultRegion,
+    DEFAULT_WORKING_DISTANCE,
+    isWorkingDistanceId,
     layoutSummaryText,
     maxSquareMmForGridAndPages,
     printedLayout,
     resolveDistancePrintPlan,
-    shouldUseImperialWorkingDistanceUnits,
+    sheetColorRgb,
     snapSquareMm,
     squareLengthTierBandEdgeFractions,
     pageStepNeighbours,
     steppablePageCounts,
     type PageStep,
+    WORKING_DISTANCES,
     workingDistanceMinSquareMm,
     workingDistanceTierFromSquareLengthMm,
+    type WorkingDistanceTierId,
 } from './print/charucoLayout.js';
+import {isPaperId, paperById, PAPERS, type PaperId} from './print/papers.js';
 import {gridFeasibility} from './print/feasibilityRules.js';
 import {buildPageSpecs, printedSheetCount} from './print/tiling.js';
-import {perfDev, perfLog} from './print/perfDebug.js';
-import {
-    CHARUCO_MARKER_LENGTH_RATIO,
-    getCharucoPrintSourceUrl,
-    getCharucoPrintSourceUrlFor,
-    PIXELS_PER_MM,
-} from './print/constants.js';
+import {perfLog} from './print/perfDebug.js';
+import {CHARUCO_MARKER_LENGTH_RATIO, PIXELS_PER_MM} from './print/constants.js';
 import {compareChartVersions, parseChartVersion} from './print/chartVersion.js';
-import {svgRootOuterSizeAttrs} from './print/svgUtils.js';
+import {rgbCss, svgRootOuterSizeAttrs} from './print/svgUtils.js';
 import {
     buildCharucoDocumentationUrl,
-    expectedCharucoCv2QueryValue,
-    mergeCharucoQrParamsInto,
     parseCharucoQrSearchParams,
     shopStandardBleedMm,
     type LinkTarget,
@@ -76,6 +70,8 @@ import {
 import {
     getQrLinkTarget,
     isQrLinkTargetSwitchAvailable,
+    resolveQrLinkSourceUrl,
+    resolveQrLinkSourceUrlFor,
     setQrLinkTarget,
 } from './print/qrLinkTarget.js';
 import {
@@ -94,9 +90,10 @@ import {
     setStoredPreference,
     type ThemePreference,
 } from './ui/theme.js';
+import {defaultPaperId, defaultRegion, prefersImperialUnits} from './ui/locale.js';
 import {
     FREEMOCAP_CALIBRATION_DOCS_MULTI_CAM_URL,
-    bandLabel,
+    distanceLabel,
     distanceSelectLabel,
     interpolate,
     paperLabel,
@@ -106,38 +103,25 @@ import {
     sheetsShort,
 } from './ui/strings.js';
 
-const PRESET_IDS = ['close', 'near', 'far'] as const;
-
-/** Default working-distance preset (2–4 m); labelled “(recommended)” in the dropdown. */
-const DEFAULT_WORKING_DISTANCE_ID = 'near' as const satisfies (typeof PRESET_IDS)[number];
-
-function normalizeWorkingDistanceId(id: string): (typeof PRESET_IDS)[number] {
-    if (id === 'far') {
-        return 'far';
-    }
-    if (id === 'close') {
-        return 'close';
-    }
-    return DEFAULT_WORKING_DISTANCE_ID;
-}
-
-function initialBoard(): {paperId: string; squareMm: number; squaresX: number; squaresY: number} {
+function initialBoard(): {paperId: PaperId; squareMm: number; squaresX: number; squaresY: number} {
     const paperId = defaultPaperId();
-    const paper = paperById(paperId) ?? PAPER_OPTIONS[0]!;
-    const plan = resolveDistancePrintPlan(DEFAULT_WORKING_DISTANCE_ID, paperId);
-    const squareMm =
-        maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, paper.wMm, paper.hMm, plan.targetPages) ?? 54;
+    const paper = paperById(paperId);
+    const plan = resolveDistancePrintPlan(DEFAULT_WORKING_DISTANCE, paperId);
+    const squareMm = maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, paper.wMm, paper.hMm, plan.targetPages);
+    if (squareMm === null) {
+        throw new Error(`The ${paperId} ${DEFAULT_WORKING_DISTANCE} preset does not print (npm run check:presets catches this).`);
+    }
     return {paperId, squareMm, squaresX: plan.squaresX, squaresY: plan.squaresY};
 }
 
 const defaultBoard = initialBoard();
 
 interface AppState {
-    distanceId: (typeof PRESET_IDS)[number];
+    distanceId: WorkingDistanceTierId;
     /** "My printer" (tiled sheets of `paperId`) or "Print shop" (one board of `shopSizeId`). */
     mode: PrintMode;
     /** Home paper; kept while in print-shop mode so switching back restores it. */
-    paperId: string;
+    paperId: PaperId;
     squareMm: number;
     squaresX: number;
     squaresY: number;
@@ -174,7 +158,7 @@ function storeShopOptions(): void {
 }
 
 const state: AppState = {
-    distanceId: DEFAULT_WORKING_DISTANCE_ID,
+    distanceId: DEFAULT_WORKING_DISTANCE,
     mode: 'home',
     paperId: defaultBoard.paperId,
     squareMm: defaultBoard.squareMm,
@@ -241,7 +225,7 @@ function resetPreviewVisualsEmpty(): void {
 }
 
 function paperDims() {
-    return paperById(state.paperId) ?? PAPER_OPTIONS[0]!;
+    return paperById(state.paperId);
 }
 
 function autoPlan() {
@@ -293,7 +277,7 @@ function shopOptions(): ShopPrintOptions {
 }
 
 /** What the chart link and QR describe: the home paper, or the print-shop board and its options. */
-function linkTarget(): string | LinkTarget {
+function linkTarget(): PaperId | LinkTarget {
     return state.mode === 'shop' && state.shopSizeId
         ? {kind: 'shop', size: {id: state.shopSizeId, unit: state.shopUnit}, options: shopOptions()}
         : state.paperId;
@@ -496,7 +480,7 @@ function syncPageStepper(tiling: ReturnType<typeof effectiveTiling>, imperial: b
         hint =
             fewestAnyDistance !== undefined && fewestAnyDistance < count
                 ? interpolate(S.pagesFewestHint, {
-                      distance: bandLabel(state.distanceId, imperial),
+                      distance: distanceLabel(state.distanceId, imperial),
                       mm: workingDistanceMinSquareMm(state.distanceId),
                   })
                 : interpolate(S.pagesFewestGridHint, {sheets: sheetsShort(printedSheetCount(count))});
@@ -727,8 +711,7 @@ function setPrintAdviceElement(el: HTMLElement): void {
 /** Keeps the address bar's packed chart query (`b`) in step with the QR / exported chart; drops legacy keys. */
 function syncAddressBarChartQuery(): void {
     const {squaresX, squaresY} = state;
-    const u = new URL(window.location.href);
-    mergeCharucoQrParamsInto(u.searchParams, squaresX, squaresY, state.squareMm, linkTarget());
+    const u = new URL(buildCharucoDocumentationUrl(window.location.href, squaresX, squaresY, state.squareMm, linkTarget()));
     const next = `${u.pathname}${u.search}${u.hash}`;
     const cur = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (next === cur) {
@@ -852,7 +835,7 @@ function syncDevQrLinkTargetUi(): void {
     for (const link of links) {
         const qrTarget = link.dataset.qrTarget === 'local' ? 'local' : 'production';
         const url = buildCharucoDocumentationUrl(
-            getCharucoPrintSourceUrlFor(qrTarget),
+            resolveQrLinkSourceUrlFor(qrTarget),
             squaresX,
             squaresY,
             state.squareMm,
@@ -865,14 +848,13 @@ function syncDevQrLinkTargetUi(): void {
 
 function syncUi(options: SyncUiOptions = {}): void {
     const {lite = false, previewDelayMs} = options;
-    const t0 = perfDev() ? performance.now() : 0;
+    const t0 = IS_DEV ? performance.now() : 0;
     if (syncUiRafId !== null) {
         window.cancelAnimationFrame(syncUiRafId);
         syncUiRafId = null;
     }
-    state.distanceId = normalizeWorkingDistanceId(state.distanceId);
     applyAutoPreset();
-    const imperial = shouldUseImperialWorkingDistanceUnits();
+    const imperial = prefersImperialUnits();
     const tiling = effectiveTiling();
 
     if (!lite) {
@@ -905,15 +887,15 @@ function syncUi(options: SyncUiOptions = {}): void {
         const s1 = document.createElement('span');
         s1.style.width = `${pCloseEnd}%`;
         s1.style.color = 'var(--close)';
-        s1.textContent = bandLabel('close', imperial);
+        s1.textContent = distanceLabel('close', imperial);
         const s2 = document.createElement('span');
         s2.style.width = `${Math.max(0, pNearEnd - pCloseEnd)}%`;
         s2.style.color = 'var(--near)';
-        s2.textContent = bandLabel('near', imperial);
+        s2.textContent = distanceLabel('near', imperial);
         const s3 = document.createElement('span');
         s3.style.flex = '1';
         s3.style.color = 'var(--far)';
-        s3.textContent = bandLabel('far', imperial);
+        s3.textContent = distanceLabel('far', imperial);
         tierEl.append(s1, s2, s3);
         sliderStack.style.setProperty('--tier-p-close-end', `${pCloseEnd}%`);
         sliderStack.style.setProperty('--tier-p-near-end', `${pNearEnd}%`);
@@ -939,11 +921,11 @@ function syncUi(options: SyncUiOptions = {}): void {
     sy.value = String(state.squaresY);
 
     const distSel = byId('distance') as HTMLSelectElement;
-    const distanceSelectKey = `${imperial}:${(PRESET_IDS as readonly string[]).join('|')}`;
+    const distanceSelectKey = `${imperial}:${WORKING_DISTANCES.map((d) => d.id).join('|')}`;
     if (distanceSelectKey !== syncedDistanceSelectKey) {
         syncedDistanceSelectKey = distanceSelectKey;
         distSel.innerHTML = '';
-        for (const id of PRESET_IDS) {
+        for (const {id} of WORKING_DISTANCES) {
             const o = document.createElement('option');
             o.value = id;
             o.textContent = distanceSelectLabel(id, imperial);
@@ -955,16 +937,16 @@ function syncUi(options: SyncUiOptions = {}): void {
     }
 
     const paperSel = byId('paper') as HTMLSelectElement;
-    const paperSelectKey = PAPER_OPTIONS.map((p) => p.id).join('|');
+    const paperSelectKey = PAPERS.map((p) => p.id).join('|');
     if (paperSelectKey !== syncedPaperSelectKey) {
         syncedPaperSelectKey = paperSelectKey;
         paperSel.innerHTML = '';
-        for (const p of PAPER_OPTIONS) {
+        for (const p of PAPERS) {
             const o = document.createElement('option');
             o.value = p.id;
             o.textContent = interpolate(S.paperOption, {
                 paper: paperLabel(p.id),
-                dims: paperOptionDimensions(p.id, p.wMm, p.hMm),
+                dims: paperOptionDimensions(p),
             });
             paperSel.appendChild(o);
         }
@@ -995,7 +977,7 @@ function syncUi(options: SyncUiOptions = {}): void {
         syncThemeToggle();
         showErr(null);
     }
-    if (perfDev()) {
+    if (IS_DEV) {
         const dt = performance.now() - t0;
         if (dt > 16) {
             perfLog(
@@ -1005,9 +987,7 @@ function syncUi(options: SyncUiOptions = {}): void {
             );
         }
     }
-    if (import.meta.env.DEV) {
-        syncDevQrLinkTargetUi();
-    }
+    syncDevQrLinkTargetUi();
     schedulePreview(previewDelayMs);
     scheduleAddressBarSync();
 }
@@ -1299,7 +1279,7 @@ function schedulePreview(delayOverride?: number): void {
     if (previewTimer) {
         clearTimeout(previewTimer);
     }
-    const scheduleBaselineMs = perfDev() ? performance.now() : undefined;
+    const scheduleBaselineMs = IS_DEV ? performance.now() : undefined;
     lastScheduledPreviewDelayMs =
         delayOverride !== undefined
             ? delayOverride
@@ -1340,20 +1320,20 @@ function flushPreviewImgLayoutReads(thumbsRoot: HTMLElement): void {
  * wait **2× requestAnimationFrame** as a rough proxy for “about to paint”.
  */
 async function awaitPreviewImagesDecodedAndPaint(thumbsRoot: HTMLElement): Promise<void> {
-    const tDecode = perfDev() ? performance.now() : 0;
+    const tDecode = IS_DEV ? performance.now() : 0;
     const pending: Promise<void>[] = Array.from(thumbsRoot.querySelectorAll<HTMLImageElement>('img.thumb-img'), (im) =>
         im.decode().catch(() => {}),
     );
     await Promise.all(pending);
-    if (perfDev()) {
+    if (IS_DEV) {
         perfLog('browser <img> decode()', performance.now() - tDecode, `${pending.length} images`);
     }
 
     flushPreviewImgLayoutReads(thumbsRoot);
 
-    const tRaf = perfDev() ? performance.now() : 0;
+    const tRaf = IS_DEV ? performance.now() : 0;
     await waitAnimationFrames(2);
-    if (perfDev()) {
+    if (IS_DEV) {
         perfLog('2× requestAnimationFrame after decode (paint proxy)', performance.now() - tRaf);
     }
 }
@@ -1401,7 +1381,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     await yieldToMain();
 
     try {
-        const previewWallStart = perfDev() ? performance.now() : 0;
+        const previewWallStart = IS_DEV ? performance.now() : 0;
 
         const {squaresX: px, squaresY: py} = state;
         const {paperWMm, paperHMm} = tiling;
@@ -1441,9 +1421,9 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
         await yieldToMain();
 
         try {
-            const tThumbs = perfDev() ? performance.now() : 0;
+            const tThumbs = IS_DEV ? performance.now() : 0;
             const pageImages = printResult.pages.slice(0, MAX_PREVIEW_PAGES).map((svg) => svgToDataUrl(svg));
-            if (perfDev()) {
+            if (IS_DEV) {
                 perfLog(
                     'preview thumbs (svgToDataUrl × N)',
                     performance.now() - tThumbs,
@@ -1513,7 +1493,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
                 img.alt = interpolate(S.pageLabel, {n: i + 1});
                 if (layoutN > 1 && totalPages > 1) {
                     // Same palette as the full-chart blocks so each thumbnail matches its block's colour.
-                    img.style.border = `2px solid ${charucoPagePreviewBorderColor(i + 1, layoutN, false)}`;
+                    img.style.border = `2px solid ${rgbCss(sheetColorRgb(i + 1, layoutN))}`;
                 }
                 wrap.appendChild(img);
                 thumbs.appendChild(wrap);
@@ -1522,7 +1502,7 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
             if (signal.aborted || runId !== previewGeneration) {
                 return;
             }
-            if (perfDev()) {
+            if (IS_DEV) {
                 perfLog('runPreview JS through paint proxy', performance.now() - previewWallStart, '');
                 if (scheduleBaselineMs !== undefined) {
                     perfLog(
@@ -1657,11 +1637,11 @@ function exportBasenamePrefix(): string {
  */
 function shopExportAllowed(): boolean {
     const v = parseChartVersion(APP_VERSION);
-    const release = v !== null && v.prerelease === null && getCharucoPrintSourceUrl().startsWith('https://skelly.cam/c/');
+    const release = v !== null && v.prerelease === null && resolveQrLinkSourceUrl().startsWith('https://skelly.cam/c/');
     if (release) {
         return true;
     }
-    if (import.meta.env.DEV) {
+    if (IS_DEV) {
         return window.confirm(interpolate(S.shopTestBuildConfirm, {version: APP_VERSION}));
     }
     showErr(S.shopReleaseOnly);
@@ -1873,12 +1853,12 @@ async function openPrintDialog(): Promise<void> {
             pages,
             cooperativeYield: false,
         });
-        const [pageWCss, pageHCss] = svgRootOuterSizeAttrs(paperWMm, paperHMm, paperId);
+        const [pageWCss, pageHCss] = svgRootOuterSizeAttrs(paperWMm, paperHMm, paperById(paperId).units);
         // The guide may be turned the other way from the chart sheets, so it prints on its own named page.
         let guideCss = '';
         let guideHtml = '';
         if (guide) {
-            const [guideWCss, guideHCss] = svgRootOuterSizeAttrs(guide.paperWMm, guide.paperHMm, paperId);
+            const [guideWCss, guideHCss] = svgRootOuterSizeAttrs(guide.paperWMm, guide.paperHMm, paperById(paperId).units);
             guideCss =
                 `@page guide{size:${guideWCss} ${guideHCss};margin:0}` +
                 `.sheet.sheet--guide{page:guide;width:${guideWCss};height:${guideHCss}}` +
@@ -1931,16 +1911,6 @@ function applyQrQueryFromLocation(): void {
         );
     }
 
-    const expectedCv2 = expectedCharucoCv2QueryValue(CHARUCO_MARKER_LENGTH_RATIO);
-    if (parsed.cv2 !== null && parsed.cv2 !== expectedCv2) {
-        warnings.push(
-            interpolate(S.qrOpenCvMismatch, {
-                theirs: parsed.cv2,
-                ours: expectedCv2,
-            }),
-        );
-    }
-
     if (parsed.squaresX !== null || parsed.squaresY !== null || parsed.squareLengthMm !== null) {
         const seen = (history.state as {skScanSeen?: boolean} | null)?.skScanSeen === true;
         if (!seen && parsed.squaresX !== null && parsed.squaresY !== null && parsed.squareLengthMm !== null) {
@@ -1971,7 +1941,7 @@ function applyQrQueryFromLocation(): void {
                 }),
             );
         }
-        if (parsed.paperId !== null && paperById(parsed.paperId)) {
+        if (parsed.paperId !== null) {
             state.paperId = parsed.paperId;
         }
         if (parsed.printMode === 'shop') {
@@ -2104,7 +2074,10 @@ function wireUi(): void {
         pendingDistanceRestore = null;
         suppressDistanceSelectUiClamp = false;
         distanceArmClearForNextPrimaryDown = true;
-        state.distanceId = normalizeWorkingDistanceId((e.target as HTMLSelectElement).value);
+        const distanceId = (e.target as HTMLSelectElement).value;
+        if (isWorkingDistanceId(distanceId)) {
+            state.distanceId = distanceId;
+        }
         state.autoGrid = true;
         clearTransientNotices();
         forgetLinkSquare();
@@ -2124,7 +2097,10 @@ function wireUi(): void {
     });
 
     (byId('paper') as HTMLSelectElement).addEventListener('change', (e) => {
-        state.paperId = (e.target as HTMLSelectElement).value;
+        const paperId = (e.target as HTMLSelectElement).value;
+        if (isPaperId(paperId)) {
+            state.paperId = paperId;
+        }
         if (!state.autoGrid) {
             // Keep the board the user set (or opened from a link); re-fit only the square length, from
             // the link's own size while it is still pending, so the chart's paper restores it exactly.
@@ -2216,7 +2192,7 @@ function wireUi(): void {
             squareMm = maxShopSquareMm(state.squaresX, state.squaresY, sizeId);
             if (squareMm !== null) {
                 shopSizeHint = interpolate(S.shopSizeBandHint, {
-                    distance: bandLabel(state.distanceId, shouldUseImperialWorkingDistanceUnits()),
+                    distance: distanceLabel(state.distanceId, prefersImperialUnits()),
                     size: shopSizeById(sizeId).name,
                     mm: squareMm,
                 });
@@ -2256,10 +2232,11 @@ function wireUi(): void {
 function boot(): void {
     (byId('brandLogo') as HTMLImageElement).src = freemocapLogoUrl;
     initTheme();
-    scaleScene = mountScaleScene(byId('scaleScene'), shouldUseImperialWorkingDistanceUnits);
+    scaleScene = mountScaleScene(byId('scaleScene'), prefersImperialUnits);
     wireUi();
     initAdvancedFoldout();
-    if (import.meta.env.DEV) {
+    // A literal in release builds, so the dev-only UI is left out of the bundle.
+    if (IS_DEV) {
         initDevQrLinkTargetUi();
     }
     applyQrQueryFromLocation();

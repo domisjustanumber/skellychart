@@ -20,7 +20,7 @@ async function buildShopPdf(r: Request) {
     if (!layout) {
         throw new Error(`${r.squaresX}×${r.squaresY} at ${r.squareMm} mm does not fit ${r.size.id}`);
     }
-    const sheet = await renderShopPrintSvg({...r, layout, documentationSourceUrl: 'https://skelly.cam/c/'});
+    const sheet = await renderShopPrintSvg({...r, layout});
     const blob = await buildPdfBlobFromSvgPages(
         [{svg: sheet.svg, widthMm: sheet.mediaMm.w, heightMm: sheet.mediaMm.h}],
         undefined,

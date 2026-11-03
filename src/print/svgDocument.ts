@@ -1,5 +1,5 @@
 import freemocapLogoUrl from '../freemocapLogoUrl.js';
-import {getCharucoPrintSourceUrl} from './constants.js';
+import {resolveQrLinkSourceUrl} from './qrLinkTarget.js';
 import {buildCharucoDocumentationUrl} from './charucoDocUrl.js';
 import {BANNER_QR_PX} from './originBannerLayout.js';
 import {generateQrSvgFragment} from './qrSvg.js';
@@ -8,7 +8,6 @@ import {renderCharucoPrintSvgCore} from './svgAssemblyCore.js';
 import type {PrintSvgParams, PrintSvgResult} from './svgAssemblyTypes.js';
 
 export type {PrintSvgParams} from './svgAssemblyTypes.js';
-export {buildCharucoDocumentationUrl} from './charucoDocUrl.js';
 
 /** One resolved XML fetch/read per runtime (browser tab or Node process). */
 let memoLogoXmlPromise: Promise<string | null> | undefined;
@@ -86,7 +85,7 @@ export async function resolveLogoForPrint(): Promise<string | null> {
 
 export async function renderCharucoPrintSvg(params: PrintSvgParams): Promise<PrintSvgResult> {
     const docUrl = buildCharucoDocumentationUrl(
-        params.documentationSourceUrl ?? getCharucoPrintSourceUrl(),
+        resolveQrLinkSourceUrl(),
         params.squaresX,
         params.squaresY,
         params.squareLengthMm,

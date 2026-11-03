@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {helveticaTextWidthPx} from '../src/print/helveticaMetrics.js';
+import type {PaperId} from '../src/print/papers.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const GOLDEN_FILE = path.join(ROOT, 'scripts/home-golden.json');
@@ -41,27 +42,25 @@ const measureContext = {
 };
 
 const {
-    PAPER_OPTIONS,
     maxSquareMmForGridAndPages,
     printedLayout,
     resolveDistancePrintPlan,
 } = await import('../src/print/charucoLayout.js');
+const {PAPERS, paperById} = await import('../src/print/papers.js');
 const {CHARUCO_MARKER_LENGTH_RATIO} = await import('../src/print/constants.js');
 const {buildPageSpecs} = await import('../src/print/tiling.js');
 const {renderCharucoPrintSvg} = await import('../src/print/svgDocument.js');
 
-const SOURCE_URL = 'https://skelly.cam/c/';
-
 interface GoldenCase {
     key: string;
-    paperId: string;
+    paperId: PaperId;
     squaresX: number;
     squaresY: number;
     squareMm: number;
 }
 
 const cases: GoldenCase[] = [];
-for (const paper of PAPER_OPTIONS) {
+for (const paper of PAPERS) {
     for (const distance of ['close', 'near', 'far'] as const) {
         const plan = resolveDistancePrintPlan(distance, paper.id);
         const squareMm = maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, paper.wMm, paper.hMm, plan.targetPages);
@@ -85,7 +84,7 @@ for (const [paperId, squaresX, squaresY, squareMm] of [
 
 const actual: Record<string, string> = {};
 for (const c of cases) {
-    const paper = PAPER_OPTIONS.find((p) => p.id === c.paperId)!;
+    const paper = paperById(c.paperId);
     const tiling = printedLayout(c.squaresX, c.squaresY, c.squareMm, paper.wMm, paper.hMm);
     if (!tiling) {
         throw new Error(`${c.key}: does not print`);
@@ -98,7 +97,6 @@ for (const c of cases) {
         markerLengthRatio: CHARUCO_MARKER_LENGTH_RATIO,
         tiling,
         pages: buildPageSpecs(c.squaresX, c.squaresY, tiling),
-        documentationSourceUrl: SOURCE_URL,
         cooperativeYield: false,
     });
     // The logo markup keeps the file's line endings, which Git checks out as CRLF on Windows and LF elsewhere.

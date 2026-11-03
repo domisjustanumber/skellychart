@@ -352,7 +352,7 @@ for (const size of SHOP_SIZES) {
             for (const cropMarks of [false, true]) {
                 const options = {bleed, cropMarks, colour: 'colour' as const};
                 const shopSize = {id: size.id, unit};
-                const r = await renderShopPrintSvg({squaresX, squaresY, squareMm, layout, size: shopSize, options, documentationSourceUrl: 'https://skelly.cam/c/'});
+                const r = await renderShopPrintSvg({squaresX, squaresY, squareMm, layout, size: shopSize, options});
                 const b = bleedMmForUnit(bleed, unit);
                 const label = `${size.id} ${unit} bleed ${b} mm${cropMarks ? ' + crop marks' : ''}`;
                 const found = FORBIDDEN.filter((t) => r.svg.includes(t));

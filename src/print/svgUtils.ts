@@ -1,3 +1,5 @@
+import type {PaperUnits} from './papers.js';
+
 export function escapeXml(text: string): string {
     return text
         .replace(/&/g, '&amp;')
@@ -10,18 +12,15 @@ export function rgbCss(rgb: [number, number, number]): string {
     return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
 }
 
-/** US paper presets: outer SVG / print page dimensions use inches; layout math stays in mm. */
-const SVG_PAGE_INCHES_IDS = new Set(['letter', 'tabloid']);
-
 /** Convert mm → inch string for SVG/CSS (trims float noise from mm constants). */
 export function mmToInchString(mm: number): string {
     const inch = mm / 25.4;
     return inch.toFixed(4).replace(/\.?0+$/, '');
 }
 
-/** `width` / `height` attribute values (with unit) for the root print `<svg>`. */
-export function svgRootOuterSizeAttrs(paperWMm: number, paperHMm: number, paperId: string): [string, string] {
-    if (SVG_PAGE_INCHES_IDS.has(paperId)) {
+/** `width` / `height` attribute values for the root print `<svg>`, in the paper's units (layout math stays in mm). */
+export function svgRootOuterSizeAttrs(paperWMm: number, paperHMm: number, units: PaperUnits): [string, string] {
+    if (units === 'in') {
         return [`${mmToInchString(paperWMm)}in`, `${mmToInchString(paperHMm)}in`];
     }
     return [`${paperWMm}mm`, `${paperHMm}mm`];

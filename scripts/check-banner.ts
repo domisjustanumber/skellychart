@@ -12,7 +12,8 @@
  */
 import {PACKAGE_VERSION} from './useBuildAppVersion.js';
 import {DEV_APP_VERSION, displayAppVersion} from '../src/appVersion.js';
-import {BOARD_GRID_MAX, BOARD_GRID_MIN, PAPER_OPTIONS, boardGridAxisMax} from '../src/print/charucoLayout.js';
+import {BOARD_GRID_MAX, BOARD_GRID_MIN, boardGridAxisMax} from '../src/print/charucoLayout.js';
+import {PAPERS} from '../src/print/papers.js';
 import {
     CHARUCO_SQUARE_MM_MAX,
     CHARUCO_SQUARE_MM_MIN,
@@ -57,7 +58,7 @@ const gridCounts = widthRepresentatives(BOARD_GRID_MIN, BOARD_GRID_MAX);
 const squareMms = widthRepresentatives(CHARUCO_SQUARE_MM_MIN, CHARUCO_SQUARE_MM_MAX);
 const headerFontMm = SHEET_HEADER_FONT_PX / PIXELS_PER_MM;
 const headerBaselineMm = Math.round(MM_SHEET_HEADER_BASELINE_MM * PIXELS_PER_MM) / PIXELS_PER_MM;
-for (const paper of PAPER_OPTIONS) {
+for (const paper of PAPERS) {
     for (const [widthMm, heightMm, orientation] of [
         [paper.wMm, paper.hMm, 'portrait'],
         [paper.hMm, paper.wMm, 'landscape'],

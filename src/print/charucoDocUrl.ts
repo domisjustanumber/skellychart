@@ -1,20 +1,6 @@
 import {APP_VERSION, DEV_APP_VERSION} from '../appVersion.js';
-import {CHARUCO_MARKER_LENGTH_RATIO, OPENCV_LABEL_VERSION} from './constants.js';
 import {APP_VERSION_SOURCE, parseChartVersion, type ChartVersion} from './chartVersion.js';
-
-export function charucoCv2QueryValue(markerLengthRatio: number): string {
-    return `${OPENCV_LABEL_VERSION}+DICT_4X4_250+ratio=${markerLengthRatio}`;
-}
-
-/** OpenCV / dictionary / ratio metadata embedded in legacy chart QR links (for round‑trip checks). */
-export function expectedCharucoCv2QueryValue(
-    markerLengthRatio: number = CHARUCO_MARKER_LENGTH_RATIO,
-): string {
-    return charucoCv2QueryValue(markerLengthRatio);
-}
-
-/** Link format a query matched: packed `b` is current, separate params are legacy. */
-export type CharucoQrQueryFormat = 'packed' | 'legacy';
+import {paperById, PAPERS, type PaperId} from './papers.js';
 
 /** "My printer" (tiled sheets, `p` field) or "Print shop" (one trimmed board, `t` field). */
 export type PrintMode = 'home' | 'shop';
@@ -73,23 +59,21 @@ export function shopStandardBleedMm(unit: ShopUnit): number {
     return unit === 'in' ? 25.4 / 8 : 3;
 }
 
-/** A shop board's link target, or a home paper id (`null` for a paper without a code). */
+/** A shop board's link target, or a home paper id (`null` writes no paper, as 1.x links did). */
 export type LinkTarget =
-    | {kind: 'home'; paperId: string | null}
+    | {kind: 'home'; paperId: PaperId | null}
     | {kind: 'shop'; size: ShopSizeChoice; options: ShopPrintOptions};
 
 export interface ParsedCharucoQrQuery {
-    /** Which of the two parsing paths produced these values. */
-    format: CharucoQrQueryFormat;
-    /** Raw version token from the packed `b` param or legacy `v` param. */
+    /** Raw version token from the packed `b` param; null for the legacy format. */
     chartVersionRaw: string | null;
-    /** Parsed version; legacy `v=1` becomes 1.0.0. Null when absent or unparseable. */
+    /** Parsed version; null when absent or unparseable. */
     chartVersion: ChartVersion | null;
     squaresX: number | null;
     squaresY: number | null;
     squareLengthMm: number | null;
     /** Paper preset id from the packed `p` code; null for older links and the legacy format. */
-    paperId: string | null;
+    paperId: PaperId | null;
     /** `shop` when the packed value has a `t` field; it wins over `p`. */
     printMode: PrintMode;
     /** The shop trim; null in home mode, or when the size was unreadable (open at the default size). */
@@ -100,8 +84,6 @@ export interface ParsedCharucoQrQuery {
     shopSizeError: boolean;
     /** The `t` options were malformed or out of range; the size was kept. */
     shopOptionsError: boolean;
-    /** Legacy OpenCV metadata; current charts do not write it. */
-    cv2: string | null;
 }
 
 /**
@@ -209,27 +191,13 @@ function shopOptionsLinkValue(options: ShopPrintOptions, unit: ShopUnit): string
 }
 
 /**
- * One-digit paper codes for the packed `p` field (two characters in the link). Fixed forever:
- * printed charts carry them, so never renumber; append new papers with new digits.
+ * Current format: one packed `b` param, e.g. `b=2.0.1w12h9s50p0` (`p` = paper code, optional) or
+ * `b=2.0.1w12h9s50t1c` (`t` = print-shop trim and options).
+ * Returns `null` when `b` is absent or does not match the packed grammar, so the
+ * caller can decide whether to fall back to legacy params.
  */
-const PAPER_LINK_CODES: Readonly<Record<string, number>> = {a4: 0, a3: 1, letter: 2, tabloid: 3};
-
-function paperIdFromLinkCode(code: string | undefined): string | null {
-    if (code === undefined) {
-        return null;
-    }
-    const n = Number(code);
-    return Object.keys(PAPER_LINK_CODES).find((id) => PAPER_LINK_CODES[id] === n) ?? null;
-}
-
-type PackedChartValues = Pick<
-    ParsedCharucoQrQuery,
-    'chartVersionRaw' | 'chartVersion' | 'squaresX' | 'squaresY' | 'squareLengthMm' | 'paperId'
-> &
-    ShopLinkValues;
-
-function parsePackedChartQueryValue(raw: string): PackedChartValues | null {
-    const m = PACKED_CHART_RE.exec(raw);
+function parsePackedCharucoQrQuery(searchParams: URLSearchParams): ParsedCharucoQrQuery | null {
+    const m = PACKED_CHART_RE.exec(searchParams.get('b') ?? '');
     if (!m) {
         return null;
     }
@@ -240,36 +208,17 @@ function parsePackedChartQueryValue(raw: string): PackedChartValues | null {
         squaresX: Number(m[2]),
         squaresY: Number(m[3]),
         squareLengthMm: Number(m[4]),
-        paperId: paperIdFromLinkCode(m[5]),
+        paperId: m[5] === undefined ? null : (PAPERS.find((p) => p.linkCode === Number(m[5]))?.id ?? null),
         ...parseShopTail(m[6]),
     };
 }
 
 /**
- * Current format: one packed `b` param, e.g. `b=2.0.1w12h9s50p0` (`p` = paper code, optional) or
- * `b=2.0.1w12h9s50t1c` (`t` = print-shop trim and options).
- * Returns `null` when `b` is absent or does not match the packed grammar, so the
- * caller can decide whether to fall back to legacy params.
- */
-export function parsePackedCharucoQrQuery(
-    searchParams: URLSearchParams,
-): ParsedCharucoQrQuery | null {
-    const bRaw = searchParams.get('b');
-    if (bRaw === null || bRaw === '') {
-        return null;
-    }
-    const packed = parsePackedChartQueryValue(bRaw);
-    if (!packed) {
-        return null;
-    }
-    return {format: 'packed', ...packed, cv2: null};
-}
-
-/**
- * Legacy format: separate `v`, `w`, `h`, `s` params, plus `cv2` OpenCV metadata.
+ * Legacy format: separate `w`, `h`, `s` params. Its `v` and `cv2` were always `1` and OpenCV 4.10+ at
+ * ratio 0.8, so they are ignored.
  * Missing or unparseable values become `null`; this never rejects the whole query.
  */
-export function parseLegacyCharucoQrQuery(searchParams: URLSearchParams): ParsedCharucoQrQuery {
+function parseLegacyCharucoQrQuery(searchParams: URLSearchParams): ParsedCharucoQrQuery {
     const parseIntNullable = (key: string): number | null => {
         const raw = searchParams.get(key);
         if (raw === null || raw === '') {
@@ -291,20 +240,14 @@ export function parseLegacyCharucoQrQuery(searchParams: URLSearchParams): Parsed
         return Number.isFinite(n) ? n : null;
     };
 
-    const vRaw = searchParams.get('v');
-    const chartVersionRaw = vRaw === null || vRaw.trim() === '' ? null : vRaw.trim();
-    const cv2Raw = searchParams.get('cv2');
-
     return {
-        format: 'legacy',
-        chartVersionRaw,
-        chartVersion: chartVersionRaw === null ? null : parseChartVersion(chartVersionRaw),
+        chartVersionRaw: null,
+        chartVersion: null,
         squaresX: parseIntNullable('w'),
         squaresY: parseIntNullable('h'),
         squareLengthMm: parseFloatNullable('s'),
         paperId: null,
         ...HOME_LINK_VALUES,
-        cv2: cv2Raw === null || cv2Raw === '' ? null : cv2Raw,
     };
 }
 
@@ -313,22 +256,22 @@ export function parseLegacyCharucoQrQuery(searchParams: URLSearchParams): Parsed
  *
  * Dispatch: a valid packed `b` param means the current format and wins outright.
  * Otherwise (including a malformed `b`) the legacy separate params are read, so
- * old links keep working. {@link ParsedCharucoQrQuery.format} reports the path taken.
+ * old links keep working.
  */
 export function parseCharucoQrSearchParams(searchParams: URLSearchParams): ParsedCharucoQrQuery {
     return parsePackedCharucoQrQuery(searchParams) ?? parseLegacyCharucoQrQuery(searchParams);
 }
 
-/** Query keys written by chart QR / shareable URLs (removed before re-writing). */
+/** Query keys written by chart QR / shareable URLs (removed before re-writing); `v` and `cv2` are legacy only. */
 const CHART_QR_PARAM_KEYS = ['v', 'w', 'h', 's', 'cv2', 'b'] as const;
 
-function linkTargetOf(target: string | null | LinkTarget): LinkTarget {
+function linkTargetOf(target: PaperId | null | LinkTarget): LinkTarget {
     return target === null || typeof target === 'string' ? {kind: 'home', paperId: target} : target;
 }
 
 /**
  * Compact chart spec: `<version>w<squaresX>h<squaresY>s<squareLengthMm>`, then `p<paperCode>` for a
- * home paper (omitted for a paper without a code) or `t<size>[<options>]` for a print-shop board
+ * home paper (omitted for `null`) or `t<size>[<options>]` for a print-shop board
  * (e.g. `2.0.1w12h9s50p0`, `2.0.1w12h9s50t1c`). A paper id or `null` means a home paper.
  */
 export function packedChartQueryValue(
@@ -336,44 +279,32 @@ export function packedChartQueryValue(
     squaresX: number,
     squaresY: number,
     squareLengthMm: number,
-    target: string | null | LinkTarget = null,
+    target: PaperId | null | LinkTarget = null,
 ): string {
     const core = `${version}w${squaresX}h${squaresY}s${squareLengthMm}`;
     const t = linkTargetOf(target);
     if (t.kind === 'shop') {
         return `${core}t${shopSizeLinkValue(t.size)}${shopOptionsLinkValue(t.options, t.size.unit)}`;
     }
-    const code = t.paperId === null ? undefined : PAPER_LINK_CODES[t.paperId];
-    return `${core}${code === undefined ? '' : `p${code}`}`;
+    return t.paperId === null ? core : `${core}p${paperById(t.paperId).linkCode}`;
 }
 
 /**
- * Rewrite chart QR query parameters on {@link searchParams} (drops prior values for those keys
- * then sets the current packed value). Other keys are untouched so tracking params can coexist.
+ * `sourceUrl` with its chart params replaced by the current packed value (`b`). Other keys are kept,
+ * so tracking params can coexist.
  */
-export function mergeCharucoQrParamsInto(
-    searchParams: URLSearchParams,
-    squaresX: number,
-    squaresY: number,
-    squareLengthMm: number,
-    target: string | null | LinkTarget,
-    version: string = APP_VERSION,
-): void {
-    for (const k of CHART_QR_PARAM_KEYS) {
-        searchParams.delete(k);
-    }
-    searchParams.set('b', packedChartQueryValue(version, squaresX, squaresY, squareLengthMm, target));
-}
-
 export function buildCharucoDocumentationUrl(
     sourceUrl: string,
     squaresX: number,
     squaresY: number,
     squareLengthMm: number,
-    target: string | null | LinkTarget,
+    target: PaperId | null | LinkTarget,
     version: string = APP_VERSION,
 ): string {
     const u = new URL(sourceUrl);
-    mergeCharucoQrParamsInto(u.searchParams, squaresX, squaresY, squareLengthMm, target, version);
+    for (const k of CHART_QR_PARAM_KEYS) {
+        u.searchParams.delete(k);
+    }
+    u.searchParams.set('b', packedChartQueryValue(version, squaresX, squaresY, squareLengthMm, target));
     return u.toString();
 }

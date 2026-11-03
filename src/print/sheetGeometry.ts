@@ -26,7 +26,7 @@ export const MM_SAFE_LEADING = 7.5;
 export const MM_SAFE_TRAILING = 14.2;
 /** Safe margin at the paper's long sides (mm), and on every edge of A3 and Tabloid. */
 export const MM_SAFE_SIDE = 8;
-/** Papers whose short side is at least this (mm) are A3/Tabloid class: {@link MM_SAFE_SIDE} on every edge. */
+/** Papers whose short side is at least this (mm) are A3/Tabloid class ({@link isLargeSheet}). */
 const MM_LARGE_PAPER_SHORT_SIDE = 279;
 
 /** A distance (mm) from each edge of a sheet. */
@@ -37,9 +37,17 @@ export interface EdgesMm {
     left: number;
 }
 
+/**
+ * A3 / Tabloid class: {@link MM_SAFE_SIDE} on every edge, and the far preset prints on fewer sheets
+ * (`resolveDistancePrintPlan`).
+ */
+export function isLargeSheet(paperWMm: number, paperHMm: number): boolean {
+    return Math.min(paperWMm, paperHMm) >= MM_LARGE_PAPER_SHORT_SIDE;
+}
+
 /** Safe margins (mm) of a sheet printed `paperWMm` wide and `paperHMm` tall. */
 export function sheetSafeMarginsMm(paperWMm: number, paperHMm: number): EdgesMm {
-    if (Math.min(paperWMm, paperHMm) >= MM_LARGE_PAPER_SHORT_SIDE) {
+    if (isLargeSheet(paperWMm, paperHMm)) {
         return {top: MM_SAFE_SIDE, right: MM_SAFE_SIDE, bottom: MM_SAFE_SIDE, left: MM_SAFE_SIDE};
     }
     if (paperHMm >= paperWMm) {

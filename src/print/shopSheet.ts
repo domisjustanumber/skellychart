@@ -8,12 +8,13 @@
 import {APP_VERSION_DISPLAY} from '../appVersion.js';
 import {renderCharucoBoardSvgFragment, type CharucoGeometry} from '../charuco/board.js';
 import {buildCharucoDocumentationUrl, type ShopPrintOptions, type ShopSizeChoice} from './charucoDocUrl.js';
-import {CHARUCO_MARKER_LENGTH_RATIO, getCharucoPrintSourceUrl, PIXELS_PER_MM} from './constants.js';
+import {CHARUCO_MARKER_LENGTH_RATIO, PIXELS_PER_MM} from './constants.js';
 import {GLYPH_CAP_HEIGHT_EM} from './glyphOutlines.generated.js';
 import {helveticaTextWidthPx} from './helveticaMetrics.js';
 import {interpolate, pdfLabels} from './labels.js';
 import {BANNER_QR_PX, layoutOriginBanner} from './originBannerLayout.js';
 import {outlineText} from './outlineText.js';
+import {resolveQrLinkSourceUrl} from './qrLinkTarget.js';
 import {generateQrSvgFragment} from './qrSvg.js';
 import type {ShopLayout} from './shopLayout.js';
 import {
@@ -220,10 +221,9 @@ export async function renderShopPrintSvg(params: {
     layout: ShopLayout;
     size: ShopSizeChoice;
     options: ShopPrintOptions;
-    documentationSourceUrl?: string;
 }): Promise<ShopSheetSvg & {chartUrl: string}> {
     const chartUrl = buildCharucoDocumentationUrl(
-        params.documentationSourceUrl ?? getCharucoPrintSourceUrl(),
+        resolveQrLinkSourceUrl(),
         params.squaresX,
         params.squaresY,
         params.squareMm,

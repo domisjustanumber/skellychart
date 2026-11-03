@@ -1,7 +1,5 @@
 /** Print layout constants. Originally aligned with freemocap's `charuco_board_print.py`; margins now differ (`sheetGeometry.ts`). */
 
-import {resolveQrLinkSourceUrl, resolveQrLinkSourceUrlFor, type QrLinkTarget} from './qrLinkTarget.js';
-
 /*
  * Safe printing margins per paper edge, and the board region on each sheet, are in `sheetGeometry.ts`.
  */
@@ -77,51 +75,5 @@ export const ORIGIN_MARKER_AXIS_Y_RGB: [number, number, number] = [0x33, 0x6c, 0
 export const JOIN_MEET_DASH_RGB: [number, number, number] = [90, 90, 90];
 export const PIXELS_PER_MM = 12;
 
-function explicitCharucoPrintSourceUrl(): string | null {
-    const v = import.meta.env.VITE_CHARUCO_PRINT_SOURCE_URL;
-    if (typeof v === 'string') {
-        const t = v.trim();
-        if (t.length > 0) {
-            return t;
-        }
-    }
-    return null;
-}
-
-function resolveCharucoPrintSourceUrl(): string {
-    return explicitCharucoPrintSourceUrl() ?? resolveQrLinkSourceUrl();
-}
-
-/**
- * Base URL QR codes on printed charts open.
- * - Explicit: `VITE_CHARUCO_PRINT_SOURCE_URL` (CI pins the skelly.cam short link).
- * - `npm run dev`: skelly.cam short link by default, so dev output matches release output.
- *   The dev-only “QR link target” switch selects the local dev server instead (encoded as a
- *   LAN URL, so phones can scan it).
- * - Otherwise: skelly.cam short link (keeps the printed QR short).
- *
- * Call this when generating URLs (e.g. QR codes) so the current dev switch is honoured.
- */
-export function getCharucoPrintSourceUrl(): string {
-    return resolveCharucoPrintSourceUrl();
-}
-
-/**
- * Base URL QR codes would encode for an explicit target, regardless of the current dev
- * selection. Used by the dev-only QR link target UI to show what each option produces.
- */
-export function getCharucoPrintSourceUrlFor(target: QrLinkTarget): string {
-    return explicitCharucoPrintSourceUrl() ?? resolveQrLinkSourceUrlFor(target);
-}
-
-/** OpenCV version written into the legacy `cv2` QR metadata (not printed on the sheet). */
-export const OPENCV_LABEL_VERSION = '4.10+';
 /** Default marker edge length as a fraction of square length (OpenCV ChArUco-style). */
 export const CHARUCO_MARKER_LENGTH_RATIO = 0.8;
-
-export const PAPER_SIZES_MM: Record<string, [number, number]> = {
-    a4: [210, 297],
-    a3: [297, 420],
-    letter: [215.9, 279.4],
-    tabloid: [279.4, 431.8],
-};

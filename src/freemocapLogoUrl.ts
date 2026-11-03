@@ -1,7 +1,4 @@
-/** Logo asset at `public/freemocap-logo.svg` (same origin as the app). */
-function viteBaseUrl(): string {
-    const b = (import.meta as ImportMeta & {env?: {BASE_URL?: string}}).env?.BASE_URL;
-    return typeof b === 'string' && b.length > 0 ? b : './';
-}
+import {BASE_URL} from './env.js';
 
-export default `${viteBaseUrl()}freemocap-logo.svg`;
+/** Logo asset at `public/freemocap-logo.svg` (same origin as the app). */
+export default `${BASE_URL}freemocap-logo.svg`;

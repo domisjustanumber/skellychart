@@ -1,6 +1,8 @@
 /** English UI copy aligned with freemocap `en-english.json` → `charucoPrint`. */
 
-import type {WorkingDistanceTierId} from '../print/charucoLayout.js';
+import {DEFAULT_WORKING_DISTANCE, type WorkingDistanceTierId} from '../print/charucoLayout.js';
+import type {Paper, PaperId} from '../print/papers.js';
+import {mmToInchString} from '../print/svgUtils.js';
 
 /** FreeMoCap multi-camera calibration (using the chart). */
 export const FREEMOCAP_CALIBRATION_DOCS_MULTI_CAM_URL =
@@ -14,16 +16,9 @@ export function interpolate(template: string, vars: Record<string, string | numb
     );
 }
 
-/** Paper size line in the paper dropdown: US formats in inches, ISO in mm. */
-export function paperOptionDimensions(id: string, wMm: number, hMm: number): string {
-    switch (id) {
-        case 'letter':
-            return '8.5 × 11 in';
-        case 'tabloid':
-            return '11 × 17 in';
-        default:
-            return `${wMm} × ${hMm} mm`;
-    }
+/** Paper size line in the paper dropdown, in the paper's units: `8.5 × 11 in`, `210 × 297 mm`. */
+export function paperOptionDimensions(p: Paper): string {
+    return p.units === 'in' ? `${mmToInchString(p.wMm)} × ${mmToInchString(p.hMm)} in` : `${p.wMm} × ${p.hMm} mm`;
 }
 
 export const S = {
@@ -113,8 +108,6 @@ export const S = {
         'This link’s square length ({{theirs}} mm) cannot print on {{paper}}, so the nearest size that can ({{ours}} mm) is shown. Check the square size on your printed chart.',
     qrGridClamped:
         'This link’s board ({{theirs}} squares) needs more ArUco markers than the dictionary holds ({{markers}}), so its markers cannot be detected; the largest board that fits ({{ours}}) is shown instead.',
-    qrOpenCvMismatch:
-        'This link’s OpenCV line (cv2) does not match this generator (expected {{ours}}; got {{theirs}}). Board detection or geometry may differ.',
     printWith: 'Print with',
     modeHome: 'My printer',
     modeShop: 'Print shop',
@@ -177,49 +170,32 @@ export const S = {
     closeFt: '<7 ft',
     nearFt: '7 - 13 ft',
     farFt: '13 ft+',
+    /** Paper names in the dropdown; the sheet header uses shorter ones (`pdfLabels.sheetHeaderPaper`). */
     paper: {
         a4: 'A4',
         letter: 'US Letter',
         tabloid: 'Tabloid / Ledger',
         a3: 'A3',
-    },
+    } satisfies Record<PaperId, string>,
     /** Appended to the 2–4 m working-distance preset in the dropdown only (not band labels). */
     recommendedPreset: '(recommended)',
 } as const;
 
-export function distanceLabel(id: string, imperial: boolean): string {
-    if (imperial) {
-        switch (id) {
-            case 'close':
-                return S.closeFt;
-            case 'near':
-                return S.nearFt;
-            case 'far':
-                return S.farFt;
-            default:
-                return id;
-        }
-    }
-    switch (id) {
-        case 'close':
-            return S.close;
-        case 'near':
-            return S.near;
-        case 'far':
-            return S.far;
-        default:
-            return id;
-    }
+const DISTANCE_LABELS: Record<WorkingDistanceTierId, {metric: string; imperial: string}> = {
+    close: {metric: S.close, imperial: S.closeFt},
+    near: {metric: S.near, imperial: S.nearFt},
+    far: {metric: S.far, imperial: S.farFt},
+};
+
+export function distanceLabel(id: WorkingDistanceTierId, imperial: boolean): string {
+    const labels = DISTANCE_LABELS[id];
+    return imperial ? labels.imperial : labels.metric;
 }
 
 /** Dropdown option text — includes markers such as `(recommended)` where applicable. */
-export function distanceSelectLabel(id: string, imperial: boolean): string {
+export function distanceSelectLabel(id: WorkingDistanceTierId, imperial: boolean): string {
     const base = distanceLabel(id, imperial);
-    return id === 'near' ? `${base} ${S.recommendedPreset}` : base;
-}
-
-export function bandLabel(tier: WorkingDistanceTierId, imperial: boolean): string {
-    return distanceLabel(tier, imperial);
+    return id === DEFAULT_WORKING_DISTANCE ? `${base} ${S.recommendedPreset}` : base;
 }
 
 export function sheetCountPhrase(count: number): string {
@@ -231,7 +207,6 @@ export function sheetsShort(count: number): string {
     return count === 1 ? '1 sheet' : `${count} sheets`;
 }
 
-export function paperLabel(id: string): string {
-    const p = S.paper[id as keyof typeof S.paper];
-    return p ?? id;
+export function paperLabel(id: PaperId): string {
+    return S.paper[id];
 }

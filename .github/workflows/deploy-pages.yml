@@ -73,9 +73,6 @@ jobs:
 
       - name: Build site
         run: npm run build
-        env:
-          # GitHub Pages project-site URL so printed-chart QR codes resolve for this repository.
-          VITE_CHARUCO_PRINT_SOURCE_URL: https://skelly.cam/c/
 
       # Push before uploading/deploying: if the bump cannot land (branch protection,
       # or another merge moved main), this run fails instead of deploying a version

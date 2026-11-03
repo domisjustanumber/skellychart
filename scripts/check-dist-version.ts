@@ -67,6 +67,28 @@ if (!embedded) {
     fail(`no bundle embeds ${JSON.stringify(expectedVersion)} — Vite define did not reach the app`);
 }
 
+// The print-shop glyph outlines come from Arimo (OFL-1.1): the chunk that ships them must keep the notice,
+// and they must stay out of the main bundle (it is loaded only for print-shop boards).
+const generatedOutlines = readFileSync(join(repoRoot, 'src/print/glyphOutlines.generated.ts'), 'utf8');
+const outlineOfH = /"H":"([^"]+)"/.exec(generatedOutlines)?.[1];
+if (!outlineOfH) {
+    fail('src/print/glyphOutlines.generated.ts has no outline for "H"');
+}
+const outlineChunks = jsFiles.filter((file) => readFileSync(file, 'utf8').includes(outlineOfH));
+if (outlineChunks.length === 0) {
+    fail('no bundle contains the print-shop glyph outlines');
+}
+for (const file of outlineChunks) {
+    const code = readFileSync(file, 'utf8');
+    if (!code.includes('@license OFL-1.1')) {
+        fail(`${relative(repoRoot, file)} ships the Arimo glyph outlines without their OFL-1.1 notice`);
+    }
+}
+const entryChunk = /<script[^>]+src="\.?\/?(assets\/[^"]+\.js)"/.exec(readFileSync(join(distDir, 'index.html'), 'utf8'))?.[1];
+if (entryChunk && outlineChunks.some((file) => file.endsWith(entryChunk.split('/').pop()!))) {
+    fail('the glyph outlines are in the main bundle; load print-shop rendering with import()');
+}
+
 const htmlPath = join(distDir, 'index.html');
 if (!existsSync(htmlPath)) {
     fail('dist/index.html not found');

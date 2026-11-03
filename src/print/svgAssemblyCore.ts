@@ -27,6 +27,7 @@ import {interpolate, pdfLabels} from './labels.js';
 import {layoutOriginBanner, type OriginBannerLayout, wrapHelvetica} from './originBannerLayout.js';
 import type {PageSpec, TilingInfo} from './tiling.js';
 import type {PrintSheetSvg, PrintSvgAssemblyParams, PrintSvgResult} from './svgAssemblyTypes.js';
+import type {OutlineTextOptions} from './outlineText.js';
 import {perfDev, perfLog, perfNote} from './perfDebug.js';
 import {boardRegionMm, type EdgesMm, originMarkerRoomMm, sheetSafeMarginsMm} from './sheetGeometry.js';
 import {SKELLY_LOGO_VIEWBOX_H, SKELLY_LOGO_VIEWBOX_W} from './skellyLogo.js';
@@ -103,7 +104,14 @@ function svgDashedHline(x0: number, x1: number, y: number, ppm: number): string 
     return parts.join('');
 }
 
-function svgCornerMarker(ppm: number, cx: number, cy: number): string {
+/**
+ * Draws one line of text in place of a `<text>` element: print-shop sheets pass `outlineText`, so their
+ * text is paths. Home sheets leave it out and keep their `<text>` markup.
+ */
+export type SvgTextEmitter = (text: string, opts: OutlineTextOptions) => string;
+
+/** Origin corner marker: X / Y arrows and their labels at the board's top-left corner (`cx`, `cy`). */
+export function svgCornerMarker(ppm: number, cx: number, cy: number, emitText?: SvgTextEmitter): string {
     const g = Math.max(1, Math.round(ORIGIN_CORNER_MARKER_PAD_MM * ppm));
     const ax = 8 * ppm;
     const colX = rgbCss(ORIGIN_MARKER_AXIS_X_RGB);
@@ -116,14 +124,20 @@ function svgCornerMarker(ppm: number, cx: number, cy: number): string {
     const hy = Math.max(0, ax - 2 * tri);
     const fontPx = Math.max(28, Math.round(ax * 0.4));
     const labelGap = Math.max(8, Math.round(0.75 * ppm));
+    const xLabel = {x: ix + ax + 2 * labelGap, y: iy};
+    const yLabel = {x: ix, y: iy + ax + 2 * labelGap + labelGap};
+    const labels = emitText
+        ? emitText('x', {...xLabel, fontPx, anchor: 'middle', baseline: 'middle', fill: colX}) +
+          emitText('y', {...yLabel, fontPx, anchor: 'middle', baseline: 'middle', fill: colY})
+        : `<text x="${xLabel.x}" y="${xLabel.y}" fill="${colX}" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle" dominant-baseline="middle">x</text>` +
+          `<text x="${yLabel.x}" y="${yLabel.y}" fill="${colY}" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle" dominant-baseline="middle">y</text>`;
     return (
         `<g stroke-linecap="square" stroke-linejoin="miter">` +
         `<line x1="${ix}" y1="${iy}" x2="${ix + hx}" y2="${iy}" stroke="${colX}" stroke-width="${lw}"/>` +
         `<line x1="${ix}" y1="${iy}" x2="${ix}" y2="${iy + hy}" stroke="${colY}" stroke-width="${lw}"/>` +
         `<polygon points="${ix + ax},${iy} ${ix + ax - tri * 2},${iy - tri} ${ix + ax - tri * 2},${iy + tri}" fill="${colX}"/>` +
         `<polygon points="${ix},${iy + ax} ${ix - tri},${iy + ax - tri * 2} ${ix + tri},${iy + ax - tri * 2}" fill="${colY}"/>` +
-        `<text x="${ix + ax + 2 * labelGap}" y="${iy}" fill="${colX}" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle" dominant-baseline="middle">x</text>` +
-        `<text x="${ix}" y="${iy + ax + 2 * labelGap + labelGap}" fill="${colY}" font-size="${fontPx}" font-family="${FONT}" text-anchor="middle" dominant-baseline="middle">y</text>` +
+        labels +
         `</g>`
     );
 }
@@ -197,9 +211,9 @@ function svgTextBlock(
 
 /**
  * One right-aligned `<text>`: bold title line + body pieces placed by `layoutOriginBanner`, then the
- * write-in box for the measured square length.
+ * write-in box for the measured square length. With `emitText`, each line is drawn by it instead.
  */
-function svgCharucoBoardInfoBlock(
+export function svgCharucoBoardInfoBlock(
     x: number,
     yStart: number,
     titleLine: string,
@@ -208,17 +222,25 @@ function svgCharucoBoardInfoBlock(
     bodyFontPx: number,
     writeInBox: OriginBannerLayout['writeInBox'],
     ppm: number,
+    emitText?: SvgTextEmitter,
 ): string {
-    const titleEscaped = escapeXml(titleLine);
-    const bodyTspans = bodyLines.map(({text, right, y}) => {
-        const inner = text === '' ? '&#xa0;' : escapeXml(text);
-        return `<tspan x="${right}" y="${y}" font-size="${bodyFontPx}" font-weight="normal">${inner}</tspan>`;
-    });
     let box = '';
     if (writeInBox) {
         const sw = Math.max(1, Math.round(0.25 * ppm));
         box = `<rect x="${writeInBox.x + sw / 2}" y="${writeInBox.y + sw / 2}" width="${writeInBox.w - sw}" height="${writeInBox.h - sw}" fill="#fff" stroke="#000" stroke-width="${sw}"/>`;
     }
+    if (emitText) {
+        const title = emitText(titleLine, {x, y: yStart, fontPx: titleFontPx, bold: true, anchor: 'end', baseline: 'hanging'});
+        const body = bodyLines.map(({text, right, y}) =>
+            emitText(text, {x: right, y, fontPx: bodyFontPx, anchor: 'end', baseline: 'hanging'}),
+        );
+        return title + body.join('') + box;
+    }
+    const titleEscaped = escapeXml(titleLine);
+    const bodyTspans = bodyLines.map(({text, right, y}) => {
+        const inner = text === '' ? '&#xa0;' : escapeXml(text);
+        return `<tspan x="${right}" y="${y}" font-size="${bodyFontPx}" font-weight="normal">${inner}</tspan>`;
+    });
     return `<text x="${x}" y="${yStart}" fill="#000" font-size="${titleFontPx}" font-family="${FONT}" text-anchor="end" dominant-baseline="hanging"><tspan font-weight="bold">${titleEscaped}</tspan>${bodyTspans.join('')}</text>${box}`;
 }
 

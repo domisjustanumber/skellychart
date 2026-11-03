@@ -115,15 +115,16 @@ export function defaultPaperIdForRegion(region: string | undefined): string {
 }
 
 /**
- * Default paper: known IANA time zone → region (CA / US / MX allowlists), else first BCP-47 region from
- * locale / `navigator`, else A4.
+ * The user's region: known IANA time zone → region (CA / US / MX allowlists), else the first BCP-47 region
+ * from locale / `navigator`, else `undefined`.
  */
+export function defaultRegion(): string | undefined {
+    return regionFromLetterDefaultTimeZone() ?? firstRegionFromLocaleTags();
+}
+
+/** Default paper for {@link defaultRegion}, else A4. */
 export function defaultPaperId(): string {
-    const fromTz = regionFromLetterDefaultTimeZone();
-    if (fromTz) {
-        return defaultPaperIdForRegion(fromTz);
-    }
-    return defaultPaperIdForRegion(firstRegionFromLocaleTags());
+    return defaultPaperIdForRegion(defaultRegion());
 }
 
 /** Feet vs metres for working-distance copy: US English → ft; first other explicit region → m. */
@@ -201,8 +202,9 @@ export function workingDistanceTierFromSquareLengthMm(squareMm: number): Working
     return 'far';
 }
 
-export function squareLengthTierBandEdgeFractions(): {closeNear: number; nearFar: number} {
-    const span = CHARUCO_SQUARE_MM_MAX - CHARUCO_SQUARE_MM_MIN;
+/** Band edges as fractions of the square slider, which runs to `maxMm` (print-shop mode goes further). */
+export function squareLengthTierBandEdgeFractions(maxMm: number = CHARUCO_SQUARE_MM_MAX): {closeNear: number; nearFar: number} {
+    const span = maxMm - CHARUCO_SQUARE_MM_MIN;
     if (span <= 0) {
         return {closeNear: 1, nearFar: 1};
     }
@@ -214,6 +216,19 @@ export function squareLengthTierBandEdgeFractions(): {closeNear: number; nearFar
 
 export const BOARD_GRID_MIN = 2;
 export const BOARD_GRID_MAX = 40;
+
+/** Markers the dictionary holds (DICT_4X4_250); a board needs one per white square. */
+export const BOARD_MARKERS_MAX = 250;
+
+/** Markers on an X×Y board: one in every white square, floor(X·Y/2). */
+export function charucoMarkerCount(squaresX: number, squaresY: number): number {
+    return Math.floor((squaresX * squaresY) / 2);
+}
+
+/** Largest count on one axis that keeps the board within the dictionary, given the other axis (X·Y ≤ 501). */
+export function boardGridAxisMax(otherAxisCount: number): number {
+    return Math.min(BOARD_GRID_MAX, Math.floor((2 * BOARD_MARKERS_MAX + 1) / otherAxisCount));
+}
 
 /**
  * Smallest square length (mm) allowed at a working distance. Distance bands are minimums, not ranges:

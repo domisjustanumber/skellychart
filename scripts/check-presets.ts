@@ -2,12 +2,16 @@
  * Build guard: every working-distance preset must print exactly its target page count, at the largest
  * square length that does so, and that square must meet the distance's minimum square length. Every
  * stop of the sheets stepper, for every paper, grid and distance, must print exactly the page count it
- * names, at or above the distance minimum, ending at one square per sheet.
+ * names, at or above the distance minimum, ending at one square per sheet. Every preset and every grid
+ * the X / Y sliders allow must fit the 250-marker dictionary.
  */
 import {
     BOARD_GRID_MAX,
     BOARD_GRID_MIN,
+    BOARD_MARKERS_MAX,
     PAPER_OPTIONS,
+    boardGridAxisMax,
+    charucoMarkerCount,
     computeEffectivePrintLayout,
     maxSquareMmForGridAndPages,
     resolveDistancePrintPlan,
@@ -25,6 +29,9 @@ for (const paper of PAPER_OPTIONS) {
     for (const distance of DISTANCES) {
         const plan = resolveDistancePrintPlan(distance, paper.id);
         const label = `${paper.id} ${distance} ${plan.squaresX}×${plan.squaresY} → ${plan.targetPages} page(s)`;
+        if (charucoMarkerCount(plan.squaresX, plan.squaresY) > BOARD_MARKERS_MAX) {
+            failures.push(`${label}: needs more than ${BOARD_MARKERS_MAX} markers`);
+        }
         const squareMm = maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, paper.wMm, paper.hMm, plan.targetPages);
         if (squareMm === null) {
             failures.push(`${label}: no square length prints on exactly ${plan.targetPages} page(s)`);
@@ -42,10 +49,19 @@ for (const paper of PAPER_OPTIONS) {
     }
 }
 
+// The X / Y end-stop is exactly the largest count whose board fits the marker dictionary.
+for (let other = BOARD_GRID_MIN; other <= BOARD_GRID_MAX; other++) {
+    const max = boardGridAxisMax(other);
+    const fits = (n: number) => charucoMarkerCount(n, other) <= BOARD_MARKERS_MAX;
+    if (max < BOARD_GRID_MIN || !fits(max) || (max < BOARD_GRID_MAX && fits(max + 1))) {
+        failures.push(`grid end-stop with ${other} on the other axis is ${max}, not the largest that fits`);
+    }
+}
+
 let stepperChecks = 0;
 for (const paper of PAPER_OPTIONS) {
     for (let sx = BOARD_GRID_MIN; sx <= BOARD_GRID_MAX; sx++) {
-        for (let sy = BOARD_GRID_MIN; sy <= BOARD_GRID_MAX; sy++) {
+        for (let sy = BOARD_GRID_MIN; sy <= boardGridAxisMax(sx); sy++) {
             for (const distance of DISTANCES) {
                 const minMm = workingDistanceMinSquareMm(distance);
                 const steps = steppablePageCounts(sx, sy, paper.wMm, paper.hMm, minMm);

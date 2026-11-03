@@ -73,7 +73,7 @@ function warmupFreemocapLogoCache(): void {
  * href="data:image/svg+xml,...">` is often shown as broken there, and `xlink:href` on `<image>` is
  * still what many SVG 1.1 tools expect for external images.
  */
-async function resolveLogoForPrint(ppm: number): Promise<{
+export async function resolveLogoForPrint(ppm: number): Promise<{
     logoSvgInner: string | null;
     widthPx: number;
     heightPx: number;

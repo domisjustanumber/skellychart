@@ -71,3 +71,8 @@ the sheet count of those boards.
 - Release builds regenerate automatically: the deploy workflow runs `npm run generate:banner` after
   bumping the patch version and commits the result with the version bump.
 - Never edit the generated file by hand.
+- Print-shop boards use the compact banner (`variant: 'compact'`), sized at runtime by
+  `compactBannerHeightMm` / `compactBannerMinWidthPx`, never from the generated file; `npm run check:shop`
+  asserts its height stays constant. Its text is outlined from `src/print/glyphOutlines.generated.ts`: after
+  changing the chart font, the glyph set or `helveticaMetrics.ts`, also run `npm run generate:glyphs`, and add
+  any new banner character to the glyph set in `scripts/generate-glyph-outlines.ts`.

@@ -28,6 +28,18 @@ export function svgRootOuterSizeAttrs(paperWMm: number, paperHMm: number, paperI
 }
 
 /**
+ * `width` / `height` for a print-shop page: inches when both sides are whole eighths of an inch (an inch
+ * trim plus ⅛ in bleed), otherwise mm.
+ */
+export function svgRootOuterSizeAttrsUnit(mediaWMm: number, mediaHMm: number): [string, string] {
+    const eighths = (mm: number) => (mm / 25.4) * 8;
+    if ([mediaWMm, mediaHMm].every((mm) => Math.abs(eighths(mm) - Math.round(eighths(mm))) < 1e-6)) {
+        return [`${mmToInchString(mediaWMm)}in`, `${mmToInchString(mediaHMm)}in`];
+    }
+    return [`${+mediaWMm.toFixed(3)}mm`, `${+mediaHMm.toFixed(3)}mm`];
+}
+
+/**
  * Root `<svg>` of a printed sheet. The viewBox must be the exact sheet size in px (`mm * PIXELS_PER_MM`,
  * not rounded): Letter and Tabloid are not whole px, and a rounded viewBox would scale the whole chart.
  */

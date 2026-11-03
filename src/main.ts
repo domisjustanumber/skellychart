@@ -5,6 +5,8 @@ import {svgAssembledChartWithSheetNumbers} from './print/svgAssemblyCore.js';
 import {
     BOARD_GRID_MAX,
     BOARD_GRID_MIN,
+    BOARD_MARKERS_MAX,
+    boardGridAxisMax,
     CHARUCO_SQUARE_MM_MAX,
     CHARUCO_SQUARE_MM_MIN,
     PAPER_OPTIONS,
@@ -12,6 +14,7 @@ import {
     charucoPagePreviewBorderColor,
     computeEffectivePrintLayout,
     defaultPaperId,
+    defaultRegion,
     layoutSummaryText,
     maxSquareMmForGridAndPages,
     resolveDistancePrintPlan,
@@ -27,7 +30,12 @@ import {
 } from './print/charucoLayout.js';
 import {buildPageSpecs, nominalPaperToPdfDimensionsMm, printedSheetCount} from './print/tiling.js';
 import {perfDev, perfLog} from './print/perfDebug.js';
-import {CHARUCO_MARKER_LENGTH_RATIO, getCharucoPrintSourceUrlFor} from './print/constants.js';
+import {
+    CHARUCO_MARKER_LENGTH_RATIO,
+    getCharucoPrintSourceUrl,
+    getCharucoPrintSourceUrlFor,
+    PIXELS_PER_MM,
+} from './print/constants.js';
 import {compareChartVersions, parseChartVersion} from './print/chartVersion.js';
 import {svgRootOuterSizeAttrs} from './print/svgUtils.js';
 import {
@@ -35,7 +43,36 @@ import {
     expectedCharucoCv2QueryValue,
     mergeCharucoQrParamsInto,
     parseCharucoQrSearchParams,
+    shopStandardBleedMm,
+    type LinkTarget,
+    type PrintMode,
+    type ShopPrintOptions,
+    type ShopSizeId,
+    type ShopUnit,
 } from './print/charucoDocUrl.js';
+import {
+    bleedMmForUnit,
+    formatShopBleed,
+    formatShopDims,
+    formatShopTrim,
+    pageSizeMm,
+    SHOP_SQUARE_MM_MAX,
+    SHOP_TRIM_MAX_MM,
+    shopBleedChoices,
+    shopSizeById,
+    shopSizeGroups,
+    shopSizeOptionLabel,
+    shopUnitForRegion,
+} from './print/shopSizes.js';
+import {
+    maxShopGridForSquare,
+    maxShopSquareMm,
+    resolveShopDistancePlan,
+    shopQuietZoneMm,
+    shopSheetLayout,
+    smallestFittingShopSize,
+    snapShopSquareMm,
+} from './print/shopLayout.js';
 import {
     getQrLinkTarget,
     isQrLinkTargetSwitchAvailable,
@@ -97,21 +134,67 @@ const defaultBoard = initialBoard();
 
 interface AppState {
     distanceId: (typeof PRESET_IDS)[number];
+    /** "My printer" (tiled sheets of `paperId`) or "Print shop" (one board of `shopSizeId`). */
+    mode: PrintMode;
+    /** Home paper; kept while in print-shop mode so switching back restores it. */
     paperId: string;
     squareMm: number;
     squaresX: number;
     squaresY: number;
     autoGrid: boolean;
+    /** Print-shop mm | in toggle: standard bleed, which sizes are listed and searched first, readouts. */
+    shopUnit: ShopUnit;
+    /** Print-shop board size; set whenever the mode is `shop`. */
+    shopSizeId: ShopSizeId | null;
+    shopBleed: ShopPrintOptions['bleed'];
+    shopCropMarks: boolean;
+}
+
+/** Print-file options remembered for a fresh print-shop session; a chart link always wins. */
+const SHOP_OPTIONS_STORAGE_KEY = 'skellychart.shopOptions';
+
+function storedShopOptions(): Pick<AppState, 'shopBleed' | 'shopCropMarks'> {
+    const fallback = {shopBleed: 'std' as const, shopCropMarks: false};
+    try {
+        const v = JSON.parse(localStorage.getItem(SHOP_OPTIONS_STORAGE_KEY) ?? 'null') as {bleed?: unknown; cropMarks?: unknown} | null;
+        const bleed = v?.bleed === 'std' ? 'std' : typeof v?.bleed === 'number' && v.bleed >= 0 && v.bleed <= 25 ? {mm: v.bleed} : 'std';
+        return {shopBleed: bleed, shopCropMarks: v?.cropMarks === true};
+    } catch {
+        return fallback;
+    }
+}
+
+function storeShopOptions(): void {
+    try {
+        const bleed = state.shopBleed === 'std' ? 'std' : state.shopBleed.mm;
+        localStorage.setItem(SHOP_OPTIONS_STORAGE_KEY, JSON.stringify({bleed, cropMarks: state.shopCropMarks}));
+    } catch {
+        /* storage unavailable: the options still apply to this session */
+    }
 }
 
 const state: AppState = {
     distanceId: DEFAULT_WORKING_DISTANCE_ID,
+    mode: 'home',
     paperId: defaultBoard.paperId,
     squareMm: defaultBoard.squareMm,
     squaresX: defaultBoard.squaresX,
     squaresY: defaultBoard.squaresY,
     autoGrid: true,
+    shopUnit: shopUnitForRegion(defaultRegion()),
+    shopSizeId: null,
+    ...storedShopOptions(),
 };
+
+/** Shown under the mode toggle after a mode switch (refused, or the square shrank); cleared by the next change. */
+let modeNotice: string | null = null;
+/** Shown under the board size after picking a size too small for the working distance; cleared by the next change. */
+let shopSizeHint: string | null = null;
+
+function clearTransientNotices(): void {
+    modeNotice = null;
+    shopSizeHint = null;
+}
 
 /** Set from chart QR link query params; shown once at load (not cleared by `syncUi`). */
 let qrVersionBannerMessage: string | null = null;
@@ -169,6 +252,16 @@ function applyAutoPreset(): void {
     if (!state.autoGrid) {
         return;
     }
+    if (state.mode === 'shop') {
+        const shopPlan = resolveShopDistancePlan(state.distanceId, state.shopUnit);
+        if (shopPlan) {
+            state.squaresX = shopPlan.squaresX;
+            state.squaresY = shopPlan.squaresY;
+            state.squareMm = shopPlan.squareMm;
+            state.shopSizeId = shopPlan.sizeId;
+        }
+        return;
+    }
     const plan = autoPlan();
     const pd = paperDims();
     const maxSq = maxSquareMmForGridAndPages(plan.squaresX, plan.squaresY, pd.wMm, pd.hMm, plan.targetPages);
@@ -186,6 +279,131 @@ function applyAutoPreset(): void {
 function effectiveTiling() {
     const pd = paperDims();
     return computeEffectivePrintLayout(state.squaresX, state.squaresY, state.squareMm, pd.wMm, pd.hMm);
+}
+
+/** The print-shop board as laid out on its size, or `null` (home mode, or it does not fit). */
+function shopLayoutNow() {
+    return state.mode === 'shop' && state.shopSizeId
+        ? shopSheetLayout(state.squaresX, state.squaresY, state.squareMm, state.shopSizeId)
+        : null;
+}
+
+function shopOptions(): ShopPrintOptions {
+    return {bleed: state.shopBleed, cropMarks: state.shopCropMarks, colour: 'colour'};
+}
+
+/** What the chart link and QR describe: the home paper, or the print-shop board and its options. */
+function linkTarget(): string | LinkTarget {
+    return state.mode === 'shop' && state.shopSizeId
+        ? {kind: 'shop', size: {id: state.shopSizeId, unit: state.shopUnit}, options: shopOptions()}
+        : state.paperId;
+}
+
+/** Whether the current mode has something to print and export. */
+function hasPrintableLayout(): boolean {
+    if (state.mode === 'shop') {
+        return shopLayoutNow() !== null;
+    }
+    const t = effectiveTiling();
+    return t !== null && t.pageCount >= 1;
+}
+
+/** The square slider's end: print-shop boards go up to {@link SHOP_SQUARE_MM_MAX}. */
+function squareSliderMaxMm(): number {
+    return state.mode === 'shop' ? SHOP_SQUARE_MM_MAX : CHARUCO_SQUARE_MM_MAX;
+}
+
+/** Nearest square length (at or above `minSquareMm`) the board prints at in the current mode. */
+function snapSquareForMode(raw: number, minSquareMm?: number): number | null {
+    if (state.mode === 'shop') {
+        return state.shopSizeId
+            ? snapShopSquareMm(raw, state.squaresX, state.squaresY, state.shopSizeId, minSquareMm)
+            : null;
+    }
+    const pd = paperDims();
+    return snapSquareMm(raw, state.squaresX, state.squaresY, pd.wMm, pd.hMm, minSquareMm);
+}
+
+/**
+ * The board on a print-shop size: its own square if some size takes it, else the largest smaller square
+ * in its distance band that one does. `null` if none does.
+ */
+function shopFitForBoard(): {squareMm: number; sizeId: ShopSizeId} | null {
+    const bandMin = Math.min(workingDistanceMinSquareMm(state.distanceId), state.squareMm);
+    for (let squareMm = Math.min(state.squareMm, SHOP_SQUARE_MM_MAX); squareMm >= bandMin; squareMm--) {
+        const sizeId = smallestFittingShopSize(state.squaresX, state.squaresY, squareMm, state.shopUnit);
+        if (sizeId) {
+            return {squareMm, sizeId};
+        }
+    }
+    return null;
+}
+
+/**
+ * The print-shop board left for home paper, when the square had to shrink to print there. Switching back
+ * with the board untouched restores its square and size.
+ */
+let shopBoardBeforeHome: {squaresX: number; squaresY: number; homeSquareMm: number; squareMm: number; sizeId: ShopSizeId} | null =
+    null;
+
+/**
+ * Switches between "My printer" and "Print shop". X, Y and the distance never change without telling the
+ * user: entering print-shop mode keeps the board on the smallest size that fits it, shrinks the square
+ * within its band if it must (with a notice), or refuses (with a message). Leaving it keeps the square if
+ * the home paper prints it, else the nearest that does (with a notice).
+ */
+function setMode(mode: PrintMode): void {
+    if (mode === state.mode) {
+        return;
+    }
+    clearTransientNotices();
+    const back = shopBoardBeforeHome;
+    shopBoardBeforeHome = null;
+    if (
+        mode === 'shop' &&
+        !state.autoGrid &&
+        back &&
+        back.squaresX === state.squaresX &&
+        back.squaresY === state.squaresY &&
+        back.homeSquareMm === state.squareMm &&
+        shopSheetLayout(state.squaresX, state.squaresY, back.squareMm, back.sizeId)
+    ) {
+        setSquareFollowingBand(back.squareMm);
+        state.shopSizeId = back.sizeId;
+    } else if (mode === 'shop' && !state.autoGrid) {
+        const fit = shopFitForBoard();
+        if (!fit) {
+            modeNotice = S.shopModeNoFit;
+            syncUi();
+            return;
+        }
+        if (fit.squareMm !== state.squareMm) {
+            modeNotice = interpolate(S.shopModeSnapped, {from: state.squareMm, to: fit.squareMm});
+        }
+        state.squareMm = fit.squareMm;
+        state.shopSizeId = fit.sizeId;
+    }
+    const shopBoard = {squareMm: state.squareMm, sizeId: state.shopSizeId};
+    state.mode = mode;
+    if (mode === 'home' && !state.autoGrid) {
+        // Print-shop squares may be larger than home paper allows; keep the nearest that prints.
+        const snapped = snapSquareForMode(state.squareMm);
+        if (snapped !== null && snapped !== shopBoard.squareMm) {
+            modeNotice = interpolate(S.homeModeSnapped, {from: shopBoard.squareMm, to: snapped, paper: paperLabel(state.paperId)});
+            if (shopBoard.sizeId) {
+                shopBoardBeforeHome = {
+                    squaresX: state.squaresX,
+                    squaresY: state.squaresY,
+                    homeSquareMm: snapped,
+                    squareMm: shopBoard.squareMm,
+                    sizeId: shopBoard.sizeId,
+                };
+            }
+            setSquareFollowingBand(snapped);
+        }
+    }
+    forgetLinkSquare();
+    syncUi({previewDelayMs: 0});
 }
 
 function pagesSliderDisplay(tiling: ReturnType<typeof effectiveTiling>): number {
@@ -369,10 +587,17 @@ function distanceMinSquareMm(): number {
 
 /**
  * X / Y keep the square length (so they never change the distance); the page count follows. Every grid
- * prints every square length up to the paper's limit, so there is nothing to snap or end-stop here.
+ * prints every square length up to the paper's limit; the only end-stop is the marker dictionary, so
+ * each axis stops where the board would need more than 250 markers.
  */
 function setGridSize(axis: 'squaresX' | 'squaresY', requested: number): void {
-    state[axis] = clampInt(requested, BOARD_GRID_MIN, BOARD_GRID_MAX);
+    const other = axis === 'squaresX' ? state.squaresY : state.squaresX;
+    let max = boardGridAxisMax(other);
+    if (state.mode === 'shop' && state.shopSizeId) {
+        // Print shop: one board, so X / Y also stop where the board would outgrow the chosen size.
+        max = Math.min(max, maxShopGridForSquare(axis, other, state.squareMm, state.shopSizeId) ?? BOARD_GRID_MIN);
+    }
+    state[axis] = clampInt(requested, BOARD_GRID_MIN, max);
 }
 
 function syncThemeToggle(): void {
@@ -481,6 +706,25 @@ function setIntroElement(el: HTMLElement): void {
 }
 
 function setPrintAdviceElement(el: HTMLElement): void {
+    if (state.mode === 'shop') {
+        const finish = document.createElement('p');
+        const lead = document.createElement('strong');
+        lead.textContent = S.shopAdviceLead;
+        finish.append(lead, document.createTextNode(S.shopAdviceFinish));
+        const paragraphs: string[] = [S.shopAdviceSubstrate, S.shopAdviceProducts, S.shopAdviceTemplate];
+        if (!state.shopCropMarks) {
+            paragraphs.push(S.shopAdviceCropMarks);
+        }
+        el.replaceChildren(
+            finish,
+            ...paragraphs.map((text) => {
+                const p = document.createElement('p');
+                p.textContent = text;
+                return p;
+            }),
+        );
+        return;
+    }
     const shop = document.createElement('p');
     const shopLead = document.createElement('strong');
     shopLead.textContent = S.printAdviceShopLead;
@@ -498,7 +742,7 @@ function setPrintAdviceElement(el: HTMLElement): void {
 function syncAddressBarChartQuery(): void {
     const {squaresX, squaresY} = state;
     const u = new URL(window.location.href);
-    mergeCharucoQrParamsInto(u.searchParams, squaresX, squaresY, state.squareMm, state.paperId);
+    mergeCharucoQrParamsInto(u.searchParams, squaresX, squaresY, state.squareMm, linkTarget());
     const next = `${u.pathname}${u.search}${u.hash}`;
     const cur = `${window.location.pathname}${window.location.search}${window.location.hash}`;
     if (next === cur) {
@@ -603,13 +847,13 @@ function syncDevQrLinkTargetUi(): void {
     }
     const {squaresX, squaresY} = state;
     for (const link of links) {
-        const linkTarget = link.dataset.qrTarget === 'local' ? 'local' : 'production';
+        const qrTarget = link.dataset.qrTarget === 'local' ? 'local' : 'production';
         const url = buildCharucoDocumentationUrl(
-            getCharucoPrintSourceUrlFor(linkTarget),
+            getCharucoPrintSourceUrlFor(qrTarget),
             squaresX,
             squaresY,
             state.squareMm,
-            state.paperId,
+            linkTarget(),
         );
         link.href = url;
         link.textContent = url;
@@ -635,6 +879,7 @@ function syncUi(options: SyncUiOptions = {}): void {
         byId('lbl-paper').textContent = S.paperSize;
         byId('lbl-advanced').textContent = S.advanced;
     }
+    syncModeControls();
     byId('lbl-square').textContent = interpolate(S.squareLengthHeading, {mm: state.squareMm});
     byId('lbl-sx').textContent = interpolate(S.squaresInX, {n: state.squaresX});
     byId('lbl-sy').textContent = interpolate(S.squaresInY, {n: state.squaresY});
@@ -643,13 +888,10 @@ function syncUi(options: SyncUiOptions = {}): void {
         byId('preview-title').textContent = S.previewTitle;
         byId('fullChartHint').textContent = S.fullChartHint;
         (byId('btnPdf') as HTMLButtonElement).textContent = S.printCharts;
-        if (!pdfExportInProgress) {
-            (byId('btnSavePdf') as HTMLButtonElement).textContent = S.savePdfFiles;
-        }
         setPrintAdviceElement(byId('printAdvice'));
     }
 
-    const frac = squareLengthTierBandEdgeFractions();
+    const frac = squareLengthTierBandEdgeFractions(squareSliderMaxMm());
     const pCloseEnd = frac.closeNear * 100;
     const pNearEnd = frac.nearFar * 100;
     const tierBandKey = `${imperial}:${pCloseEnd}:${pNearEnd}`;
@@ -677,7 +919,7 @@ function syncUi(options: SyncUiOptions = {}): void {
 
     const sqmm = byId('sqmm') as HTMLInputElement;
     sqmm.min = String(CHARUCO_SQUARE_MM_MIN);
-    sqmm.max = String(CHARUCO_SQUARE_MM_MAX);
+    sqmm.max = String(squareSliderMaxMm());
     sqmm.step = '1';
     sqmm.value = String(state.squareMm);
 
@@ -727,7 +969,8 @@ function syncUi(options: SyncUiOptions = {}): void {
     }
     paperSel.value = state.paperId;
 
-    const summary = layoutSummaryText(
+    const shopLayout = shopLayoutNow();
+    const summary = state.mode === 'shop' ? shopSummaryText(shopLayout) : layoutSummaryText(
         tiling,
         state.squaresX,
         state.squaresY,
@@ -746,9 +989,17 @@ function syncUi(options: SyncUiOptions = {}): void {
 
     const btnPdf = byId('btnPdf') as HTMLButtonElement;
     const btnSavePdf = byId('btnSavePdf') as HTMLButtonElement;
-    const exportDisabled = !tiling || tiling.pageCount < 1;
+    const exportDisabled = !hasPrintableLayout();
     btnPdf.disabled = exportDisabled;
     btnSavePdf.disabled = exportDisabled || pdfExportInProgress;
+    // Print shop: the PDF is the deliverable, so Print goes and the download becomes the main action.
+    const shop = state.mode === 'shop';
+    btnPdf.classList.toggle('hidden', shop);
+    btnSavePdf.classList.toggle('btn-primary', shop);
+    btnSavePdf.classList.toggle('btn-secondary', !shop);
+    if (!pdfExportInProgress) {
+        btnSavePdf.textContent = shop ? S.shopDownload : S.savePdfFiles;
+    }
 
     if (!lite) {
         syncThemeToggle();
@@ -769,6 +1020,261 @@ function syncUi(options: SyncUiOptions = {}): void {
         syncDevQrLinkTargetUi();
     }
     schedulePreview(previewDelayMs);
+}
+
+/** Mode toggle, which board-size control shows, and the print-shop size, unit, bleed and crop-mark controls. */
+function syncModeControls(): void {
+    const shop = state.mode === 'shop';
+    byId('lbl-mode').textContent = S.printWith;
+    for (const btn of byId('modeToggle').querySelectorAll<HTMLButtonElement>('[data-mode]')) {
+        btn.textContent = btn.dataset.mode === 'shop' ? S.modeShop : S.modeHome;
+        btn.setAttribute('aria-pressed', String(btn.dataset.mode === state.mode));
+    }
+    const notice = byId('modeNotice');
+    notice.textContent = modeNotice ?? '';
+    notice.classList.toggle('hidden', modeNotice === null);
+
+    byId('paperField').classList.toggle('hidden', shop);
+    byId('pagesGroup').classList.toggle('hidden', shop);
+    for (const id of ['shopSizeField', 'shopBleedField', 'shopCropField', 'shopOrder']) {
+        byId(id).classList.toggle('hidden', !shop);
+    }
+    if (!shop) {
+        return;
+    }
+
+    byId('lbl-shopSize').textContent = S.shopSize;
+    const unitToggle = byId('shopUnitToggle');
+    unitToggle.setAttribute('aria-label', S.shopUnits);
+    for (const btn of unitToggle.querySelectorAll<HTMLButtonElement>('[data-unit]')) {
+        btn.setAttribute('aria-pressed', String(btn.dataset.unit === state.shopUnit));
+    }
+
+    // Sizes this grid cannot fit at any square length are listed but disabled.
+    const sizeSel = byId('shopSize') as HTMLSelectElement;
+    const sizeKey = `${state.shopUnit}|${state.squaresX}x${state.squaresY}`;
+    if (sizeSel.dataset.key !== sizeKey) {
+        sizeSel.dataset.key = sizeKey;
+        sizeSel.innerHTML = '';
+        for (const group of shopSizeGroups(state.shopUnit)) {
+            const og = document.createElement('optgroup');
+            og.label = group.unit === 'in' ? S.shopSizeGroupIn : S.shopSizeGroupMm;
+            for (const size of group.sizes) {
+                const o = document.createElement('option');
+                o.value = size.id;
+                const label = shopSizeOptionLabel(size, state.shopUnit);
+                const fits = maxShopSquareMm(state.squaresX, state.squaresY, size.id) !== null;
+                o.textContent = fits ? label : interpolate(S.shopSizeTooSmall, {size: label});
+                o.disabled = !fits;
+                og.appendChild(o);
+            }
+            sizeSel.appendChild(og);
+        }
+    }
+    sizeSel.value = state.shopSizeId ?? '';
+
+    const layout = shopLayoutNow();
+    const imperial = state.shopUnit === 'in';
+    byId('shopSizeDetail').textContent = layout
+        ? interpolate(S.shopSizeDetail, {trim: formatShopTrim(layout.trimWMm, layout.trimHMm, state.shopUnit), ...chartSizeParts(imperial)})
+        : '';
+    // The largest sizes are the walk-in cap: say why there is nothing bigger.
+    const atCap = state.shopSizeId === '36x48in' || state.shopSizeId === '900x1200mm';
+    const hint = [shopSizeHint, atCap ? S.shopCapNote : null].filter((h) => h !== null).join(' ');
+    const hintEl = byId('shopSizeHint');
+    hintEl.textContent = hint;
+    hintEl.classList.toggle('hidden', hint === '');
+
+    byId('lbl-shopBleed').textContent = S.shopBleed;
+    const bleedSel = byId('shopBleed') as HTMLSelectElement;
+    const choices = shopBleedChoices(state.shopUnit);
+    const current = state.shopBleed === 'std' ? 'std' : String(state.shopBleed.mm);
+    const values = choices.map((c) => (c === 'std' ? 'std' : String(c.mm)));
+    const bleedKey = `${state.shopUnit}|${values.includes(current) ? '' : current}`;
+    if (bleedSel.dataset.key !== bleedKey) {
+        bleedSel.dataset.key = bleedKey;
+        bleedSel.innerHTML = '';
+        const otherUnit = state.shopUnit === 'in' ? 'mm' : 'in';
+        const labels = [
+            interpolate(S.shopBleedStd, {bleed: formatShopBleed(shopStandardBleedMm(state.shopUnit))}),
+            S.shopBleedNone,
+            S.shopBleed5,
+            S.shopBleed10,
+            S.shopBleedQuarter,
+            interpolate(S.shopBleedOther, {bleed: formatShopBleed(shopStandardBleedMm(otherUnit)), unit: otherUnit}),
+        ];
+        values.forEach((value, i) => bleedSel.add(new Option(labels[i], value)));
+        if (!values.includes(current)) {
+            // A link may carry any bleed up to 25 mm; show it rather than silently change it.
+            bleedSel.add(new Option(formatShopBleed(Number(current)), current));
+        }
+    }
+    bleedSel.value = current;
+
+    const pageEl = byId('shopPageSize');
+    if (layout) {
+        const bleedMm = bleedMmForUnit(state.shopBleed, state.shopUnit);
+        const page = pageSizeMm({wMm: layout.trimWMm, hMm: layout.trimHMm}, bleedMm, state.shopCropMarks);
+        const pageDims = formatShopDims(page.wMm, page.hMm, state.shopUnit);
+        const trimDims = formatShopDims(layout.trimWMm, layout.trimHMm, state.shopUnit).replace(/ (mm|in)$/, '');
+        const extras = [
+            bleedMm > 0 ? interpolate(S.shopPageBleed, {bleed: formatShopBleed(bleedMm)}) : null,
+            state.shopCropMarks ? S.shopPageMarks : null,
+        ].filter((e) => e !== null);
+        pageEl.textContent = extras.length
+            ? interpolate(S.shopPageSize, {page: pageDims, trim: trimDims, extras: extras.join(' + ')})
+            : interpolate(S.shopPageSizeExact, {page: pageDims});
+    } else {
+        pageEl.textContent = '';
+    }
+    byId('lbl-shopCropMarks').textContent = S.shopCropMarks;
+    (byId('shopCropMarks') as HTMLInputElement).checked = state.shopCropMarks;
+
+    byId('shopOrderTitle').textContent = S.shopOrderTitle;
+    byId('btnCopyOrder').textContent = S.shopOrderCopy;
+    const orderText = layout ? shopOrderText(layout) : '';
+    const orderEl = byId('shopOrderText');
+    if (orderEl.textContent !== orderText) {
+        orderEl.textContent = orderText;
+        byId('copyOrderStatus').textContent = '';
+    }
+}
+
+/**
+ * The note for the shop: print at 100%, the file and trim size, the board, colour handling and how to check
+ * the squares on delivery. It carries the same facts as the slug and the PDF subject.
+ */
+function shopOrderText(layout: NonNullable<ReturnType<typeof shopLayoutNow>>): string {
+    const unit = state.shopUnit;
+    const bleedMm = bleedMmForUnit(state.shopBleed, unit);
+    const trim = formatShopTrim(layout.trimWMm, layout.trimHMm, unit);
+    const page = pageSizeMm({wMm: layout.trimWMm, hMm: layout.trimHMm}, bleedMm, state.shopCropMarks);
+    const pageDims = formatShopDims(page.wMm, page.hMm, unit);
+    const bleed = formatShopBleed(bleedMm);
+    let pageLine: string;
+    if (state.shopCropMarks) {
+        const included = bleedMm > 0 ? interpolate(S.shopOrderBleedIncluded, {bleed}) : S.shopOrderNoBleed;
+        pageLine = interpolate(S.shopOrderPageMarks, {page: pageDims, trim, bleed: included});
+    } else {
+        pageLine = bleedMm > 0 ? interpolate(S.shopOrderPage, {page: pageDims, trim, bleed}) : interpolate(S.shopOrderPageExact, {trim});
+    }
+    // 5 mm foam flexes past 24 × 36 in, so bigger boards need a stiffer substrate.
+    const large = Math.max(layout.trimWMm, layout.trimHMm) > 914.4 + 1e-6;
+    const n = Math.max(2, Math.min(state.squaresX, Math.floor(300 / state.squareMm)));
+    const lines = [
+        interpolate(S.shopOrderChart, {squaresX: state.squaresX, squaresY: state.squaresY, mm: state.squareMm}),
+        S.shopOrderScale,
+        pageLine,
+        large ? S.shopOrderBoardLarge : S.shopOrderBoardSmall,
+        S.shopOrderColour,
+        interpolate(S.shopOrderCheck, {n, total: n * state.squareMm, mm: state.squareMm}),
+    ];
+    // Near the walk-in cap, say why the board cannot be bigger.
+    const e = shopQuietZoneMm(state.squareMm);
+    const needW = layout.content.w + 2 * e;
+    const needH = layout.content.h + 2 * e;
+    if (Math.min(needW, needH) >= SHOP_TRIM_MAX_MM[0] - 25 || Math.max(needW, needH) >= SHOP_TRIM_MAX_MM[1] - 25) {
+        lines.push(S.shopCapNote);
+    }
+    return lines.join('\n');
+}
+
+async function copyShopOrder(): Promise<void> {
+    const text = byId('shopOrderText').textContent ?? '';
+    const status = byId('copyOrderStatus');
+    try {
+        await navigator.clipboard.writeText(text);
+        status.textContent = S.shopOrderCopied;
+    } catch {
+        // No clipboard access (permissions, insecure context): select the note so it can be copied by hand.
+        const range = document.createRange();
+        range.selectNodeContents(byId('shopOrderText'));
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        status.textContent = S.shopOrderCopyManual;
+    }
+}
+
+/** The chart a scanned QR code described; the scan card shows once per tab. */
+let scannedChart: {squaresX: number; squaresY: number; squareMm: number; shop: boolean} | null = null;
+
+function renderScanCard(): void {
+    const card = byId('scanCard');
+    if (!scannedChart) {
+        card.classList.add('hidden');
+        card.replaceChildren();
+        return;
+    }
+    const p = (text: string, className?: string): HTMLParagraphElement => {
+        const el = document.createElement('p');
+        el.textContent = text;
+        if (className) {
+            el.className = className;
+        }
+        return el;
+    };
+    const title = p(
+        interpolate(S.scanCardTitle, {squaresX: scannedChart.squaresX, squaresY: scannedChart.squaresY, mm: scannedChart.squareMm}),
+        'scan-card-title',
+    );
+    title.id = 'scanCardTitle';
+    const docs = document.createElement('p');
+    const a = document.createElement('a');
+    a.href = FREEMOCAP_CALIBRATION_DOCS_MULTI_CAM_URL;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.textContent = S.scanCardDocs;
+    docs.appendChild(a);
+    const button = (label: string, className: string, onClick: () => void): HTMLButtonElement => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = className;
+        b.textContent = label;
+        b.addEventListener('click', onClick);
+        return b;
+    };
+    const close = (): void => {
+        scannedChart = null;
+        renderScanCard();
+    };
+    const actions = document.createElement('div');
+    actions.className = 'scan-card-actions';
+    actions.append(
+        button(S.scanCardPrintAnother, 'btn btn-secondary', () => {
+            close();
+            setMode('home');
+        }),
+        button(S.scanCardOrder, 'btn btn-secondary', () => {
+            close();
+            setMode('shop');
+        }),
+    );
+    const dismiss = button('×', 'scan-card-dismiss', close);
+    dismiss.setAttribute('aria-label', S.scanCardDismiss);
+    card.replaceChildren(
+        title,
+        p(S.scanCardMeasure),
+        ...(scannedChart.shop ? [p(S.scanCardFlat)] : []),
+        docs,
+        actions,
+        dismiss,
+    );
+    card.classList.remove('hidden');
+}
+
+/** Print-shop summary: one board, its trim (toggled unit first), orientation, grid and square length. */
+function shopSummaryText(layout: ReturnType<typeof shopLayoutNow>): string {
+    if (!layout) {
+        return S.layoutCannotFit;
+    }
+    return interpolate(S.shopSummary, {
+        trim: formatShopTrim(layout.trimWMm, layout.trimHMm, state.shopUnit),
+        orientation: layout.landscape ? S.landscape : S.portrait,
+        squaresX: state.squaresX,
+        squaresY: state.squaresY,
+        mm: state.squareMm,
+    });
 }
 
 function schedulePreview(delayOverride?: number): void {
@@ -853,6 +1359,12 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     const fullBlock = byId('fullPreviewBlock');
     const thumbs = byId('thumbGrid');
     const trunc = byId('previewTruncated');
+
+    if (state.mode === 'shop') {
+        await runShopPreview(signal, runId);
+        endPreviewBusyIfCurrent();
+        return;
+    }
 
     if (!tiling || tiling.pageCount < 1) {
         statusEl.textContent = '';
@@ -1021,6 +1533,63 @@ async function runPreview(scheduleBaselineMs?: number): Promise<void> {
     }
 }
 
+/** Print-shop preview: the one board, exactly the SVG the PDF is made from (page, bleed, marks and slug). */
+async function runShopPreview(signal: AbortSignal, runId: number): Promise<void> {
+    const statusEl = byId('previewStatus') as HTMLParagraphElement;
+    const panelPreview = byId('panelPreview');
+    const thumbs = byId('thumbGrid');
+    byId('fullPreviewBlock').classList.add('hidden');
+    byId('previewTruncated').classList.add('hidden');
+    const layout = shopLayoutNow();
+    if (!layout || !state.shopSizeId) {
+        statusEl.textContent = '';
+        resetPreviewVisualsEmpty();
+        return;
+    }
+    panelPreview.setAttribute('aria-busy', 'true');
+    statusEl.textContent = '';
+    setThumbGridPlaceholder(S.loadingPreviews);
+    await yieldToMain();
+    try {
+        const {renderShopPrintSvg} = await import('./print/shopSheet.js');
+        const sheet = await renderShopPrintSvg({
+            squaresX: state.squaresX,
+            squaresY: state.squaresY,
+            squareMm: state.squareMm,
+            layout,
+            size: {id: state.shopSizeId, unit: state.shopUnit},
+            options: shopOptions(),
+        });
+        if (signal.aborted || runId !== previewGeneration) {
+            return;
+        }
+        const sheetImage = svgToDataUrl(sheet.svg);
+        // The scale scene shows the board as trimmed: the page cropped to its trim box.
+        const ppm = PIXELS_PER_MM;
+        const t = sheet.trimBoxMm;
+        const trimmed =
+            `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${t.x * ppm} ${t.y * ppm} ${t.w * ppm} ${t.h * ppm}">` +
+            `<image href="${sheetImage}" width="${sheet.mediaMm.w * ppm}" height="${sheet.mediaMm.h * ppm}"/></svg>`;
+        scaleScene?.update({href: svgToDataUrl(trimmed), widthMm: t.w, heightMm: t.h, isSheet: true});
+        thumbs.innerHTML = '';
+        const wrap = document.createElement('div');
+        wrap.className = 'thumb-wrap';
+        const img = document.createElement('img');
+        img.className = 'thumb-img';
+        img.src = sheetImage;
+        img.alt = shopSummaryText(layout);
+        img.style.border = '1px solid var(--border)';
+        wrap.appendChild(img);
+        thumbs.appendChild(wrap);
+        await awaitPreviewImagesDecodedAndPaint(thumbs);
+    } catch (e) {
+        if (runId === previewGeneration) {
+            statusEl.textContent = e instanceof Error ? e.message : String(e);
+            resetPreviewVisualsEmpty();
+        }
+    }
+}
+
 function stripXmlDeclaration(svg: string): string {
     return svg.replace(/^\s*<\?xml[\s\S]*?\?>\s*/i, '').trimStart();
 }
@@ -1039,7 +1608,29 @@ function downloadBlob(blob: Blob, filename: string): void {
     window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }
 
+/** Bleed in its own unit for the file name: `bleed0.125in`, `bleed3mm`, or `trim` for none. */
+function bleedFileToken(bleedMm: number): string {
+    if (bleedMm === 0) {
+        return 'trim';
+    }
+    const eighths = (bleedMm / 25.4) * 8;
+    return Math.abs(eighths - Math.round(eighths)) < 1e-6
+        ? `bleed${+(bleedMm / 25.4).toFixed(3)}in`
+        : `bleed${+bleedMm.toFixed(3)}mm`;
+}
+
 function exportBasenamePrefix(): string {
+    if (state.mode === 'shop' && state.shopSizeId) {
+        const parts = [
+            'skellychart-printshop',
+            state.shopSizeId,
+            `${state.squaresX}x${state.squaresY}`,
+            `${state.squareMm}mm`,
+            bleedFileToken(bleedMmForUnit(state.shopBleed, state.shopUnit)),
+            ...(state.shopCropMarks ? ['crop'] : []),
+        ];
+        return parts.join('-').replace(/[^\w.-]+/g, '_');
+    }
     const parts = [
         'skellychart',
         state.paperId,
@@ -1049,11 +1640,78 @@ function exportBasenamePrefix(): string {
     return parts.join('-').replace(/[^\w.-]+/g, '_');
 }
 
+/**
+ * A shop board is printed once, at cost, and its QR must open the released generator: only release builds
+ * whose QR targets skelly.cam make the file. Dev builds may, after confirming it is a test.
+ */
+function shopExportAllowed(): boolean {
+    const v = parseChartVersion(APP_VERSION);
+    const release = v !== null && v.prerelease === null && getCharucoPrintSourceUrl().startsWith('https://skelly.cam/c/');
+    if (release) {
+        return true;
+    }
+    if (import.meta.env.DEV) {
+        return window.confirm(interpolate(S.shopTestBuildConfirm, {version: APP_VERSION}));
+    }
+    showErr(S.shopReleaseOnly);
+    return false;
+}
+
+async function saveShopPdf(): Promise<void> {
+    const layout = shopLayoutNow();
+    if (!layout || !state.shopSizeId) {
+        showErr(S.layoutCannotFit);
+        return;
+    }
+    if (!shopExportAllowed()) {
+        return;
+    }
+    pdfExportInProgress = true;
+    const btnSave = byId('btnSavePdf') as HTMLButtonElement;
+    btnSave.disabled = true;
+    btnSave.classList.add('btn--busy');
+    btnSave.textContent = S.preparingPdfExport;
+    // Snapshot the board so control changes during the export cannot mismatch the file and its name.
+    const board = {squaresX: state.squaresX, squaresY: state.squaresY, squareMm: state.squareMm};
+    const size = {id: state.shopSizeId, unit: state.shopUnit};
+    const options = shopOptions();
+    const prefix = exportBasenamePrefix();
+    await yieldToMain();
+    try {
+        const {renderShopPrintSvg, SHOP_CMYK_BY_RGB, shopPdfProperties} = await import('./print/shopSheet.js');
+        const sheet = await renderShopPrintSvg({...board, layout, size, options});
+        const blob = await buildPdfBlobFromSvgPages(
+            [{svg: sheet.svg, widthMm: sheet.mediaMm.w, heightMm: sheet.mediaMm.h}],
+            undefined,
+            {
+                shop: {
+                    trimBoxMm: sheet.trimBoxMm,
+                    bleedBoxMm: sheet.bleedBoxMm,
+                    cmykByRgb: SHOP_CMYK_BY_RGB,
+                    ...shopPdfProperties({...board, layout, size, chartUrl: sheet.chartUrl}),
+                },
+            },
+        );
+        downloadBlob(blob, `${prefix}.pdf`);
+    } catch (e) {
+        showErr(e instanceof Error ? e.message : String(e));
+    } finally {
+        pdfExportInProgress = false;
+        btnSave.classList.remove('btn--busy');
+        btnSave.textContent = state.mode === 'shop' ? S.shopDownload : S.savePdfFiles;
+        btnSave.disabled = !hasPrintableLayout();
+    }
+}
+
 async function savePdfFile(): Promise<void> {
     if (pdfExportInProgress) {
         return;
     }
     showErr(null);
+    if (state.mode === 'shop') {
+        await saveShopPdf();
+        return;
+    }
     const tiling = effectiveTiling();
     if (!tiling) {
         showErr(S.layoutCannotFit);
@@ -1169,6 +1827,10 @@ function printHtmlDocumentInHiddenIframe(html: string): void {
 
 async function openPrintDialog(): Promise<void> {
     showErr(null);
+    // A print-shop board is only ever a downloaded PDF (the button is hidden in that mode).
+    if (state.mode === 'shop') {
+        return;
+    }
     const tiling = effectiveTiling();
     if (!tiling) {
         showErr(S.layoutCannotFit);
@@ -1272,6 +1934,16 @@ function applyQrQueryFromLocation(): void {
     }
 
     if (parsed.squaresX !== null || parsed.squaresY !== null || parsed.squareLengthMm !== null) {
+        const seen = (history.state as {skScanSeen?: boolean} | null)?.skScanSeen === true;
+        if (!seen && parsed.squaresX !== null && parsed.squaresY !== null && parsed.squareLengthMm !== null) {
+            scannedChart = {
+                squaresX: parsed.squaresX,
+                squaresY: parsed.squaresY,
+                squareMm: parsed.squareLengthMm,
+                shop: parsed.printMode === 'shop',
+            };
+            history.replaceState({...(history.state as object | null), skScanSeen: true}, '');
+        }
         state.autoGrid = false;
         if (parsed.squaresX !== null) {
             state.squaresX = clampInt(parsed.squaresX, BOARD_GRID_MIN, BOARD_GRID_MAX);
@@ -1279,9 +1951,26 @@ function applyQrQueryFromLocation(): void {
         if (parsed.squaresY !== null) {
             state.squaresY = clampInt(parsed.squaresY, BOARD_GRID_MIN, BOARD_GRID_MAX);
         }
+        // Older generators let a board outgrow the marker dictionary; keep X and end-stop Y as the slider does.
+        const linkedSquaresY = state.squaresY;
+        state.squaresY = Math.min(state.squaresY, boardGridAxisMax(state.squaresX));
+        if (state.squaresY !== linkedSquaresY) {
+            warnings.push(
+                interpolate(S.qrGridClamped, {
+                    theirs: `${state.squaresX} × ${linkedSquaresY}`,
+                    ours: `${state.squaresX} × ${state.squaresY}`,
+                    markers: BOARD_MARKERS_MAX,
+                }),
+            );
+        }
         if (parsed.paperId !== null && paperById(parsed.paperId)) {
             state.paperId = parsed.paperId;
         }
+        if (parsed.printMode === 'shop') {
+            applyShopLink(parsed, warnings);
+        }
+    }
+    if (state.mode !== 'shop' && (parsed.squaresX !== null || parsed.squaresY !== null || parsed.squareLengthMm !== null)) {
         const pd = paperDims();
         if (parsed.squareLengthMm !== null) {
             state.squareMm = Math.round(parsed.squareLengthMm);
@@ -1297,6 +1986,50 @@ function applyQrQueryFromLocation(): void {
     }
 
     qrVersionBannerMessage = warnings.length ? warnings.join(' ') : null;
+}
+
+/**
+ * A print-shop link (`t` field) reopens the board on its size, unit, bleed and crop marks. A size that is
+ * unreadable or no longer fits falls back to the default size; a board no size fits opens for home paper.
+ * Each fallback adds a notice. The board itself (X, Y, square length) is kept exactly.
+ */
+function applyShopLink(parsed: ReturnType<typeof parseCharucoQrSearchParams>, warnings: string[]): void {
+    if (parsed.shopSize) {
+        state.shopUnit = parsed.shopSize.unit;
+    }
+    if (parsed.shopOptionsError) {
+        warnings.push(S.qrShopOptionsFallback);
+    }
+    if (parsed.shopOptions) {
+        const {bleed, cropMarks} = parsed.shopOptions;
+        // The standard bleed written as its fixed value is still the standard bleed.
+        const isStd = bleed !== 'std' && Math.abs(bleed.mm - shopStandardBleedMm(state.shopUnit)) < 1e-9;
+        state.shopBleed = isStd ? 'std' : bleed;
+        state.shopCropMarks = cropMarks;
+    }
+    if (parsed.squareLengthMm !== null) {
+        state.squareMm = clampInt(parsed.squareLengthMm, CHARUCO_SQUARE_MM_MIN, SHOP_SQUARE_MM_MAX);
+    }
+    state.distanceId = workingDistanceTierFromSquareLengthMm(state.squareMm);
+    const {squaresX, squaresY, squareMm} = state;
+    if (parsed.shopSize && shopSheetLayout(squaresX, squaresY, squareMm, parsed.shopSize.id)) {
+        state.mode = 'shop';
+        state.shopSizeId = parsed.shopSize.id;
+        return;
+    }
+    const fallback = smallestFittingShopSize(squaresX, squaresY, squareMm, state.shopUnit);
+    if (!fallback) {
+        warnings.push(S.qrShopTooLarge);
+        return;
+    }
+    state.mode = 'shop';
+    state.shopSizeId = fallback;
+    const ours = shopSizeById(fallback).name;
+    warnings.push(
+        parsed.shopSize
+            ? interpolate(S.qrShopSizeNoFit, {theirs: shopSizeById(parsed.shopSize.id).name, ours})
+            : interpolate(S.qrShopSizeFallback, {size: ours}),
+    );
 }
 
 /** The user took over the board: stop re-fitting to the link's square length and drop its notice. */
@@ -1356,6 +2089,7 @@ function wireUi(): void {
         distanceArmClearForNextPrimaryDown = true;
         state.distanceId = normalizeWorkingDistanceId((e.target as HTMLSelectElement).value);
         state.autoGrid = true;
+        clearTransientNotices();
         forgetLinkSquare();
         syncUi();
     });
@@ -1396,9 +2130,9 @@ function wireUi(): void {
     sqmmEl.addEventListener('input', (e) => {
         state.autoGrid = false;
         forgetLinkSquare();
+        clearTransientNotices();
         const raw = Number((e.target as HTMLInputElement).value);
-        const pd = paperDims();
-        const snapped = snapSquareMm(raw, state.squaresX, state.squaresY, pd.wMm, pd.hMm);
+        const snapped = snapSquareForMode(raw);
         if (snapped !== null) {
             setSquareFollowingBand(snapped);
         }
@@ -1431,6 +2165,7 @@ function wireUi(): void {
     sxEl.addEventListener('input', (e) => {
         state.autoGrid = false;
         forgetLinkSquare();
+        clearTransientNotices();
         setGridSize('squaresX', Number((e.target as HTMLInputElement).value));
         scheduleSyncUi();
     });
@@ -1440,10 +2175,57 @@ function wireUi(): void {
     syEl.addEventListener('input', (e) => {
         state.autoGrid = false;
         forgetLinkSquare();
+        clearTransientNotices();
         setGridSize('squaresY', Number((e.target as HTMLInputElement).value));
         scheduleSyncUi();
     });
 
+    for (const btn of byId('modeToggle').querySelectorAll<HTMLButtonElement>('[data-mode]')) {
+        btn.addEventListener('click', () => setMode(btn.dataset.mode === 'shop' ? 'shop' : 'home'));
+    }
+    for (const btn of byId('shopUnitToggle').querySelectorAll<HTMLButtonElement>('[data-unit]')) {
+        btn.addEventListener('click', () => {
+            state.shopUnit = btn.dataset.unit === 'in' ? 'in' : 'mm';
+            syncUi();
+        });
+    }
+    (byId('shopSize') as HTMLSelectElement).addEventListener('change', (e) => {
+        const sizeId = (e.target as HTMLSelectElement).value as ShopSizeId;
+        state.autoGrid = false;
+        forgetLinkSquare();
+        clearTransientNotices();
+        state.shopSizeId = sizeId;
+        // Keep the board; re-fit only the square, staying in the working distance's band if the size allows.
+        const bandMin = workingDistanceMinSquareMm(state.distanceId);
+        let squareMm = snapShopSquareMm(state.squareMm, state.squaresX, state.squaresY, sizeId, bandMin);
+        if (squareMm === null) {
+            squareMm = maxShopSquareMm(state.squaresX, state.squaresY, sizeId);
+            if (squareMm !== null) {
+                shopSizeHint = interpolate(S.shopSizeBandHint, {
+                    distance: bandLabel(state.distanceId, shouldUseImperialWorkingDistanceUnits()),
+                    size: shopSizeById(sizeId).name,
+                    mm: squareMm,
+                });
+            }
+        }
+        if (squareMm !== null) {
+            setSquareFollowingBand(squareMm);
+        }
+        syncUi();
+    });
+    (byId('shopBleed') as HTMLSelectElement).addEventListener('change', (e) => {
+        const v = (e.target as HTMLSelectElement).value;
+        state.shopBleed = v === 'std' ? 'std' : {mm: Number(v)};
+        storeShopOptions();
+        syncUi();
+    });
+    (byId('shopCropMarks') as HTMLInputElement).addEventListener('change', (e) => {
+        state.shopCropMarks = (e.target as HTMLInputElement).checked;
+        storeShopOptions();
+        syncUi();
+    });
+
+    byId('btnCopyOrder').addEventListener('click', () => void copyShopOrder());
     byId('btnPdf').addEventListener('click', () => void openPrintDialog());
     byId('btnSavePdf').addEventListener('click', () => void savePdfFile());
 
@@ -1469,6 +2251,7 @@ function boot(): void {
     applyQrQueryFromLocation();
     syncQrVersionBanner();
     syncUi();
+    renderScanCard();
 }
 
 boot();

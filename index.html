@@ -13,9 +13,9 @@
         else if (p === 'dark') resolved = 'dark';
         else
           resolved =
-            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-              ? 'dark'
-              : 'light';
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+              ? 'light'
+              : 'dark';
         document.documentElement.dataset.theme = resolved;
         document.documentElement.dataset.themePreference =
           p === 'dark' || p === 'light' ? p : 'system';
@@ -27,6 +27,9 @@
     <link rel="icon" type="image/png" sizes="192x192" href="./android-chrome-192x192.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
     <link rel="manifest" href="./site.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>

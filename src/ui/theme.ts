@@ -21,7 +21,8 @@ export function resolveTheme(p: ThemePreference): 'dark' | 'light' {
     if (p === 'light') {
         return 'light';
     }
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    // Dark unless the OS asks for light: dark is the designed theme, and the fallback when the OS expresses none.
+    return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
 }
 
 export function applyThemePreference(pref: ThemePreference): void {
@@ -37,7 +38,7 @@ export function initTheme(): void {
         return;
     }
     systemListenerAttached = true;
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
         if (getStoredPreference() === 'system') {
             applyThemePreference('system');
         }
